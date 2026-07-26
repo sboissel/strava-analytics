@@ -334,6 +334,56 @@ def process_activities(activities, access_token):
     return pd.DataFrame(rows)
 
 
+def save_activities_last_week(activity_files, output_path):
+    frames = []
+    for filename in activity_files:
+        df = pd.read_csv(filename)
+        df = df.loc[:, ~df.columns.str.contains(r"^Unnamed")]
+        if "date" not in df.columns:
+            continue
+        frames.append(df)
+
+    if not frames:
+        combined = pd.DataFrame(columns=[
+            "type",
+            "date",
+            "distance_miles",
+            "moving_time_min",
+            "elapsed_time_min",
+            "elevation_gain_ft",
+            "avg_pace",
+            "max_pace",
+        ])
+    else:
+        combined = pd.concat(frames, ignore_index=True, sort=False)
+
+    if "date" in combined.columns:
+        combined["date"] = pd.to_datetime(combined["date"], utc=True)
+
+    today = pd.Timestamp.now(tz="UTC").normalize()
+    week_start = today - pd.Timedelta(days=today.dayofweek)
+    week_end = week_start + pd.Timedelta(days=6)
+
+    if "date" in combined.columns:
+        combined = combined[(combined["date"] >= week_start) & (combined["date"] <= week_end)]
+        combined = combined.sort_values("date", ascending=True).reset_index(drop=True)
+        combined["date"] = combined["date"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    columns = [
+        "type",
+        "date",
+        "distance_miles",
+        "moving_time_min",
+        "elapsed_time_min",
+        "elevation_gain_ft",
+        "avg_pace",
+        "max_pace",
+    ]
+    combined = combined.reindex(columns=columns)
+    combined.to_csv(output_path, index=False, mode="w")
+    return combined
+
+
 # ========================
 # RUN
 # ========================
@@ -353,18 +403,27 @@ if __name__ == "__main__":
     # 3. Process + enrich
     print(f"Processing {len(activities)} activities...")
     df = process_activities(activities, access_token)
-    
-    # 4. Save
-    if df.empty:
-        print("No new activities to process.")
-        exit()
 
+    activity_file_paths = []
     for activity_type in ["Run", "Ride", "Swim", "Hike"]:
-        activity_df = df[df["type"] == activity_type]
         filename = REPO_ROOT / "data" / f"strava_{activity_type.lower()}_analysis.csv"
+        activity_file_paths.append(filename)
+
+        if df.empty:
+            continue
+
+        activity_df = df[df["type"] == activity_type]
         activity_df = pd.concat([activity_df, pd.read_csv(filename)], axis=0).drop_duplicates(subset=["activity_id"])
         activity_df.to_csv(filename, index=False)
         print(f"Saved: {filename}")
 
-    with open(REPO_ROOT / "data" / "highest_activity_id.txt", "w") as f:
-        f.write(df['activity_id'].max().astype(str))
+    if df.empty:
+        print("No new activities to process.")
+    else:
+        with open(REPO_ROOT / "data" / "highest_activity_id.txt", "w") as f:
+            f.write(df['activity_id'].max().astype(str))
+
+    weekly_output = REPO_ROOT / "data" / "activities_last_week.csv"
+    weekly_df = save_activities_last_week(activity_file_paths, weekly_output)
+    weekly_df.to_csv(weekly_output, index=False)
+    print(f"Saved weekly summary: {weekly_output}")

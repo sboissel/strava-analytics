@@ -1,4 +1,6 @@
 activity_id,name,type,date,distance_miles,moving_time_min,elapsed_time_min,elevation_gain_ft,avg_pace,max_pace,race,run_type,zrfs,vo2max,Unnamed: 0,race_distance,Unnamed: 15
+19454465448,Gloriously cool day,Run,2026-07-25T05:57:17Z,8.01,01:30:09,01:32:13,1013.12,11:15,05:55,False,hard,4.4,31.73,,,
+19427701202,Rolling 800s,Run,2026-07-23T06:06:12Z,4.09,00:39:02,00:40:46,115.81,09:33,05:35,False,hard,2.25,37.14,,,
 19398269391,Tough one,Run,2026-07-21T05:23:50Z,4.07,00:44:42,00:48:23,327.43,10:59,05:42,False,easy,3.73,33.2,,,
 19345762297,Morning Run,Run,2026-07-17T04:53:52Z,7.34,01:23:49,01:25:02,1008.86,11:24,06:25,False,hard,3.11,29.37,,,
 19224898106,Car drop off/ getting lost,Run,2026-07-08T06:33:06Z,4.0,00:42:15,00:50:18,231.63,10:33,06:31,False,hard,2.41,36.01,,,
