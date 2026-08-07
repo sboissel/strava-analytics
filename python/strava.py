@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from collections import defaultdict
 from tqdm import tqdm
+from datetime import date, timedelta
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 tqdm.pandas()
@@ -15,44 +16,35 @@ tqdm.pandas()
 # ========================
 CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
-AUTH_TOKEN = "52ee9669003a01f2987624ae78bcbde81200490f"
+AUTH_TOKEN = os.environ["AUTH_TOKEN"]
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
-
-TEMPO_HR = 140
-HR_ZONES = {
-    "zone_1": (0, 127),
-    "zone_2": (128, 139),
-    "zone_3": (140, 151),
-    "zone_4": (152, 164),
-    "zone_5": (165, 250)
-}
-ZONE_WEIGHTS = {
-    "zone_1": 0.3,
-    "zone_2": 0.6,
-    "zone_3": 1.0,
-    "zone_4": 1.5,
-    "zone_5": 2.0
-}
 
 MILE_METERS = 1609.34
 FEET_METERS  = 0.3048
+HR_EASY_THRESHOLD = 142
 last_id = open(REPO_ROOT / "data" / "highest_activity_id.txt", "r").read().strip()
 
 # ========================
 # AUTH: refresh token
 # ========================
 def refresh_access_token(refresh_token):
+    """Refresh the Strava access token using the configured refresh token.
+
+    Raises:
+        RuntimeError: If Strava rejects the refresh request.
+    """
     url = "https://www.strava.com/oauth/token"
 
     payload = {
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
         "grant_type": "refresh_token",
-        "refresh_token": "fab4916a59557227d50a6eb0633d2e856cc0ad3c"
+        "refresh_token": refresh_token,
     }
 
-    res = requests.post(url, data=payload)
-    res.raise_for_status()
+    res = requests.post(url, data=payload, timeout=30)
+    if res.status_code != 200:
+        raise RuntimeError(f"Strava token refresh failed: {res.status_code} {res.text[:200]}")
     return res.json()
 
 
@@ -60,6 +52,11 @@ def refresh_access_token(refresh_token):
 # GET ACTIVITIES
 # ========================
 def get_strava_activities(access_token):
+    """Fetch athlete activities from the Strava API.
+
+    The function walks the paginated API until it reaches the latest known
+    activity ID or the API stops returning results.
+    """
     activities = []
     page = 1
 
@@ -93,6 +90,19 @@ def get_strava_activities(access_token):
 # GET STREAMS (pace, HR, elevation)
 # ========================
 def get_streams(activity_id, streams, access_token):
+    """Retrieve one or more Strava activity streams for a given activity.
+
+    Args:
+        activity_id: The Strava activity identifier.
+        streams: One or more stream names such as "distance" or "heartrate".
+        access_token: A valid Strava API access token.
+
+    Returns:
+        A JSON-like payload from the Strava streams endpoint.
+
+    Raises:
+        RuntimeError: If the API request fails.
+    """
     url = f"https://www.strava.com/api/v3/activities/{activity_id}/streams"
 
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -110,178 +120,99 @@ def get_streams(activity_id, streams, access_token):
     return res.json()
 
 # ========================
-#  ZONAL RUNNING FITNESS SCORE (ZRFS)
+# RUNNING HR THRESHOLD STATS
 # ========================
+def compute_hr_easy_stats(hr_stream, time_stream, threshold=HR_EASY_THRESHOLD):
+    """Summarize easy versus hard running time from HR and time streams.
 
-def compute_zrfs(streams):
+    The helper estimates the share of elapsed time spent below the easy HR
+    threshold and returns the equivalent minutes for easy and hard segments.
+    """
+    hr_array = np.array(hr_stream, dtype=float)
+    time_array = np.array(time_stream, dtype=float)
 
-    dist = np.array(streams["distance"]["data"])
-    hr = np.array(streams["heartrate"]["data"])
-    time_s = np.array(streams["time"]["data"])
+    if len(hr_array) == 0 or len(time_array) == 0:
+        return None, None, None
 
-    altitude = streams.get("altitude", {}).get("data", None)
-    if altitude is not None:
-        altitude = np.array(altitude)
+    if len(hr_array) != len(time_array):
+        min_len = min(len(hr_array), len(time_array))
+        hr_array = hr_array[:min_len]
+        time_array = time_array[:min_len]
 
-    if len(dist) < 10 or len(hr) < 10:
-        return None
+    valid_mask = np.isfinite(hr_array) & np.isfinite(time_array)
+    if not np.any(valid_mask):
+        return None, None, None
 
-    # -------------------------
-    # 1. TOTALS
-    # -------------------------
-    total_dist = dist[-1]  # meters
-    total_time = time_s[-1]  # seconds
+    durations = np.diff(np.r_[0, time_array[valid_mask]])
+    hr_valid = hr_array[valid_mask]
 
-    speed = total_dist / (total_time + 1e-6)  # m/s
+    if len(durations) != len(hr_valid):
+        min_len = min(len(durations), len(hr_valid))
+        durations = durations[:min_len]
+        hr_valid = hr_valid[:min_len]
 
-    # -------------------------
-    # 2. HR ZONE LOAD
-    # -------------------------
-    zone_time = {z: 0 for z in HR_ZONES.keys()}
+    total_duration_s = np.sum(durations)
+    if total_duration_s <= 0:
+        return None, None, None
 
-    for h in hr:
-        for z, (low, high) in HR_ZONES.items():
-            if low <= h <= high:
-                zone_time[z] += 1
-                break
+    easy_mask = hr_valid < threshold
+    easy_duration_s = np.sum(durations[easy_mask])
+    hard_duration_s = np.sum(durations[~easy_mask])
 
-    hr_load = sum(zone_time[z] * ZONE_WEIGHTS[z] for z in zone_time)
+    pct_easy = round((easy_duration_s / total_duration_s) * 100, 1)
+    mt_min_easy = round(easy_duration_s / 60, 1)
+    mt_min_hard = round(hard_duration_s / 60, 1)
 
-    # normalize by time → intensity
-    hr_intensity = hr_load / (len(hr) + 1e-6)
-
-    # -------------------------
-    # 3. EFFICIENCY (NEW CORE)
-    # -------------------------
-    efficiency = speed / (hr_intensity + 1e-6)
-
-    # -------------------------
-    # 4. HR DRIFT
-    # -------------------------
-    half = len(hr) // 2
-    drift = np.mean(hr[half:]) - np.mean(hr[:half])
-    drift_factor = drift / 50
-
-    # -------------------------
-    # 5. ALTITUDE
-    # -------------------------
-    if altitude is not None:
-        alt_diff = np.diff(altitude)
-        elev_gain = np.sum(np.clip(alt_diff, 0, None))
-        grade = elev_gain / (total_dist + 1e-6)
-
-        elev_factor = 1 + 0.03 * grade
-    else:
-        elev_factor = 1.0
-
-    # -------------------------
-    # 6. FINAL SCORE
-    # -------------------------
-    zrfs = efficiency * elev_factor * (1 - drift_factor)
-
-    return zrfs
-
-# ========================
-# VO2MAX ESTIMATION
-# ========================
-
-HR_MAX = 178
-K_GRADE = 5   # grade impact scaling
-
-def compute_vo2max(streams):
-
-    dist = np.array(streams["distance"]["data"])
-    time_s = np.array(streams["time"]["data"])
-    hr = np.array(streams["heartrate"]["data"])
-    altitude = np.array(streams["altitude"]["data"])
-    
-    if len(dist) < 10:
-        return None
-
-    # -------------------------
-    # 1. segment calculations
-    # -------------------------
-    d_dist = np.diff(dist)
-    d_time = np.diff(time_s)
-    d_hr = hr[:-1]
-
-    speed = d_dist / (d_time + 1e-6)  # m/s
-
-    # -------------------------
-    # 2. grade adjustment
-    # -------------------------
-    if altitude is not None:
-        d_alt = np.diff(altitude)
-
-        grade = d_alt / (d_dist + 1e-6)
-
-        # clip extreme grades (noise protection)
-        grade = np.clip(grade, -0.3, 0.3)
-
-        adj_speed = speed * (1 + K_GRADE * grade)
-
-    else:
-        adj_speed = speed
-
-    # -------------------------
-    # 3. convert to m/min
-    # -------------------------
-    speed_m_min = adj_speed * 60
-
-    # -------------------------
-    # 4. VO2 per segment
-    # Daniels formula
-    # -------------------------
-    vo2 = -4.60 + 0.182258 * speed_m_min + 0.000104 * (speed_m_min ** 2)
-
-    # -------------------------
-    # 5. effort filter (important)
-    # -------------------------
-    effort = d_hr / HR_MAX
-
-    valid = (effort > 0.65) & (effort < 0.9)
-
-    if np.sum(valid) < 20:
-        return None
-
-    # -------------------------
-    # 6. estimate VO2max
-    # -------------------------
-    vo2max_est = np.mean(vo2[valid] / effort[valid])
-
-    return round(vo2max_est, 2)
-
-# ========================
-# RUNNING ZONES
-# ========================
-def classify_run(hr_stream):
-    hr_stream = np.array(hr_stream)
-    total = len(hr_stream)
-
-    z1_2 = np.sum(hr_stream < 140)
-    pct_easy = z1_2 / total
-
-    avg_hr = np.mean(hr_stream)
-
-    sustained_hard = np.sum(hr_stream >= 152)
-
-    if pct_easy >= 0.75 and avg_hr < 145:
-        return "easy"
-
-    if pct_easy < 0.75 or sustained_hard > 600:
-        return "hard"
-
-    return "moderate"
+    return pct_easy, mt_min_easy, mt_min_hard
 
 
 # ========================
 # PROCESS ACTIVITIES
 # ========================
-def speed_to_pace(speed_mps):
+def is_fake_activity_id(activity_id):
+    if activity_id is None or pd.isna(activity_id):
+        return False
+    return str(activity_id).strip().upper().startswith("FAKE")
+
+
+def pace_seconds_from_speed(speed_mps):
     if speed_mps == 0 or pd.isna(speed_mps):
         return None
 
-    minutes, seconds = divmod(int(MILE_METERS / speed_mps), 60)
+    return int(MILE_METERS / speed_mps)
+
+
+def pace_to_seconds(pace):
+    if pace is None or pd.isna(pace):
+        return None
+
+    if isinstance(pace, (int, float)):
+        return int(pace)
+
+    if isinstance(pace, str):
+        pace = pace.strip()
+        if not pace:
+            return None
+        try:
+            return int(float(pace))
+        except ValueError:
+            parts = pace.split(":")
+            if len(parts) == 2:
+                try:
+                    minutes, seconds = parts
+                    return int(minutes) * 60 + int(seconds)
+                except ValueError:
+                    return None
+
+    return None
+
+
+def speed_to_pace(speed_mps):
+    pace_seconds = pace_seconds_from_speed(speed_mps)
+    if pace_seconds is None:
+        return None
+
+    minutes, seconds = divmod(pace_seconds, 60)
 
     return f"{minutes:02d}:{seconds:02d}"
 
@@ -292,10 +223,175 @@ def format_duration(seconds):
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
+PACE_BIN_LABELS = [
+    "under_700",
+    "700_730",
+    "730_800",
+    "800_830",
+    "830_900",
+    "900_930",
+    "930_1000",
+    "1000_1030",
+    "1030_1100",
+    "1100_1130",
+    "over_1130",
+]
+
+
+def pace_bin_for_seconds(pace_seconds):
+    """Map an elapsed pace in seconds per mile to the configured pace bin."""
+    if pace_seconds < 420:
+        return "under_700"
+    if pace_seconds <= 449:
+        return "700_730"
+    if pace_seconds <= 479:
+        return "730_800"
+    if pace_seconds <= 509:
+        return "800_830"
+    if pace_seconds <= 539:
+        return "830_900"
+    if pace_seconds <= 569:
+        return "900_930"
+    if pace_seconds <= 599:
+        return "930_1000"
+    if pace_seconds <= 629:
+        return "1000_1030"
+    if pace_seconds <= 659:
+        return "1030_1100"
+    if pace_seconds <= 689:
+        return "1100_1130"
+    return "over_1130"
+
+
+def run_pace_columns():
+    """Return the canonical column order for run pace analysis output."""
+    columns = ["activity_id"]
+    for label in PACE_BIN_LABELS:
+        columns.append(f"seconds_{label}")
+        columns.append(f"avg_hr_{label}")
+    return columns
+
+
+def compute_run_pace_summary_from_streams(activity_id, distance_meters, time_seconds, hr_values):
+    """Aggregate per-pace-bin elapsed time and average HR for a run.
+
+    The function converts distance/time deltas into pace bins and summarizes
+    the total time spent in each bin alongside the average HR observed in that
+    segment.
+    """
+    if activity_id is None:
+        return None
+
+    if distance_meters is None or time_seconds is None:
+        return None
+
+    distance_arr = np.asarray(distance_meters, dtype=float)
+    time_arr = np.asarray(time_seconds, dtype=float)
+    hr_arr = np.asarray(hr_values, dtype=float) if hr_values is not None else np.array([])
+
+    if distance_arr.size == 0 or time_arr.size == 0 or hr_arr.size == 0:
+        return None
+
+    shared_len = min(len(distance_arr), len(time_arr), len(hr_arr))
+    if shared_len < 2:
+        return None
+
+    elapsed_by_bin = {label: 0.0 for label in PACE_BIN_LABELS}
+    hr_weighted_by_bin = {label: 0.0 for label in PACE_BIN_LABELS}
+    hr_valid_seconds_by_bin = {label: 0.0 for label in PACE_BIN_LABELS}
+
+    for idx in range(1, shared_len):
+        prev_distance = distance_arr[idx - 1]
+        curr_distance = distance_arr[idx]
+        prev_time = time_arr[idx - 1]
+        curr_time = time_arr[idx]
+        hr_value = hr_arr[idx]
+
+        if not np.isfinite(prev_distance) or not np.isfinite(curr_distance):
+            continue
+        if not np.isfinite(prev_time) or not np.isfinite(curr_time):
+            continue
+        if not np.isfinite(hr_value):
+            hr_value = np.nan
+
+        delta_distance = curr_distance - prev_distance
+        delta_time = curr_time - prev_time
+        if delta_distance <= 0 or delta_time <= 0:
+            continue
+
+        pace_seconds = delta_time / (delta_distance / MILE_METERS)
+        label = pace_bin_for_seconds(pace_seconds)
+        elapsed_by_bin[label] += delta_time
+
+        if np.isfinite(hr_value):
+            hr_weighted_by_bin[label] += hr_value * delta_time
+            hr_valid_seconds_by_bin[label] += delta_time
+
+    if not any(elapsed_by_bin.values()):
+        return None
+
+    summary = {"activity_id": int(activity_id)}
+    for label in PACE_BIN_LABELS:
+        total_seconds = elapsed_by_bin[label]
+        summary[f"seconds_{label}"] = int(round(total_seconds)) if total_seconds > 0 else 0
+        if hr_valid_seconds_by_bin[label] > 0:
+            summary[f"avg_hr_{label}"] = round(hr_weighted_by_bin[label] / hr_valid_seconds_by_bin[label], 1)
+        else:
+            summary[f"avg_hr_{label}"] = np.nan
+
+    return summary
+
+
+def update_run_pace_analysis_csv(activity_df, access_token, output_path):
+    if activity_df is None or activity_df.empty:
+        return
+
+    run_df = activity_df[activity_df["type"] == "Run"].copy()
+    if run_df.empty:
+        return
+
+    rows = []
+    for activity_id in run_df["activity_id"].dropna().astype(int).tolist():
+        streams = get_streams(activity_id, ["distance", "time", "heartrate"], access_token)
+        if not streams:
+            continue
+
+        distance_values = streams.get("distance", {}).get("data", [])
+        time_values = streams.get("time", {}).get("data", [])
+        hr_values = streams.get("heartrate", {}).get("data", [])
+
+        if not distance_values or not time_values or not hr_values:
+            continue
+
+        summary = compute_run_pace_summary_from_streams(activity_id, distance_values, time_values, hr_values)
+        if summary is not None:
+            rows.append(summary)
+
+    if not rows:
+        return
+
+    new_df = pd.DataFrame(rows)
+    columns = run_pace_columns()
+
+    if output_path.exists():
+        existing_df = pd.read_csv(output_path, dtype=str, keep_default_na=False)
+        existing_df = _drop_header_like_rows(existing_df)
+        existing_df = existing_df.reindex(columns=columns, fill_value=np.nan)
+    else:
+        existing_df = pd.DataFrame(columns=columns)
+
+    combined = pd.concat([existing_df, new_df], ignore_index=True, sort=False)
+    combined = combined.drop_duplicates(subset=["activity_id"], keep="last")
+    combined = combined.reindex(columns=columns)
+    combined.to_csv(output_path, index=False)
+
+
 def process_activities(activities, access_token):
     rows = []
     for idx, act in enumerate(tqdm(activities)):
         activity_id = act["id"]
+        if is_fake_activity_id(activity_id):
+            continue
         if activity_id <= int(last_id): # skip already processed
             continue
 
@@ -309,23 +405,31 @@ def process_activities(activities, access_token):
             "elapsed_time_min": format_duration(act["elapsed_time"]),
             "elevation_gain_ft": round(act["total_elevation_gain"]/FEET_METERS, 2),
             "avg_pace": speed_to_pace(act["average_speed"]),
+            "avg_pace_sec": pace_seconds_from_speed(act["average_speed"]),
             "max_pace": speed_to_pace(act["max_speed"]),
+            "max_pace_sec": pace_seconds_from_speed(act["max_speed"]),
+            "race": None,
         }
 
         if act["type"] == "Run":
             row["race"] = True if act['workout_type']== 1 else False
             streams = get_streams(activity_id, ["heartrate","distance","altitude","time"], access_token)
-            if "heartrate" in streams:
-                row["run_type"] = classify_run(streams["heartrate"]["data"])
-            
-                if "distance" in streams and "altitude" in streams and "time" in streams:
-                    row["zrfs"] = round(compute_zrfs(streams), 2)
-                    row["vo2max"] = compute_vo2max(streams)
+            if "heartrate" in streams and "time" in streams:
+                hr_stream = streams["heartrate"]["data"]
+                time_stream = streams["time"]["data"]
+                pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(hr_stream, time_stream)
+                if pct_easy is not None:
+                    row["%_easy"] = pct_easy
+                    row["mt_min_easy"] = mt_min_easy
+                    row["mt_min_hard"] = mt_min_hard
+                if hr_stream:
+                    row["avg_hr"] = round(float(np.mean(hr_stream)), 1)
+                    row["max_hr"] = int(np.max(hr_stream))
 
         if act["type"] in ["Ride", "Swim"]:
             streams = get_streams(activity_id, ["heartrate"], access_token)
             if "heartrate" in streams:
-                row["run_type"] = classify_run(streams["heartrate"]["data"])
+                row["race"] = None
 
         rows.append(row)
 
@@ -334,13 +438,43 @@ def process_activities(activities, access_token):
     return pd.DataFrame(rows)
 
 
+def _drop_header_like_rows(df):
+    """Remove repeated header rows that sometimes appear in exported CSV files."""
+    if df.empty:
+        return df
+
+    df = df.loc[:, ~df.columns.str.contains(r"^Unnamed", na=False)]
+    if df.empty:
+        return df
+
+    expected = [str(col) for col in df.columns]
+
+    def is_header_like_row(row):
+        values = ["" if pd.isna(value) else str(value).strip() for value in row.tolist()]
+        return values == expected
+
+    df = df.loc[~df.apply(is_header_like_row, axis=1)].copy()
+
+    if "date" in df.columns:
+        df["date"] = df["date"].astype(str).str.strip()
+        df = df.loc[df["date"].str.lower() != "date"].copy()
+
+    return df
+
+
 def save_activities_last_week(activity_files, output_path):
+    """Create a rolling 7-day summary of the latest activity exports.
+
+    This is used to produce the weekly CSV consumed by the analytics workflow.
+    """
     frames = []
     for filename in activity_files:
-        df = pd.read_csv(filename)
-        df = df.loc[:, ~df.columns.str.contains(r"^Unnamed")]
+        df = pd.read_csv(filename, dtype=str, keep_default_na=False)
+        df = _drop_header_like_rows(df)
         if "date" not in df.columns:
             continue
+        if "activity_id" in df.columns:
+            df = df[~df["activity_id"].map(lambda value: is_fake_activity_id(value))]
         frames.append(df)
 
     if not frames:
@@ -352,20 +486,37 @@ def save_activities_last_week(activity_files, output_path):
             "elapsed_time_min",
             "elevation_gain_ft",
             "avg_pace",
+            "avg_pace_sec",
             "max_pace",
+            "max_pace_sec",
+            "avg_hr",
+            "max_hr",
+            "%_easy",
+            "mt_min_easy",
+            "mt_min_hard",
         ])
     else:
         combined = pd.concat(frames, ignore_index=True, sort=False)
 
     if "date" in combined.columns:
-        combined["date"] = pd.to_datetime(combined["date"], utc=True)
+        combined["date"] = pd.to_datetime(combined["date"], errors="coerce", utc=True)
+        combined = combined.dropna(subset=["date"]).copy()
 
-    today = pd.Timestamp.now(tz="UTC").normalize()
-    week_start = today - pd.Timedelta(days=today.dayofweek)
-    week_end = week_start + pd.Timedelta(days=6)
+    if "avg_pace_sec" not in combined.columns:
+        combined["avg_pace_sec"] = np.nan
+    if "max_pace_sec" not in combined.columns:
+        combined["max_pace_sec"] = np.nan
+
+    combined["avg_pace_sec"] = combined["avg_pace_sec"].fillna(combined["avg_pace"].apply(pace_to_seconds))
+    combined["max_pace_sec"] = combined["max_pace_sec"].fillna(combined["max_pace"].apply(pace_to_seconds))
 
     if "date" in combined.columns:
-        combined = combined[(combined["date"] >= week_start) & (combined["date"] <= week_end)]
+        end_dt = pd.Timestamp.now(tz="UTC")
+        start_dt = end_dt - pd.Timedelta(days=7)
+        combined = combined[
+            (combined["date"] >= start_dt) &
+            (combined["date"] <= end_dt)
+        ]
         combined = combined.sort_values("date", ascending=True).reset_index(drop=True)
         combined["date"] = combined["date"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -377,7 +528,14 @@ def save_activities_last_week(activity_files, output_path):
         "elapsed_time_min",
         "elevation_gain_ft",
         "avg_pace",
+        "avg_pace_sec",
         "max_pace",
+        "max_pace_sec",
+        "avg_hr",
+        "max_hr",
+        "%_easy",
+        "mt_min_easy",
+        "mt_min_hard",
     ]
     combined = combined.reindex(columns=columns)
     combined.to_csv(output_path, index=False, mode="w")
@@ -413,7 +571,61 @@ if __name__ == "__main__":
             continue
 
         activity_df = df[df["type"] == activity_type]
-        activity_df = pd.concat([activity_df, pd.read_csv(filename)], axis=0).drop_duplicates(subset=["activity_id"])
+        activity_df = activity_df[~activity_df["activity_id"].map(lambda value: is_fake_activity_id(value))]
+        existing_df = pd.read_csv(filename, dtype=str, keep_default_na=False)
+        existing_df = _drop_header_like_rows(existing_df)
+        if "activity_id" in existing_df.columns:
+            existing_df = existing_df[~existing_df["activity_id"].map(lambda value: is_fake_activity_id(value))]
+        activity_df = pd.concat([activity_df, existing_df], axis=0, sort=False).drop_duplicates(subset=["activity_id"])
+        activity_df = activity_df.drop(columns=["zrfs", "vo2max"], errors="ignore")
+
+        if "avg_pace_sec" not in activity_df.columns:
+            activity_df["avg_pace_sec"] = np.nan
+        if "max_pace_sec" not in activity_df.columns:
+            activity_df["max_pace_sec"] = np.nan
+
+        activity_df["avg_pace_sec"] = activity_df["avg_pace_sec"].fillna(activity_df["avg_pace"].apply(pace_to_seconds))
+        activity_df["max_pace_sec"] = activity_df["max_pace_sec"].fillna(activity_df["max_pace"].apply(pace_to_seconds))
+
+        if activity_type == "Run":
+            output_columns = [
+                "activity_id",
+                "name",
+                "type",
+                "date",
+                "distance_miles",
+                "moving_time_min",
+                "elapsed_time_min",
+                "elevation_gain_ft",
+                "avg_pace",
+                "avg_pace_sec",
+                "max_pace",
+                "max_pace_sec",
+                "avg_hr",
+                "max_hr",
+                "%_easy",
+                "mt_min_easy",
+                "mt_min_hard",
+                "race",
+                "race_distance",
+            ]
+        else:
+            output_columns = [
+                "activity_id",
+                "name",
+                "type",
+                "date",
+                "distance_miles",
+                "moving_time_min",
+                "elapsed_time_min",
+                "elevation_gain_ft",
+                "avg_pace",
+                "avg_pace_sec",
+                "max_pace",
+                "max_pace_sec",
+            ]
+
+        activity_df = activity_df.reindex(columns=output_columns)
         activity_df.to_csv(filename, index=False)
         print(f"Saved: {filename}")
 
@@ -422,6 +634,10 @@ if __name__ == "__main__":
     else:
         with open(REPO_ROOT / "data" / "highest_activity_id.txt", "w") as f:
             f.write(df['activity_id'].max().astype(str))
+
+    pace_output = REPO_ROOT / "data" / "strava_run_pace_analysis.csv"
+    update_run_pace_analysis_csv(df, access_token, pace_output)
+    print(f"Saved run pace summary: {pace_output}")
 
     weekly_output = REPO_ROOT / "data" / "activities_last_week.csv"
     weekly_df = save_activities_last_week(activity_file_paths, weekly_output)
