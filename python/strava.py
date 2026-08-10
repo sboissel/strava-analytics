@@ -577,7 +577,7 @@ def process_activities(activities: Sequence[Dict[str, Any]], access_token: str) 
         activity_id = act["id"]
         if is_fake_activity_id(activity_id):
             continue
-        if activity_id <= int(last_id): # skip already processed
+        if activity_id == int(last_id): # skip the pagination boundary activity
             continue
 
         row = {
@@ -715,6 +715,10 @@ def save_activities_last_week(activity_files: Sequence[Union[str, Path]], output
         combined["avg_pace_sec"] = np.nan
     if "max_pace_sec" not in combined.columns:
         combined["max_pace_sec"] = np.nan
+    if "avg_pace" not in combined.columns:
+        combined["avg_pace"] = np.nan
+    if "max_pace" not in combined.columns:
+        combined["max_pace"] = np.nan
 
     combined["avg_pace_sec"] = combined["avg_pace_sec"].fillna(combined["avg_pace"].apply(pace_to_seconds))
     combined["max_pace_sec"] = combined["max_pace_sec"].fillna(combined["max_pace"].apply(pace_to_seconds))

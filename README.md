@@ -43,7 +43,7 @@ The script will refresh the access token, fetch activities, and rewrite the CSV 
 ## Running the tests
 
 ```bash
-python python/test_run_pace_analysis.py
+pytest
 ```
 
 ## Notes
