@@ -7,6 +7,7 @@ from pathlib import Path
 from collections import defaultdict
 from tqdm import tqdm
 from datetime import date, timedelta
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 tqdm.pandas()
@@ -27,11 +28,23 @@ last_id = open(REPO_ROOT / "data" / "highest_activity_id.txt", "r").read().strip
 # ========================
 # AUTH: refresh token
 # ========================
-def refresh_access_token(refresh_token):
+def refresh_access_token(refresh_token: str) -> Dict[str, Any]:
     """Refresh the Strava access token using the configured refresh token.
 
-    Raises:
-        RuntimeError: If Strava rejects the refresh request.
+    Parameters
+    ----------
+    refresh_token : str
+        The Strava refresh token to exchange for a new access token.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the token payload returned by the Strava OAuth endpoint.
+
+    Raises
+    ------
+    RuntimeError
+        If Strava rejects the refresh request.
     """
     url = "https://www.strava.com/oauth/token"
 
@@ -51,8 +64,18 @@ def refresh_access_token(refresh_token):
 # ========================
 # GET ACTIVITIES
 # ========================
-def get_strava_activities(access_token):
+def get_strava_activities(access_token: str) -> List[Dict[str, Any]]:
     """Fetch athlete activities from the Strava API.
+
+    Parameters
+    ----------
+    access_token : str
+        A valid Strava API access token.
+
+    Returns
+    -------
+    list[dict]
+        A list of activity dictionaries returned by the Strava athlete activities endpoint.
 
     The function walks the paginated API until it reaches the latest known
     activity ID or the API stops returning results.
@@ -63,6 +86,7 @@ def get_strava_activities(access_token):
     headers = {"Authorization": f"Bearer {access_token}"}
 
     while True:
+        # Fetch one page of activities at a time until we hit the last known activity.
         url = "https://www.strava.com/api/v3/athlete/activities"
         params = {"per_page": 100, "page": page}
 
@@ -76,7 +100,8 @@ def get_strava_activities(access_token):
 
         activities.extend(data)
         print(f"Pulled page {page} ({len(activities)} activities)")
-        
+
+        # Stop early once the latest known activity appears in the current page.
         if last_id in [str(act["id"]) for act in data]:
             break
 
@@ -89,19 +114,27 @@ def get_strava_activities(access_token):
 # ========================
 # GET STREAMS (pace, HR, elevation)
 # ========================
-def get_streams(activity_id, streams, access_token):
+def get_streams(activity_id: Union[int, str], streams: Sequence[str], access_token: str) -> Dict[str, Any]:
     """Retrieve one or more Strava activity streams for a given activity.
 
-    Args:
-        activity_id: The Strava activity identifier.
-        streams: One or more stream names such as "distance" or "heartrate".
-        access_token: A valid Strava API access token.
+    Parameters
+    ----------
+    activity_id : int or str
+        The Strava activity identifier.
+    streams : sequence of str
+        One or more stream names such as "distance" or "heartrate".
+    access_token : str
+        A valid Strava API access token.
 
-    Returns:
-        A JSON-like payload from the Strava streams endpoint.
+    Returns
+    -------
+    dict
+        A dictionary payload from the Strava streams endpoint, or an empty dictionary when the request fails.
 
-    Raises:
-        RuntimeError: If the API request fails.
+    Raises
+    ------
+    RuntimeError
+        If the API request fails.
     """
     url = f"https://www.strava.com/api/v3/activities/{activity_id}/streams"
 
@@ -122,8 +155,26 @@ def get_streams(activity_id, streams, access_token):
 # ========================
 # RUNNING HR THRESHOLD STATS
 # ========================
-def compute_hr_easy_stats(hr_stream, time_stream, threshold=HR_EASY_THRESHOLD):
+def compute_hr_easy_stats(
+    hr_stream: Sequence[float],
+    time_stream: Sequence[float],
+    threshold: float = HR_EASY_THRESHOLD,
+) -> Tuple[Optional[float], Optional[float], Optional[float]]:
     """Summarize easy versus hard running time from HR and time streams.
+
+    Parameters
+    ----------
+    hr_stream : sequence of float
+        Heart-rate values for the activity.
+    time_stream : sequence of float
+        Time values aligned to the heart-rate stream.
+    threshold : float, optional
+        The maximum heart rate considered easy.
+
+    Returns
+    -------
+    tuple
+        A tuple of percentage easy time, easy minutes, and hard minutes.
 
     The helper estimates the share of elapsed time spent below the easy HR
     threshold and returns the equivalent minutes for easy and hard segments.
@@ -135,6 +186,7 @@ def compute_hr_easy_stats(hr_stream, time_stream, threshold=HR_EASY_THRESHOLD):
         return None, None, None
 
     if len(hr_array) != len(time_array):
+        # Trim to the shared length so the arrays stay aligned.
         min_len = min(len(hr_array), len(time_array))
         hr_array = hr_array[:min_len]
         time_array = time_array[:min_len]
@@ -143,6 +195,7 @@ def compute_hr_easy_stats(hr_stream, time_stream, threshold=HR_EASY_THRESHOLD):
     if not np.any(valid_mask):
         return None, None, None
 
+    # Convert the time stream into elapsed durations between consecutive samples.
     durations = np.diff(np.r_[0, time_array[valid_mask]])
     hr_valid = hr_array[valid_mask]
 
@@ -169,20 +222,56 @@ def compute_hr_easy_stats(hr_stream, time_stream, threshold=HR_EASY_THRESHOLD):
 # ========================
 # PROCESS ACTIVITIES
 # ========================
-def is_fake_activity_id(activity_id):
+def is_fake_activity_id(activity_id: Any) -> bool:
+    """Check whether an activity ID is a placeholder fake value.
+
+    Parameters
+    ----------
+    activity_id : Any
+        The activity identifier to inspect.
+
+    Returns
+    -------
+    bool
+        True when the activity ID is a fake placeholder, otherwise False.
+    """
     if activity_id is None or pd.isna(activity_id):
         return False
     return str(activity_id).strip().upper().startswith("FAKE")
 
 
-def pace_seconds_from_speed(speed_mps):
+def pace_seconds_from_speed(speed_mps: Optional[float]) -> Optional[int]:
+    """Convert a speed in meters per second to seconds per mile.
+
+    Parameters
+    ----------
+    speed_mps : float, optional
+        Speed expressed in meters per second.
+
+    Returns
+    -------
+    int or None
+        The equivalent pace in seconds per mile, or None when the speed is invalid.
+    """
     if speed_mps == 0 or pd.isna(speed_mps):
         return None
 
     return int(MILE_METERS / speed_mps)
 
 
-def pace_to_seconds(pace):
+def pace_to_seconds(pace: Optional[Union[int, float, str]]) -> Optional[int]:
+    """Convert pace values to seconds per mile.
+
+    Parameters
+    ----------
+    pace : int, float, str, optional
+        A numeric pace or a string formatted as MM:SS or a decimal number.
+
+    Returns
+    -------
+    int or None
+        The pace expressed in seconds, or None when the input is invalid.
+    """
     if pace is None or pd.isna(pace):
         return None
 
@@ -207,7 +296,19 @@ def pace_to_seconds(pace):
     return None
 
 
-def speed_to_pace(speed_mps):
+def speed_to_pace(speed_mps: Optional[float]) -> Optional[str]:
+    """Format a speed value as a pace string.
+
+    Parameters
+    ----------
+    speed_mps : float, optional
+        Speed expressed in meters per second.
+
+    Returns
+    -------
+    str or None
+        A pace string formatted as MM:SS, or None when the speed is invalid.
+    """
     pace_seconds = pace_seconds_from_speed(speed_mps)
     if pace_seconds is None:
         return None
@@ -217,7 +318,19 @@ def speed_to_pace(speed_mps):
     return f"{minutes:02d}:{seconds:02d}"
 
 
-def format_duration(seconds):
+def format_duration(seconds: Union[int, float]) -> str:
+    """Format a duration in seconds as HH:MM:SS.
+
+    Parameters
+    ----------
+    seconds : int or float
+        A duration expressed in seconds.
+
+    Returns
+    -------
+    str
+        The duration formatted as HH:MM:SS.
+    """
     minutes, seconds = divmod(int(seconds), 60)
     hours, minutes = divmod(minutes, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
@@ -238,8 +351,19 @@ PACE_BIN_LABELS = [
 ]
 
 
-def pace_bin_for_seconds(pace_seconds):
-    """Map an elapsed pace in seconds per mile to the configured pace bin."""
+def pace_bin_for_seconds(pace_seconds: float) -> str:
+    """Map an elapsed pace in seconds per mile to the configured pace bin.
+
+    Parameters
+    ----------
+    pace_seconds : float
+        The pace in seconds per mile.
+
+    Returns
+    -------
+    str
+        The pace bin label for the provided pace.
+    """
     if pace_seconds < 420:
         return "under_700"
     if pace_seconds <= 449:
@@ -263,8 +387,14 @@ def pace_bin_for_seconds(pace_seconds):
     return "over_1130"
 
 
-def run_pace_columns():
-    """Return the canonical column order for run pace analysis output."""
+def run_pace_columns() -> List[str]:
+    """Return the canonical column order for run pace analysis output.
+
+    Returns
+    -------
+    list[str]
+        A list of column names for the run pace summary output.
+    """
     columns = ["activity_id"]
     for label in PACE_BIN_LABELS:
         columns.append(f"seconds_{label}")
@@ -272,8 +402,29 @@ def run_pace_columns():
     return columns
 
 
-def compute_run_pace_summary_from_streams(activity_id, distance_meters, time_seconds, hr_values):
+def compute_run_pace_summary_from_streams(
+    activity_id: Any,
+    distance_meters: Sequence[float],
+    time_seconds: Sequence[float],
+    hr_values: Optional[Sequence[float]],
+) -> Optional[Dict[str, Any]]:
     """Aggregate per-pace-bin elapsed time and average HR for a run.
+
+    Parameters
+    ----------
+    activity_id : Any
+        The Strava activity identifier.
+    distance_meters : sequence of float
+        Distance values for the run stream.
+    time_seconds : sequence of float
+        Time values aligned to the distance stream.
+    hr_values : sequence of float, optional
+        Heart-rate values aligned to the stream.
+
+    Returns
+    -------
+    dict or None
+        A summary dictionary keyed by pace bin, or None when insufficient data is available.
 
     The function converts distance/time deltas into pace bins and summarizes
     the total time spent in each bin alongside the average HR observed in that
@@ -301,6 +452,7 @@ def compute_run_pace_summary_from_streams(activity_id, distance_meters, time_sec
     hr_valid_seconds_by_bin = {label: 0.0 for label in PACE_BIN_LABELS}
 
     for idx in range(1, shared_len):
+        # Compare consecutive points to derive a segment pace and associated HR.
         prev_distance = distance_arr[idx - 1]
         curr_distance = distance_arr[idx]
         prev_time = time_arr[idx - 1]
@@ -319,6 +471,7 @@ def compute_run_pace_summary_from_streams(activity_id, distance_meters, time_sec
         if delta_distance <= 0 or delta_time <= 0:
             continue
 
+        # Convert distance/time deltas into a pace expressed in seconds per mile.
         pace_seconds = delta_time / (delta_distance / MILE_METERS)
         label = pace_bin_for_seconds(pace_seconds)
         elapsed_by_bin[label] += delta_time
@@ -328,6 +481,7 @@ def compute_run_pace_summary_from_streams(activity_id, distance_meters, time_sec
             hr_valid_seconds_by_bin[label] += delta_time
 
     if not any(elapsed_by_bin.values()):
+        # Nothing usable was accumulated, so skip the row.
         return None
 
     summary = {"activity_id": int(activity_id)}
@@ -342,7 +496,23 @@ def compute_run_pace_summary_from_streams(activity_id, distance_meters, time_sec
     return summary
 
 
-def update_run_pace_analysis_csv(activity_df, access_token, output_path):
+def update_run_pace_analysis_csv(activity_df: Optional[pd.DataFrame], access_token: str, output_path: Path) -> None:
+    """Update the run pace analysis CSV with the latest activity summaries.
+
+    Parameters
+    ----------
+    activity_df : pandas.DataFrame or None
+        A dataframe containing processed activity rows.
+    access_token : str
+        A valid Strava API access token.
+    output_path : pathlib.Path
+        Destination CSV file for the pace summaries.
+
+    Returns
+    -------
+    None
+        This function does not return a value.
+    """
     if activity_df is None or activity_df.empty:
         return
 
@@ -380,13 +550,28 @@ def update_run_pace_analysis_csv(activity_df, access_token, output_path):
     else:
         existing_df = pd.DataFrame(columns=columns)
 
+    # Merge the existing CSV rows with the newly computed summaries and keep the latest value per activity.
     combined = pd.concat([existing_df, new_df], ignore_index=True, sort=False)
     combined = combined.drop_duplicates(subset=["activity_id"], keep="last")
     combined = combined.reindex(columns=columns)
     combined.to_csv(output_path, index=False)
 
 
-def process_activities(activities, access_token):
+def process_activities(activities: Sequence[Dict[str, Any]], access_token: str) -> pd.DataFrame:
+    """Process Strava activities into a dataframe of enriched activity rows.
+
+    Parameters
+    ----------
+    activities : sequence of dict
+        Raw activity records returned from the Strava API.
+    access_token : str
+        A valid Strava API access token.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A dataframe containing the enriched activity data.
+    """
     rows = []
     for idx, act in enumerate(tqdm(activities)):
         activity_id = act["id"]
@@ -438,8 +623,19 @@ def process_activities(activities, access_token):
     return pd.DataFrame(rows)
 
 
-def _drop_header_like_rows(df):
-    """Remove repeated header rows that sometimes appear in exported CSV files."""
+def _drop_header_like_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove repeated header rows that sometimes appear in exported CSV files.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        A dataframe read from a CSV export.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A cleaned dataframe with header-like rows removed.
+    """
     if df.empty:
         return df
 
@@ -462,8 +658,20 @@ def _drop_header_like_rows(df):
     return df
 
 
-def save_activities_last_week(activity_files, output_path):
+def save_activities_last_week(activity_files: Sequence[Union[str, Path]], output_path: Path) -> pd.DataFrame:
     """Create a rolling 7-day summary of the latest activity exports.
+
+    Parameters
+    ----------
+    activity_files : sequence of str or pathlib.Path
+        Paths to the activity CSV exports to combine.
+    output_path : pathlib.Path
+        Destination CSV file for the weekly summary.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A dataframe containing the 7-day rolling activity summary.
 
     This is used to produce the weekly CSV consumed by the analytics workflow.
     """
@@ -478,6 +686,7 @@ def save_activities_last_week(activity_files, output_path):
         frames.append(df)
 
     if not frames:
+        # Create an empty weekly summary schema when no input files are available.
         combined = pd.DataFrame(columns=[
             "type",
             "date",
