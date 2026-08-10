@@ -11,8 +11,8 @@ os.environ.setdefault("CLIENT_SECRET", "test_secret")
 os.environ.setdefault("AUTH_TOKEN", "test_auth")
 os.environ.setdefault("REFRESH_TOKEN", "test_refresh")
 
-import strava as strava_module
-from strava import (
+import strava_analytics.strava as strava_module
+from strava_analytics.strava import (
     _drop_header_like_rows,
     compute_hr_easy_stats,
     compute_run_pace_summary_from_streams,
@@ -73,7 +73,7 @@ class StravaApiTests(unittest.TestCase):
         mock_response.status_code = 200
         mock_response.json.return_value = {"access_token": "abc123"}
 
-        with patch("strava.requests.post", return_value=mock_response) as post_mock:
+        with patch("strava_analytics.strava.requests.post", return_value=mock_response) as post_mock:
             payload = strava_module.refresh_access_token("refresh-token")
 
         self.assertEqual(payload, {"access_token": "abc123"})
@@ -89,9 +89,9 @@ class StravaApiTests(unittest.TestCase):
         second_page.status_code = 200
         second_page.json.return_value = [{"id": 999}]
 
-        with patch("strava.requests.get", side_effect=[first_page, second_page]) as get_mock, patch.object(
+        with patch("strava_analytics.strava.requests.get", side_effect=[first_page, second_page]) as get_mock, patch.object(
             strava_module, "last_id", "999"
-        ), patch("strava.time.sleep", return_value=None):
+        ), patch("strava_analytics.strava.time.sleep", return_value=None):
             activities = strava_module.get_strava_activities("token")
 
         self.assertEqual(len(activities), 2)
@@ -102,7 +102,7 @@ class StravaApiTests(unittest.TestCase):
         mock_response = Mock()
         mock_response.status_code = 404
 
-        with patch("strava.requests.get", return_value=mock_response):
+        with patch("strava_analytics.strava.requests.get", return_value=mock_response):
             payload = strava_module.get_streams(123, ["distance"], "token")
 
         self.assertEqual(payload, {})
@@ -113,7 +113,7 @@ class StravaApiTests(unittest.TestCase):
         mock_response.status_code = 200
         mock_response.json.return_value = {"distance": {"data": [1, 2]}}
 
-        with patch("strava.requests.get", return_value=mock_response):
+        with patch("strava_analytics.strava.requests.get", return_value=mock_response):
             payload = strava_module.get_streams(123, ["distance"], "token")
 
         self.assertEqual(payload, {"distance": {"data": [1, 2]}})

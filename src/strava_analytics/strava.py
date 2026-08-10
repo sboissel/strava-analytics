@@ -9,7 +9,7 @@ from tqdm import tqdm
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 tqdm.pandas()
 
 # ========================
