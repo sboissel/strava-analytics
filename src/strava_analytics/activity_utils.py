@@ -1,9 +1,13 @@
+import time
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from tqdm import tqdm
 
 MILE_METERS = 1609.34
+FEET_METERS = 0.3048
 HR_EASY_THRESHOLD = 142
 
 PACE_BIN_LABELS = [
@@ -91,24 +95,6 @@ def compute_hr_easy_stats(
 # ========================
 # PACE / DURATION HELPERS
 # ========================
-def is_fake_activity_id(activity_id: Any) -> bool:
-    """Check whether an activity ID is a placeholder fake value.
-
-    Parameters
-    ----------
-    activity_id : Any
-        The activity identifier to inspect.
-
-    Returns
-    -------
-    bool
-        True when the activity ID is a fake placeholder, otherwise False.
-    """
-    if activity_id is None or pd.isna(activity_id):
-        return False
-    return str(activity_id).strip().upper().startswith("FAKE")
-
-
 def pace_seconds_from_speed(speed_mps: Optional[float]) -> Optional[int]:
     """Convert a speed in meters per second to seconds per mile.
 
@@ -350,6 +336,230 @@ def compute_run_pace_summary_from_streams(
     return summary
 
 
+def _activity_base_row(act: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the shared activity row fields from a raw Strava activity payload."""
+    return {
+        "activity_id": act["id"],
+        "name": act["name"],
+        "type": act["type"],
+        "date": act["start_date"],
+        "distance_miles": round(act["distance"] / MILE_METERS, 2),
+        "moving_time_min": format_duration(act["moving_time"]),
+        "elapsed_time_min": format_duration(act["elapsed_time"]),
+        "elevation_gain_ft": round(act["total_elevation_gain"] / FEET_METERS, 2),
+        "avg_pace": speed_to_pace(act["average_speed"]),
+        "avg_pace_sec": pace_seconds_from_speed(act["average_speed"]),
+        "max_pace": speed_to_pace(act["max_speed"]),
+        "max_pace_sec": pace_seconds_from_speed(act["max_speed"]),
+        "race": None,
+    }
+
+
+def _enrich_run_from_streams(
+    row: Dict[str, Any],
+    activity_id: Any,
+    get_streams: Callable[[Union[int, str], Sequence[str]], Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Enrich a run row with HR stats and return an optional pace summary."""
+    streams = get_streams(activity_id, ["heartrate", "distance", "time"])
+    hr_stream = streams.get("heartrate", {}).get("data", [])
+    distance_stream = streams.get("distance", {}).get("data", [])
+    time_stream = streams.get("time", {}).get("data", [])
+
+    if hr_stream and time_stream:
+        pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(hr_stream, time_stream)
+        if pct_easy is not None:
+            row["%_easy"] = pct_easy
+            row["mt_min_easy"] = mt_min_easy
+            row["mt_min_hard"] = mt_min_hard
+        row["avg_hr"] = round(float(np.mean(hr_stream)), 1)
+        row["max_hr"] = int(np.max(hr_stream))
+
+    if distance_stream and time_stream and hr_stream:
+        return compute_run_pace_summary_from_streams(
+            activity_id, distance_stream, time_stream, hr_stream
+        )
+    return None
+
+
+def process_activities(
+    activities: Sequence[Dict[str, Any]],
+    get_streams: Callable[[Union[int, str], Sequence[str]], Dict[str, Any]],
+    last_activity_id: str,
+) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
+    """Process Strava activities into enriched rows and run pace summaries.
+
+    Parameters
+    ----------
+    activities : sequence of dict
+        Raw activity records returned from the Strava API.
+    get_streams : callable
+        Function used to fetch activity streams, typically ``StravaClient.get_streams``.
+    last_activity_id : str
+        The latest known activity ID; that boundary activity is skipped.
+
+    Returns
+    -------
+    tuple
+        A dataframe of enriched activity rows and a list of run pace summaries.
+        Streams are fetched once per run and reused for both outputs.
+    """
+    rows = []
+    pace_summaries = []
+    for act in tqdm(activities):
+        activity_id = act["id"]
+        if activity_id == int(last_activity_id):  # skip the pagination boundary activity
+            continue
+
+        row = _activity_base_row(act)
+
+        if act["type"] == "Run":
+            row["race"] = True if act["workout_type"] == 1 else False
+            summary = _enrich_run_from_streams(row, activity_id, get_streams)
+            if summary is not None:
+                pace_summaries.append(summary)
+            time.sleep(1)  # avoid rate limit after stream fetch
+
+        rows.append(row)
+
+    return pd.DataFrame(rows), pace_summaries
+
+
+ACTIVITY_TYPES = ("Run", "Ride", "Swim", "Hike")
+
+
+def activity_analysis_columns(activity_type: str) -> List[str]:
+    """Return the output columns for a given activity-type analysis CSV.
+
+    Parameters
+    ----------
+    activity_type : str
+        The activity type, such as ``Run`` or ``Ride``.
+
+    Returns
+    -------
+    list[str]
+        Column names to write for that activity type.
+    """
+    base_columns = [
+        "activity_id",
+        "name",
+        "type",
+        "date",
+        "distance_miles",
+        "moving_time_min",
+        "elapsed_time_min",
+        "elevation_gain_ft",
+        "avg_pace",
+        "avg_pace_sec",
+        "max_pace",
+        "max_pace_sec",
+    ]
+    if activity_type == "Run":
+        return base_columns + [
+            "avg_hr",
+            "max_hr",
+            "%_easy",
+            "mt_min_easy",
+            "mt_min_hard",
+            "race",
+            "race_distance",
+        ]
+    return base_columns
+
+
+def activity_analysis_paths(
+    output_dir: Path,
+    activity_types: Sequence[str] = ACTIVITY_TYPES,
+) -> List[Path]:
+    """Return the per-type analysis CSV paths under ``output_dir``."""
+    return [output_dir / f"strava_{activity_type.lower()}_analysis.csv" for activity_type in activity_types]
+
+
+def update_activity_analysis_csvs(
+    activity_df: pd.DataFrame,
+    output_dir: Path,
+    activity_types: Sequence[str] = ACTIVITY_TYPES,
+) -> None:
+    """Merge processed activities into per-type analysis CSVs.
+
+    Parameters
+    ----------
+    activity_df : pandas.DataFrame
+        Newly processed activity rows.
+    output_dir : pathlib.Path
+        Directory containing ``strava_<type>_analysis.csv`` files.
+    activity_types : sequence of str, optional
+        Activity types to update. Defaults to run, ride, swim, and hike.
+
+    Returns
+    -------
+    None
+        This function does not return a value.
+    """
+    if activity_df.empty:
+        return
+
+    for activity_type, filename in zip(
+        activity_types, activity_analysis_paths(output_dir, activity_types)
+    ):
+        typed_df = activity_df[activity_df["type"] == activity_type]
+        if typed_df.empty:
+            continue
+
+        existing_df = pd.read_csv(filename, dtype=str, keep_default_na=False)
+        existing_df = _drop_header_like_rows(existing_df)
+        typed_df = pd.concat([typed_df, existing_df], axis=0, sort=False).drop_duplicates(subset=["activity_id"])
+        typed_df = typed_df.drop(columns=["zrfs", "vo2max"], errors="ignore")
+
+        if "avg_pace_sec" not in typed_df.columns:
+            typed_df["avg_pace_sec"] = np.nan
+        if "max_pace_sec" not in typed_df.columns:
+            typed_df["max_pace_sec"] = np.nan
+
+        typed_df["avg_pace_sec"] = typed_df["avg_pace_sec"].fillna(typed_df["avg_pace"].apply(pace_to_seconds))
+        typed_df["max_pace_sec"] = typed_df["max_pace_sec"].fillna(typed_df["max_pace"].apply(pace_to_seconds))
+
+        typed_df = typed_df.reindex(columns=activity_analysis_columns(activity_type))
+        typed_df.to_csv(filename, index=False)
+        print(f"Saved: {filename}")
+
+
+def update_run_pace_analysis_csv(pace_summaries: Sequence[Dict[str, Any]], output_path: Path) -> None:
+    """Update the run pace analysis CSV with precomputed pace summaries.
+
+    Parameters
+    ----------
+    pace_summaries : sequence of dict
+        Pace-bin summary rows produced while processing run activities.
+    output_path : pathlib.Path
+        Destination CSV file for the pace summaries.
+
+    Returns
+    -------
+    None
+        This function does not return a value.
+    """
+    if not pace_summaries:
+        return
+
+    new_df = pd.DataFrame(pace_summaries)
+    columns = run_pace_columns()
+
+    if output_path.exists():
+        existing_df = pd.read_csv(output_path, dtype=str, keep_default_na=False)
+        existing_df = _drop_header_like_rows(existing_df)
+        existing_df = existing_df.reindex(columns=columns, fill_value=np.nan)
+    else:
+        existing_df = pd.DataFrame(columns=columns)
+
+    # Merge the existing CSV rows with the newly computed summaries and keep the latest value per activity.
+    combined = pd.concat([existing_df, new_df], ignore_index=True, sort=False)
+    combined = combined.drop_duplicates(subset=["activity_id"], keep="last")
+    combined = combined.reindex(columns=columns)
+    combined.to_csv(output_path, index=False)
+
+
 def _drop_header_like_rows(df: pd.DataFrame) -> pd.DataFrame:
     """Remove repeated header rows that sometimes appear in exported CSV files.
 
@@ -385,13 +595,13 @@ def _drop_header_like_rows(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def save_activities_last_week(activity_files: Sequence[Union[str, Path]], output_path: Path) -> pd.DataFrame:
+def save_activities_last_week(data_dir: Path, output_path: Path) -> pd.DataFrame:
     """Create a rolling 7-day summary of the latest activity exports.
 
     Parameters
     ----------
-    activity_files : sequence of str or pathlib.Path
-        Paths to the activity CSV exports to combine.
+    data_dir : pathlib.Path
+        Directory containing the per-type ``strava_<type>_analysis.csv`` files.
     output_path : pathlib.Path
         Destination CSV file for the weekly summary.
 
@@ -403,13 +613,13 @@ def save_activities_last_week(activity_files: Sequence[Union[str, Path]], output
     This is used to produce the weekly CSV consumed by the analytics workflow.
     """
     frames = []
-    for filename in activity_files:
+    for filename in activity_analysis_paths(data_dir):
+        if not filename.exists():
+            continue
         df = pd.read_csv(filename, dtype=str, keep_default_na=False)
         df = _drop_header_like_rows(df)
         if "date" not in df.columns:
             continue
-        if "activity_id" in df.columns:
-            df = df[~df["activity_id"].map(lambda value: is_fake_activity_id(value))]
         frames.append(df)
 
     if not frames:

@@ -48,6 +48,5 @@ pytest
 
 ## Notes
 
-- Fake or placeholder activity IDs are skipped automatically.
 - The pipeline is designed to fail loudly for genuine Strava API/auth issues so that bad data is not silently written.
 - The pace-bin logic groups runs into fixed pace ranges such as `700_730` and `830_900` based on seconds per mile.

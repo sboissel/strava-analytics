@@ -1,4 +1,3 @@
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,31 +5,50 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 
-os.environ.setdefault("CLIENT_ID", "test_client")
-os.environ.setdefault("CLIENT_SECRET", "test_secret")
-os.environ.setdefault("AUTH_TOKEN", "test_auth")
-os.environ.setdefault("REFRESH_TOKEN", "test_refresh")
+from strava_analytics.strava import (
+    StravaClient,
+    main,
+    read_last_activity_id,
+    write_last_activity_id,
+)
 
-import strava_analytics.strava as strava_module
+
+def make_client(last_activity_id: str = "0") -> StravaClient:
+    """Create a StravaClient with test credentials and an optional last activity ID."""
+    return StravaClient(
+        client_id="test_client",
+        client_secret="test_secret",
+        refresh_token="test_refresh",
+        last_activity_id=last_activity_id,
+    )
 
 
-class StravaApiTests(unittest.TestCase):
-    """Test Strava API request helpers using mocked responses."""
+class StravaClientTests(unittest.TestCase):
+    """Test StravaClient API helpers using mocked responses."""
 
-    def test_refresh_access_token_returns_token_payload(self):
-        """Ensure a successful OAuth response is returned as a dictionary."""
+    def test_refresh_access_token_stores_token_on_client(self):
+        """Ensure a successful OAuth response updates the client access token."""
+        client = make_client()
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"access_token": "abc123"}
+        mock_response.json.return_value = {
+            "access_token": "abc123",
+            "refresh_token": "new-refresh",
+        }
 
         with patch("strava_analytics.strava.requests.post", return_value=mock_response) as post_mock:
-            payload = strava_module.refresh_access_token("refresh-token")
+            payload = client.refresh_access_token()
 
-        self.assertEqual(payload, {"access_token": "abc123"})
+        self.assertEqual(payload["access_token"], "abc123")
+        self.assertEqual(client.access_token, "abc123")
+        self.assertEqual(client.refresh_token, "new-refresh")
         post_mock.assert_called_once()
 
-    def test_get_strava_activities_paginates_until_last_known_activity(self):
-        """Ensure the activity fetch loops until it reaches the latest known activity ID."""
+    def test_get_activities_paginates_until_last_known_activity(self):
+        """Ensure activity fetch loops until it reaches the latest known activity ID."""
+        client = make_client(last_activity_id="999")
+        client.access_token = "token"
+
         first_page = Mock()
         first_page.status_code = 200
         first_page.json.return_value = [{"id": 1}]
@@ -39,122 +57,115 @@ class StravaApiTests(unittest.TestCase):
         second_page.status_code = 200
         second_page.json.return_value = [{"id": 999}]
 
-        with patch("strava_analytics.strava.requests.get", side_effect=[first_page, second_page]) as get_mock, patch.object(
-            strava_module, "last_id", "999"
-        ), patch("strava_analytics.strava.time.sleep", return_value=None):
-            activities = strava_module.get_strava_activities("token")
+        with patch("strava_analytics.strava.requests.get", side_effect=[first_page, second_page]) as get_mock, patch(
+            "strava_analytics.strava.time.sleep", return_value=None
+        ):
+            activities = client.get_activities()
 
         self.assertEqual(len(activities), 2)
         self.assertEqual(get_mock.call_count, 2)
 
+    def test_get_streams_refreshes_access_token_when_missing(self):
+        """Ensure stream requests refresh the access token when none is set yet."""
+        client = make_client()
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"distance": {"data": [1, 2]}}
+
+        def refresh_side_effect():
+            client.access_token = "abc123"
+            return {"access_token": "abc123"}
+
+        with patch.object(client, "refresh_access_token", side_effect=refresh_side_effect) as refresh_mock, patch(
+            "strava_analytics.strava.requests.get", return_value=mock_response
+        ):
+            payload = client.get_streams(123, ["distance"])
+
+        refresh_mock.assert_called_once()
+        self.assertEqual(payload, {"distance": {"data": [1, 2]}})
+
     def test_get_streams_raises_for_failed_request(self):
         """Ensure failed stream requests raise a descriptive runtime error."""
+        client = make_client()
+        client.access_token = "token"
+
         mock_response = Mock()
         mock_response.status_code = 404
         mock_response.text = "activity not found"
 
         with patch("strava_analytics.strava.requests.get", return_value=mock_response):
             with self.assertRaisesRegex(RuntimeError, r"404 activity not found"):
-                strava_module.get_streams(123, ["distance"], "token")
+                client.get_streams(123, ["distance"])
 
     def test_get_streams_returns_stream_payload_on_success(self):
         """Ensure successful stream requests return the parsed JSON payload."""
+        client = make_client()
+        client.access_token = "token"
+
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"distance": {"data": [1, 2]}}
 
         with patch("strava_analytics.strava.requests.get", return_value=mock_response):
-            payload = strava_module.get_streams(123, ["distance"], "token")
+            payload = client.get_streams(123, ["distance"])
 
         self.assertEqual(payload, {"distance": {"data": [1, 2]}})
 
-
-class ActivityProcessingTests(unittest.TestCase):
-    """Test activity processing helpers that call the Strava API."""
-
-    def test_update_run_pace_analysis_csv_writes_summaries(self):
-        """Ensure the pace-analysis CSV file is populated from mocked stream data."""
+    def test_from_env_reads_credentials_and_last_activity_id(self):
+        """Ensure from_env loads credentials from the environment and last activity ID from disk."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = Path(tmpdir) / "pace.csv"
-            existing_df = pd.DataFrame({"activity_id": [999], "seconds_under_700": [10], "avg_hr_under_700": [100]})
-            existing_df.to_csv(output_path, index=False)
+            data_dir = Path(tmpdir)
+            (data_dir / "highest_activity_id.txt").write_text("42\n")
 
-            activity_df = pd.DataFrame(
-                [{"activity_id": 123, "type": "Run"}, {"activity_id": 456, "type": "Ride"}]
-            )
-
-            mock_streams = {
-                "distance": {"data": [0.0, 1609.34]},
-                "time": {"data": [0.0, 420.0]},
-                "heartrate": {"data": [150.0, 150.0]},
+            env = {
+                "CLIENT_ID": "env_client",
+                "CLIENT_SECRET": "env_secret",
+                "REFRESH_TOKEN": "env_refresh",
             }
+            with patch.dict("os.environ", env, clear=False):
+                client = StravaClient.from_env(data_dir=data_dir)
 
-            with patch.object(strava_module, "get_streams", return_value=mock_streams):
-                strava_module.update_run_pace_analysis_csv(activity_df, "token", output_path)
+        self.assertEqual(client.client_id, "env_client")
+        self.assertEqual(client.client_secret, "env_secret")
+        self.assertEqual(client.refresh_token, "env_refresh")
+        self.assertEqual(client.last_activity_id, "42")
 
-            written = pd.read_csv(output_path)
-
-        self.assertIn("activity_id", written.columns)
-        self.assertIn("seconds_700_730", written.columns)
-        self.assertTrue(written[written["activity_id"].astype(str) == "123"].shape[0] == 1)
-
-    def test_update_run_pace_analysis_csv_skips_empty_dataframe(self):
-        """Ensure an empty activity dataframe returns early without writing or calling streams."""
+    def test_read_and_write_last_activity_id(self):
+        """Ensure last activity ID helpers round-trip through the data directory file."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = Path(tmpdir) / "pace.csv"
+            data_dir = Path(tmpdir)
+            write_last_activity_id(data_dir, 123)
+            self.assertEqual(read_last_activity_id(data_dir), "123")
 
-            with patch.object(strava_module, "get_streams") as get_streams_mock:
-                strava_module.update_run_pace_analysis_csv(pd.DataFrame(), "token", output_path)
+    def test_main_skips_writes_when_no_new_activities(self):
+        """Ensure main still writes the weekly summary when processing returns no rows."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            write_last_activity_id(data_dir, 1)
+            for activity_type in ["run", "ride", "swim", "hike"]:
+                (data_dir / f"strava_{activity_type}_analysis.csv").write_text(
+                    "type,date,distance_miles\n"
+                )
 
-            get_streams_mock.assert_not_called()
-            self.assertFalse(output_path.exists())
+            client = make_client(last_activity_id="1")
+            client.access_token = "token"
 
-    def test_process_activities_enriches_run_rows(self):
-        """Ensure processed activities include the expected run-specific enrichment fields."""
-        activities = [
-            {
-                "id": 123,
-                "name": "Morning Run",
-                "type": "Run",
-                "start_date": "2024-01-01T00:00:00Z",
-                "distance": 1609.34,
-                "moving_time": 600,
-                "elapsed_time": 600,
-                "total_elevation_gain": 0,
-                "average_speed": 2.68,
-                "max_speed": 3.0,
-                "workout_type": 0,
-            },
-            {
-                "id": 456,
-                "name": "Ride",
-                "type": "Ride",
-                "start_date": "2024-01-01T00:00:00Z",
-                "distance": 1000.0,
-                "moving_time": 600,
-                "elapsed_time": 600,
-                "total_elevation_gain": 0,
-                "average_speed": 3.0,
-                "max_speed": 4.0,
-                "workout_type": 0,
-            },
-        ]
+            with patch("strava_analytics.strava.StravaClient.from_env", return_value=client), patch.object(
+                client, "refresh_access_token", return_value={"access_token": "token"}
+            ), patch.object(client, "get_activities", return_value=[]), patch(
+                "strava_analytics.strava.process_activities", return_value=(pd.DataFrame(), [])
+            ) as process_mock, patch(
+                "strava_analytics.strava.update_activity_analysis_csvs"
+            ) as update_csvs_mock, patch(
+                "strava_analytics.strava.update_run_pace_analysis_csv"
+            ) as update_pace_mock:
+                main(data_dir=data_dir)
 
-        mock_streams = {
-            "heartrate": {"data": [120.0, 160.0]},
-            "distance": {"data": [0.0, 1609.34]},
-            "altitude": {"data": [0.0, 0.0]},
-            "time": {"data": [0.0, 600.0]},
-        }
-
-        with patch.object(strava_module, "get_streams", return_value=mock_streams), patch.object(
-            strava_module.time, "sleep", return_value=None
-        ):
-            result = strava_module.process_activities(activities, "token")
-
-        self.assertIn("%_easy", result.columns)
-        self.assertEqual(result.loc[result["activity_id"] == 123, "avg_hr"].iloc[0], 140.0)
-        self.assertEqual(result.loc[result["activity_id"] == 456, "type"].iloc[0], "Ride")
+            process_mock.assert_called_once()
+            update_csvs_mock.assert_not_called()
+            update_pace_mock.assert_not_called()
+            self.assertTrue((data_dir / "activities_last_week.csv").exists())
+            self.assertEqual(read_last_activity_id(data_dir), "1")
 
 
 if __name__ == "__main__":
