@@ -11,16 +11,15 @@ from strava_analytics.activity_utils import (
     activity_analysis_paths,
     compute_hr_easy_stats,
     compute_run_pace_summary_from_streams,
-    format_duration,
+    format_time,
     pace_bin_for_seconds,
-    pace_seconds_from_speed,
-    pace_to_seconds,
     process_activities,
     run_pace_columns,
     save_activities_last_week,
-    speed_to_pace,
+    speed_to_pace_seconds,
     update_activity_analysis_csvs,
     update_run_pace_analysis_csv,
+    week_summary_bounds,
 )
 
 
@@ -110,12 +109,6 @@ class ActivityProcessingTests(unittest.TestCase):
 class PaceFormattingTests(unittest.TestCase):
     """Test pace parsing and formatting helper functions."""
 
-    def test_pace_to_seconds_parses_common_formats(self):
-        """Verify that pace values in numeric and MM:SS formats are parsed correctly."""
-        self.assertEqual(pace_to_seconds(450), 450)
-        self.assertEqual(pace_to_seconds("07:30"), 450)
-        self.assertIsNone(pace_to_seconds("not-a-pace"))
-
     def test_pace_bin_for_seconds_uses_expected_labels(self):
         """Check that pace thresholds map to the expected pace-bin labels."""
         self.assertEqual(pace_bin_for_seconds(419), "under_700")
@@ -123,10 +116,11 @@ class PaceFormattingTests(unittest.TestCase):
         self.assertEqual(pace_bin_for_seconds(690), "over_1130")
 
     def test_speed_and_duration_helpers_format_values(self):
-        """Ensure pace conversion and duration formatting return the expected strings."""
-        self.assertEqual(pace_seconds_from_speed(3.0), 536)
-        self.assertEqual(speed_to_pace(3.0), "08:56")
-        self.assertEqual(format_duration(3661), "01:01:01")
+        """Ensure speed conversion and clock formatting return the expected values."""
+        self.assertEqual(speed_to_pace_seconds(3.0), 536)
+        self.assertEqual(format_time(536, include_hours=False), "08:56")
+        self.assertEqual(format_time(3661, include_hours=True), "01:01:01")
+        self.assertIsNone(format_time(None, include_hours=False))
 
     def test_run_pace_columns_returns_expected_order(self):
         """Ensure the canonical run-pace column list starts with the activity ID and includes pace bins."""
@@ -280,22 +274,43 @@ class CsvProcessingTests(unittest.TestCase):
             for path in activity_analysis_paths(output_dir):
                 self.assertIn("# sentinel", path.read_text())
 
+    def test_week_summary_bounds_uses_previous_week_on_weekdays(self):
+        """Ensure Monday-Saturday select the previous Mon-Sun calendar week."""
+        wednesday = pd.Timestamp("2026-08-12T15:00:00Z")
+        start, end = week_summary_bounds(wednesday)
+
+        self.assertEqual(start, pd.Timestamp("2026-08-03T00:00:00Z"))
+        self.assertEqual(end, pd.Timestamp("2026-08-10T00:00:00Z"))
+
+    def test_week_summary_bounds_uses_current_week_on_sunday(self):
+        """Ensure Sunday selects the current Mon-Sun calendar week."""
+        sunday = pd.Timestamp("2026-08-16T15:00:00Z")
+        start, end = week_summary_bounds(sunday)
+
+        self.assertEqual(start, pd.Timestamp("2026-08-10T00:00:00Z"))
+        self.assertEqual(end, pd.Timestamp("2026-08-17T00:00:00Z"))
+
     def test_save_activities_last_week_creates_summary(self):
-        """Ensure the weekly summary combines recent activity exports and writes the output CSV."""
+        """Ensure the weekly summary keeps only activities inside the week window."""
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
+            as_of = pd.Timestamp("2026-08-12T12:00:00Z")  # Wednesday -> previous week Aug 3-9
             pd.DataFrame(
-                [{"type": "Run", "date": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ"), "distance_miles": 3.1}]
+                [{"type": "Run", "date": "2026-08-05T10:00:00Z", "distance_miles": 3.1}]
             ).to_csv(data_dir / "strava_run_analysis.csv", index=False)
             pd.DataFrame(
-                [{"type": "Ride", "date": (pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ"), "distance_miles": 10.0}]
+                [{"type": "Ride", "date": "2026-08-08T10:00:00Z", "distance_miles": 10.0}]
             ).to_csv(data_dir / "strava_ride_analysis.csv", index=False)
+            pd.DataFrame(
+                [{"type": "Hike", "date": "2026-08-11T10:00:00Z", "distance_miles": 2.0}]
+            ).to_csv(data_dir / "strava_hike_analysis.csv", index=False)
 
             output_path = data_dir / "weekly.csv"
-            result = save_activities_last_week(data_dir, output_path)
+            result = save_activities_last_week(data_dir, output_path, as_of=as_of)
 
             self.assertTrue(output_path.exists())
             self.assertEqual(result.shape[0], 2)
+            self.assertEqual(sorted(result["type"].tolist()), ["Ride", "Run"])
 
     def test_drop_header_like_rows_removes_header_rows(self):
         """Ensure repeated header rows are removed from imported CSV-like dataframes."""

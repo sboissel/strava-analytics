@@ -1,3 +1,5 @@
+"""Strava API client and pipeline entrypoint for refreshing tokens and syncing activities."""
+
 import os
 import time
 from pathlib import Path

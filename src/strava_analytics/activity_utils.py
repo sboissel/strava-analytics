@@ -1,3 +1,5 @@
+"""Activity enrichment and CSV helpers for pace, heart-rate, and weekly summaries."""
+
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
@@ -42,7 +44,8 @@ def compute_hr_easy_stats(
     time_stream : sequence of float
         Time values aligned to the heart-rate stream.
     threshold : float, optional
-        The maximum heart rate considered easy.
+        Heart rates strictly below this value are treated as easy; values at or
+        above it are hard.
 
     Returns
     -------
@@ -64,6 +67,7 @@ def compute_hr_easy_stats(
         hr_array = hr_array[:min_len]
         time_array = time_array[:min_len]
 
+    # Keep only samples where both HR and time are finite (drop NaN/inf gaps).
     valid_mask = np.isfinite(hr_array) & np.isfinite(time_array)
     if not np.any(valid_mask):
         return None, None, None
@@ -71,11 +75,6 @@ def compute_hr_easy_stats(
     # Convert the time stream into elapsed durations between consecutive samples.
     durations = np.diff(np.r_[0, time_array[valid_mask]])
     hr_valid = hr_array[valid_mask]
-
-    if len(durations) != len(hr_valid):
-        min_len = min(len(durations), len(hr_valid))
-        durations = durations[:min_len]
-        hr_valid = hr_valid[:min_len]
 
     total_duration_s = np.sum(durations)
     if total_duration_s <= 0:
@@ -95,7 +94,7 @@ def compute_hr_easy_stats(
 # ========================
 # PACE / DURATION HELPERS
 # ========================
-def pace_seconds_from_speed(speed_mps: Optional[float]) -> Optional[int]:
+def speed_to_pace_seconds(speed_mps: Optional[float]) -> Optional[int]:
     """Convert a speed in meters per second to seconds per mile.
 
     Parameters
@@ -114,81 +113,30 @@ def pace_seconds_from_speed(speed_mps: Optional[float]) -> Optional[int]:
     return int(MILE_METERS / speed_mps)
 
 
-def pace_to_seconds(pace: Optional[Union[int, float, str]]) -> Optional[int]:
-    """Convert pace values to seconds per mile.
+def format_time(seconds: Optional[Union[int, float]], *, include_hours: bool = True) -> Optional[str]:
+    """Format a duration in seconds as a time string.
 
     Parameters
     ----------
-    pace : int, float, str, optional
-        A numeric pace or a string formatted as MM:SS or a decimal number.
-
-    Returns
-    -------
-    int or None
-        The pace expressed in seconds, or None when the input is invalid.
-    """
-    if pace is None or pd.isna(pace):
-        return None
-
-    if isinstance(pace, (int, float)):
-        return int(pace)
-
-    if isinstance(pace, str):
-        pace = pace.strip()
-        if not pace:
-            return None
-        try:
-            return int(float(pace))
-        except ValueError:
-            parts = pace.split(":")
-            if len(parts) == 2:
-                try:
-                    minutes, seconds = parts
-                    return int(minutes) * 60 + int(seconds)
-                except ValueError:
-                    return None
-
-    return None
-
-
-def speed_to_pace(speed_mps: Optional[float]) -> Optional[str]:
-    """Format a speed value as a pace string.
-
-    Parameters
-    ----------
-    speed_mps : float, optional
-        Speed expressed in meters per second.
+    seconds : int or float, optional
+        A duration expressed in seconds.
+    include_hours : bool, optional
+        When True, format as HH:MM:SS. When False, format as MM:SS.
 
     Returns
     -------
     str or None
-        A pace string formatted as MM:SS, or None when the speed is invalid.
+        The formatted time string, or None when ``seconds`` is missing/invalid.
     """
-    pace_seconds = pace_seconds_from_speed(speed_mps)
-    if pace_seconds is None:
+    if seconds is None or pd.isna(seconds):
         return None
 
-    minutes, seconds = divmod(pace_seconds, 60)
-
-    return f"{minutes:02d}:{seconds:02d}"
-
-
-def format_duration(seconds: Union[int, float]) -> str:
-    """Format a duration in seconds as HH:MM:SS.
-
-    Parameters
-    ----------
-    seconds : int or float
-        A duration expressed in seconds.
-
-    Returns
-    -------
-    str
-        The duration formatted as HH:MM:SS.
-    """
-    minutes, seconds = divmod(int(seconds), 60)
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    total_seconds = int(seconds)
+    minutes, secs = divmod(total_seconds, 60)
+    if include_hours:
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
 
 
 def pace_bin_for_seconds(pace_seconds: float) -> str:
@@ -243,22 +191,22 @@ def run_pace_columns() -> List[str]:
 
 
 def compute_run_pace_summary_from_streams(
-    activity_id: Any,
+    activity_id: int,
     distance_meters: Sequence[float],
     time_seconds: Sequence[float],
-    hr_values: Optional[Sequence[float]],
+    hr_values: Sequence[float],
 ) -> Optional[Dict[str, Any]]:
     """Aggregate per-pace-bin elapsed time and average HR for a run.
 
     Parameters
     ----------
-    activity_id : Any
+    activity_id : int
         The Strava activity identifier.
     distance_meters : sequence of float
         Distance values for the run stream.
     time_seconds : sequence of float
         Time values aligned to the distance stream.
-    hr_values : sequence of float, optional
+    hr_values : sequence of float
         Heart-rate values aligned to the stream.
 
     Returns
@@ -270,18 +218,12 @@ def compute_run_pace_summary_from_streams(
     the total time spent in each bin alongside the average HR observed in that
     segment.
     """
-    if activity_id is None:
-        return None
-
-    if distance_meters is None or time_seconds is None:
+    if not distance_meters or not time_seconds or not hr_values:
         return None
 
     distance_arr = np.asarray(distance_meters, dtype=float)
     time_arr = np.asarray(time_seconds, dtype=float)
-    hr_arr = np.asarray(hr_values, dtype=float) if hr_values is not None else np.array([])
-
-    if distance_arr.size == 0 or time_arr.size == 0 or hr_arr.size == 0:
-        return None
+    hr_arr = np.asarray(hr_values, dtype=float)
 
     shared_len = min(len(distance_arr), len(time_arr), len(hr_arr))
     if shared_len < 2:
@@ -299,6 +241,7 @@ def compute_run_pace_summary_from_streams(
         curr_time = time_arr[idx]
         hr_value = hr_arr[idx]
 
+        # Skip segments with non-finite distance/time; allow missing HR (nan) for pace-only bins.
         if not np.isfinite(prev_distance) or not np.isfinite(curr_distance):
             continue
         if not np.isfinite(prev_time) or not np.isfinite(curr_time):
@@ -324,7 +267,7 @@ def compute_run_pace_summary_from_streams(
         # Nothing usable was accumulated, so skip the row.
         return None
 
-    summary = {"activity_id": int(activity_id)}
+    summary = {"activity_id": activity_id}
     for label in PACE_BIN_LABELS:
         total_seconds = elapsed_by_bin[label]
         summary[f"seconds_{label}"] = int(round(total_seconds)) if total_seconds > 0 else 0
@@ -338,19 +281,21 @@ def compute_run_pace_summary_from_streams(
 
 def _activity_base_row(act: Dict[str, Any]) -> Dict[str, Any]:
     """Build the shared activity row fields from a raw Strava activity payload."""
+    avg_pace_sec = speed_to_pace_seconds(act["average_speed"])
+    max_pace_sec = speed_to_pace_seconds(act["max_speed"])
     return {
         "activity_id": act["id"],
         "name": act["name"],
         "type": act["type"],
         "date": act["start_date"],
         "distance_miles": round(act["distance"] / MILE_METERS, 2),
-        "moving_time_min": format_duration(act["moving_time"]),
-        "elapsed_time_min": format_duration(act["elapsed_time"]),
+        "moving_time_min": format_time(act["moving_time"], include_hours=True),
+        "elapsed_time_min": format_time(act["elapsed_time"], include_hours=True),
         "elevation_gain_ft": round(act["total_elevation_gain"] / FEET_METERS, 2),
-        "avg_pace": speed_to_pace(act["average_speed"]),
-        "avg_pace_sec": pace_seconds_from_speed(act["average_speed"]),
-        "max_pace": speed_to_pace(act["max_speed"]),
-        "max_pace_sec": pace_seconds_from_speed(act["max_speed"]),
+        "avg_pace": format_time(avg_pace_sec, include_hours=False),
+        "avg_pace_sec": avg_pace_sec,
+        "max_pace": format_time(max_pace_sec, include_hours=False),
+        "max_pace_sec": max_pace_sec,
         "race": None,
     }
 
@@ -396,7 +341,7 @@ def process_activities(
     get_streams : callable
         Function used to fetch activity streams, typically ``StravaClient.get_streams``.
     last_activity_id : str
-        The latest known activity ID; that boundary activity is skipped.
+        Activities with an ID at or below this value are skipped.
 
     Returns
     -------
@@ -408,7 +353,7 @@ def process_activities(
     pace_summaries = []
     for act in tqdm(activities):
         activity_id = act["id"]
-        if activity_id == int(last_activity_id):  # skip the pagination boundary activity
+        if activity_id <= int(last_activity_id):  # skip already-processed activities
             continue
 
         row = _activity_base_row(act)
@@ -426,6 +371,24 @@ def process_activities(
 
 
 ACTIVITY_TYPES = ("Run", "Ride", "Swim", "Hike")
+
+WEEKLY_SUMMARY_COLUMNS = [
+    "type",
+    "date",
+    "distance_miles",
+    "moving_time_min",
+    "elapsed_time_min",
+    "elevation_gain_ft",
+    "avg_pace",
+    "avg_pace_sec",
+    "max_pace",
+    "max_pace_sec",
+    "avg_hr",
+    "max_hr",
+    "%_easy",
+    "mt_min_easy",
+    "mt_min_hard",
+]
 
 
 def activity_analysis_columns(activity_type: str) -> List[str]:
@@ -511,15 +474,6 @@ def update_activity_analysis_csvs(
         existing_df = _drop_header_like_rows(existing_df)
         typed_df = pd.concat([typed_df, existing_df], axis=0, sort=False).drop_duplicates(subset=["activity_id"])
         typed_df = typed_df.drop(columns=["zrfs", "vo2max"], errors="ignore")
-
-        if "avg_pace_sec" not in typed_df.columns:
-            typed_df["avg_pace_sec"] = np.nan
-        if "max_pace_sec" not in typed_df.columns:
-            typed_df["max_pace_sec"] = np.nan
-
-        typed_df["avg_pace_sec"] = typed_df["avg_pace_sec"].fillna(typed_df["avg_pace"].apply(pace_to_seconds))
-        typed_df["max_pace_sec"] = typed_df["max_pace_sec"].fillna(typed_df["max_pace"].apply(pace_to_seconds))
-
         typed_df = typed_df.reindex(columns=activity_analysis_columns(activity_type))
         typed_df.to_csv(filename, index=False)
         print(f"Saved: {filename}")
@@ -595,8 +549,52 @@ def _drop_header_like_rows(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def save_activities_last_week(data_dir: Path, output_path: Path) -> pd.DataFrame:
-    """Create a rolling 7-day summary of the latest activity exports.
+def week_summary_bounds(as_of: Optional[pd.Timestamp] = None) -> Tuple[pd.Timestamp, pd.Timestamp]:
+    """Return the ``[start, end)`` window used for the weekly activity summary.
+
+    Monday through Saturday uses the previous calendar week (Monday-Sunday).
+    Sunday uses the current calendar week (Monday-Sunday).
+
+    Parameters
+    ----------
+    as_of : pandas.Timestamp, optional
+        Reference timestamp. Defaults to the current UTC time.
+
+    Returns
+    -------
+    tuple
+        Inclusive week start (Monday 00:00 UTC) and exclusive week end
+        (following Monday 00:00 UTC).
+    """
+    as_of = as_of or pd.Timestamp.now(tz="UTC")
+    if as_of.tzinfo is None:
+        as_of = as_of.tz_localize("UTC")
+    else:
+        as_of = as_of.tz_convert("UTC")
+
+    today = as_of.normalize()
+    weekday = today.dayofweek  # Monday=0 ... Sunday=6
+
+    if weekday == 6:  # Sunday: current week Mon-Sun
+        week_start = today - pd.Timedelta(days=6)
+        week_end = today + pd.Timedelta(days=1)
+    else:  # Monday-Saturday: previous week Mon-Sun
+        last_sunday = today - pd.Timedelta(days=weekday + 1)
+        week_start = last_sunday - pd.Timedelta(days=6)
+        week_end = last_sunday + pd.Timedelta(days=1)
+
+    return week_start, week_end
+
+
+def save_activities_last_week(
+    data_dir: Path,
+    output_path: Path,
+    as_of: Optional[pd.Timestamp] = None,
+) -> pd.DataFrame:
+    """Create a weekly summary of activity exports for the configured week window.
+
+    Monday through Saturday returns the previous Mon-Sun week. Sunday returns
+    the current Mon-Sun week.
 
     Parameters
     ----------
@@ -604,11 +602,13 @@ def save_activities_last_week(data_dir: Path, output_path: Path) -> pd.DataFrame
         Directory containing the per-type ``strava_<type>_analysis.csv`` files.
     output_path : pathlib.Path
         Destination CSV file for the weekly summary.
+    as_of : pandas.Timestamp, optional
+        Reference timestamp for choosing the week window. Defaults to now (UTC).
 
     Returns
     -------
     pandas.DataFrame
-        A dataframe containing the 7-day rolling activity summary.
+        A dataframe containing the weekly activity summary.
 
     This is used to produce the weekly CSV consumed by the analytics workflow.
     """
@@ -624,69 +624,21 @@ def save_activities_last_week(data_dir: Path, output_path: Path) -> pd.DataFrame
 
     if not frames:
         # Create an empty weekly summary schema when no input files are available.
-        combined = pd.DataFrame(columns=[
-            "type",
-            "date",
-            "distance_miles",
-            "moving_time_min",
-            "elapsed_time_min",
-            "elevation_gain_ft",
-            "avg_pace",
-            "avg_pace_sec",
-            "max_pace",
-            "max_pace_sec",
-            "avg_hr",
-            "max_hr",
-            "%_easy",
-            "mt_min_easy",
-            "mt_min_hard",
-        ])
+        combined = pd.DataFrame(columns=WEEKLY_SUMMARY_COLUMNS)
     else:
         combined = pd.concat(frames, ignore_index=True, sort=False)
 
     if "date" in combined.columns:
         combined["date"] = pd.to_datetime(combined["date"], errors="coerce", utc=True)
         combined = combined.dropna(subset=["date"]).copy()
-
-    if "avg_pace_sec" not in combined.columns:
-        combined["avg_pace_sec"] = np.nan
-    if "max_pace_sec" not in combined.columns:
-        combined["max_pace_sec"] = np.nan
-    if "avg_pace" not in combined.columns:
-        combined["avg_pace"] = np.nan
-    if "max_pace" not in combined.columns:
-        combined["max_pace"] = np.nan
-
-    combined["avg_pace_sec"] = combined["avg_pace_sec"].fillna(combined["avg_pace"].apply(pace_to_seconds))
-    combined["max_pace_sec"] = combined["max_pace_sec"].fillna(combined["max_pace"].apply(pace_to_seconds))
-
-    if "date" in combined.columns:
-        end_dt = pd.Timestamp.now(tz="UTC")
-        start_dt = end_dt - pd.Timedelta(days=7)
+        start_dt, end_dt = week_summary_bounds(as_of)
         combined = combined[
             (combined["date"] >= start_dt) &
-            (combined["date"] <= end_dt)
+            (combined["date"] < end_dt)
         ]
         combined = combined.sort_values("date", ascending=True).reset_index(drop=True)
         combined["date"] = combined["date"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    columns = [
-        "type",
-        "date",
-        "distance_miles",
-        "moving_time_min",
-        "elapsed_time_min",
-        "elevation_gain_ft",
-        "avg_pace",
-        "avg_pace_sec",
-        "max_pace",
-        "max_pace_sec",
-        "avg_hr",
-        "max_hr",
-        "%_easy",
-        "mt_min_easy",
-        "mt_min_hard",
-    ]
-    combined = combined.reindex(columns=columns)
+    combined = combined.reindex(columns=WEEKLY_SUMMARY_COLUMNS)
     combined.to_csv(output_path, index=False, mode="w")
     return combined
