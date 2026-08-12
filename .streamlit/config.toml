@@ -1,0 +1,4 @@
+[client]
+# Minimal toolbar; sidebar nav must stay enabled for st.navigation(position="sidebar").
+toolbarMode = "minimal"
+showSidebarNavigation = true

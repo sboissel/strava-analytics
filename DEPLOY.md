@@ -48,3 +48,15 @@ Recommended workflow:
 3. GitLab push mirror syncs to GitHub.
 
 Do not push directly to GitHub unless you also merge back to GitLab, or the mirrors will diverge.
+
+## 4. Streamlit Community Cloud
+
+The dashboard can run publicly from the GitHub mirror without Strava API secrets (it reads committed CSVs only).
+
+1. Sign in at [share.streamlit.io](https://share.streamlit.io) with GitHub.
+2. **Create app** → **From existing repo** → `sboissel/strava-analytics`.
+3. Set **Main file path** to `dashboard/streamlit_app.py`, branch `main`, Python **3.11**.
+4. Leave **Secrets** empty.
+5. Deploy and confirm **Training Overview** loads charts.
+
+Requirements are installed from root [`requirements.txt`](requirements.txt) (includes `streamlit` and `plotly`). After the Sunday GitLab sync and mirror push, Streamlit Cloud redeploys with updated `data/` files.

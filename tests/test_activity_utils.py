@@ -509,6 +509,43 @@ class CsvProcessingTests(unittest.TestCase):
             for path in activity_analysis_paths(output_dir):
                 self.assertIn("# sentinel", path.read_text())
 
+    def test_update_activity_analysis_csvs_creates_missing_file(self):
+        """Ensure missing analysis CSVs are created on first update."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            new_df = pd.DataFrame(
+                [
+                    {
+                        "activity_id": 123,
+                        "name": "New Run",
+                        "type": "Run",
+                        "date": "2024-02-01T00:00:00Z",
+                        "distance_miles": 1.0,
+                        "moving_time_min": "00:10:00",
+                        "elapsed_time_min": "00:10:00",
+                        "elevation_gain_ft": 0.0,
+                        "avg_pace": "10:00",
+                        "avg_pace_sec": 600,
+                        "max_pace": "09:00",
+                        "max_pace_sec": 540,
+                        "avg_hr": 140.0,
+                        "max_hr": 160,
+                        "%_easy": 50.0,
+                        "mt_min_easy": 5.0,
+                        "mt_min_hard": 5.0,
+                        "race": False,
+                    }
+                ]
+            )
+
+            update_activity_analysis_csvs(new_df, output_dir)
+
+            run_path = output_dir / "strava_run_analysis.csv"
+            self.assertTrue(run_path.exists())
+            run_df = pd.read_csv(run_path)
+            self.assertEqual(len(run_df), 1)
+            self.assertEqual(str(run_df.iloc[0]["activity_id"]), "123")
+
     def test_update_run_pace_analysis_csv_writes_summaries(self):
         """Ensure the pace-analysis CSV file is populated from precomputed summaries."""
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -73,9 +73,33 @@ In GitLab → **Build → Pipeline schedules**:
 
 The `sync` job runs only for scheduled pipelines; the `test` job still runs on normal pushes.
 
+## Runner's Dashboard
+
+A Streamlit app under [`dashboard/`](dashboard) mirrors the Tableau training overview (with Insights and Race pages stubbed for next).
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+streamlit run dashboard/streamlit_app.py
+```
+
+### Streamlit Community Cloud
+
+Deploy from GitHub at [share.streamlit.io](https://share.streamlit.io):
+
+| Setting | Value |
+| ------- | ----- |
+| Repository | `sboissel/strava-analytics` |
+| Branch | `main` |
+| Main file | `dashboard/streamlit_app.py` |
+| Python | 3.11 |
+| Secrets | None required (reads committed CSVs in `data/`) |
+
+Data updates when the GitLab weekly sync commits to `main` and the GitLab→GitHub mirror pushes. See [DEPLOY.md](DEPLOY.md).
+
 ## Running the tests
 
 ```bash
+pip install -r requirements.txt -r requirements-dev.txt
 pytest
 ```
 

@@ -25,7 +25,10 @@ def last_activity_id_path(data_dir: Path) -> Path:
 
 def read_last_activity_id(data_dir: Path) -> str:
     """Read the last known activity ID from disk."""
-    return last_activity_id_path(data_dir).read_text().strip()
+    path = last_activity_id_path(data_dir)
+    if not path.exists():
+        return "0"
+    return path.read_text().strip()
 
 
 def write_last_activity_id(data_dir: Path, activity_id: Union[int, str]) -> None:
@@ -129,8 +132,11 @@ class StravaClient:
             url = "https://www.strava.com/api/v3/athlete/activities"
             params = {"per_page": 100, "page": page}
 
-            res = requests.get(url, headers=headers, params=params)
-            res.raise_for_status()
+            res = requests.get(url, headers=headers, params=params, timeout=30)
+            if res.status_code != 200:
+                raise RuntimeError(
+                    f"Strava activities request failed: {res.status_code} {res.text[:200]}"
+                )
 
             data = res.json()
             if not data:
@@ -176,7 +182,7 @@ class StravaClient:
             "key_by_type": "true",
         }
 
-        res = requests.get(url, headers=headers, params=params)
+        res = requests.get(url, headers=headers, params=params, timeout=30)
         if res.status_code != 200:
             raise RuntimeError(f"Strava streams request failed: {res.status_code} {res.text[:200]}")
 

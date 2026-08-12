@@ -12,7 +12,7 @@ test:
       when: never
     - when: on_success
   script:
-    - pip install -r requirements.txt
+    - pip install -r requirements.txt -r requirements-dev.txt
     - pytest -q --cov=strava_analytics --cov-report=term-missing
 
 sync:
@@ -23,7 +23,7 @@ sync:
     GIT_DEPTH: "0"
   before_script:
     - apt-get update -qq && apt-get install -y -qq git
-    - pip install -r requirements.txt
+    - pip install -r requirements-pipeline.txt
   script:
     - |
       if [ -z "${CI_PUSH_TOKEN}" ]; then

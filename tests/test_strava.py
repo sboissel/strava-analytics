@@ -33,6 +33,12 @@ class LastActivityIdHelperTests(unittest.TestCase):
             write_last_activity_id(data_dir, 123)
             self.assertEqual(read_last_activity_id(data_dir), "123")
 
+    def test_read_last_activity_id_returns_zero_when_missing(self):
+        """Ensure a missing last-activity-id file defaults to zero."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            self.assertEqual(read_last_activity_id(data_dir), "0")
+
 
 class StravaClientTests(unittest.TestCase):
     """Test StravaClient methods in source-file order."""

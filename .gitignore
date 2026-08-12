@@ -1,9 +1,30 @@
 __pycache__/
 *.py[cod]
+*$py.class
 
 .venv/
+.env
+.env.*
+
 .pytest_cache/
 .coverage
 .coverage.*
 htmlcov/
+
+# Python packaging
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+
+# Streamlit — never commit secrets (config.toml is OK to track)
+**/.streamlit/secrets.toml
+
+# Local debug artifacts
+dashboard/_debug_*.png
+
 .DS_Store

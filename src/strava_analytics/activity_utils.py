@@ -426,7 +426,6 @@ def activity_analysis_columns(activity_type: str) -> List[str]:
             "mt_min_easy",
             "mt_min_hard",
             "race",
-            "race_distance",
         ]
     return base_columns
 
@@ -470,8 +469,11 @@ def update_activity_analysis_csvs(
         if typed_df.empty:
             continue
 
-        existing_df = pd.read_csv(filename, dtype=str, keep_default_na=False)
-        existing_df = _drop_header_like_rows(existing_df)
+        if filename.exists():
+            existing_df = pd.read_csv(filename, dtype=str, keep_default_na=False)
+            existing_df = _drop_header_like_rows(existing_df)
+        else:
+            existing_df = pd.DataFrame(columns=activity_analysis_columns(activity_type))
         typed_df = pd.concat([typed_df, existing_df], axis=0, sort=False)
         typed_df["activity_id"] = typed_df["activity_id"].astype(str)
         typed_df = typed_df.drop_duplicates(subset=["activity_id"])
