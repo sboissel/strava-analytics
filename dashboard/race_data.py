@@ -18,6 +18,8 @@ from strava_analytics.activity_utils import race_distance_label
 
 RACE_TYPE_ORDER = ["5k", "5M", "10k", "Half", "Marathon", "Other"]
 PRS_ONLY_FILTER = "PRs only"
+# Bump when derived race columns change so Streamlit cache invalidates.
+_RACE_LOADER_VERSION = 2
 
 
 def parse_duration_minutes(value: object) -> float | None:
@@ -108,25 +110,48 @@ def _load_race_results_uncached(data_dir: Path) -> pd.DataFrame:
         for _, row in races.iterrows()
     ]
     races["elapsed_min"] = races["elapsed_time_min"].map(parse_duration_minutes)
-    valid_pace = (
-        races["elapsed_min"].notna()
-        & races["distance_miles"].notna()
-        & (races["distance_miles"] > 0)
-    )
-    races["pace_min"] = np.nan
-    races.loc[valid_pace, "pace_min"] = (
-        races.loc[valid_pace, "elapsed_min"] / races.loc[valid_pace, "distance_miles"]
-    )
-    races["elapsed_pace"] = [
-        format_pace_from_minutes(elapsed, dist)
-        for elapsed, dist in zip(races["elapsed_min"], races["distance_miles"], strict=False)
-    ]
+    races = _add_pace_columns(races)
     races = mark_personal_records(races)
     return races.sort_values("date", ascending=False).reset_index(drop=True)
 
 
+def _add_pace_columns(races: pd.DataFrame) -> pd.DataFrame:
+    """Compute numeric and display pace columns from elapsed time and distance."""
+    if races.empty:
+        return races
+
+    out = races.copy()
+    if "elapsed_min" not in out.columns and "elapsed_time_min" in out.columns:
+        out["elapsed_min"] = out["elapsed_time_min"].map(parse_duration_minutes)
+
+    valid_pace = (
+        out["elapsed_min"].notna()
+        & out["distance_miles"].notna()
+        & (out["distance_miles"] > 0)
+    )
+    out["pace_min"] = np.nan
+    out.loc[valid_pace, "pace_min"] = (
+        out.loc[valid_pace, "elapsed_min"] / out.loc[valid_pace, "distance_miles"]
+    )
+    out["elapsed_pace"] = [
+        format_pace_from_minutes(elapsed, dist)
+        for elapsed, dist in zip(out["elapsed_min"], out["distance_miles"], strict=False)
+    ]
+    return out
+
+
+def ensure_race_pace_min(races: pd.DataFrame) -> pd.DataFrame:
+    """Backfill pace_min when missing, e.g. from a stale Streamlit cache entry."""
+    if races.empty or "pace_min" in races.columns:
+        return races
+    return _add_pace_columns(races)
+
+
 @st.cache_data(show_spinner=False)
-def _load_race_results_cached(csv_mtime: float, data_dir_str: str) -> pd.DataFrame:
+def _load_race_results_cached(
+    csv_mtime: float, data_dir_str: str, loader_version: int
+) -> pd.DataFrame:
+    del loader_version
     return _load_race_results_uncached(Path(data_dir_str))
 
 
@@ -134,7 +159,7 @@ def load_race_results(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     """Load race activities with parsed times, types, and PR flags."""
     path = data_dir / "strava_run_analysis.csv"
     mtime = path.stat().st_mtime if path.exists() else 0.0
-    return _load_race_results_cached(mtime, str(data_dir))
+    return _load_race_results_cached(mtime, str(data_dir), _RACE_LOADER_VERSION)
 
 
 def race_type_options(races: pd.DataFrame) -> list[str]:

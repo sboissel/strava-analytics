@@ -14,7 +14,7 @@ except ImportError:
     import _bootstrap  # noqa: F401
 
 from data import format_full_date
-from race_data import RACE_TYPE_ORDER
+from race_data import RACE_TYPE_ORDER, ensure_race_pace_min
 from theme import (
     CHART_TITLE_FONT_WEIGHT,
     CHART_TITLE_SIZE_PX,
@@ -602,6 +602,9 @@ def race_results_scatter(
     if races.empty:
         fig.update_layout(title=_title(title), **CHART_LAYOUT)
         return fig
+
+    if metric == "pace":
+        races = ensure_race_pace_min(races)
 
     work = races.dropna(subset=[y_col]).copy()
     if work.empty:

@@ -6,6 +6,7 @@ import pandas as pd
 
 from dashboard.data import format_full_date
 from dashboard.race_data import (
+    ensure_race_pace_min,
     filter_race_results,
     mark_personal_records,
     parse_duration_minutes,
@@ -59,6 +60,26 @@ class PersonalRecordTests(unittest.TestCase):
         )
         result = mark_personal_records(races)
         self.assertTrue(result["is_pr"].all())
+
+
+class EnsureRacePaceMinTests(unittest.TestCase):
+    """Backfill pace_min for dataframes loaded before the column existed."""
+
+    def test_adds_pace_min_when_missing(self):
+        races = pd.DataFrame(
+            {
+                "elapsed_min": [39.0, 47.0],
+                "distance_miles": [3.1, 6.2],
+            }
+        )
+        result = ensure_race_pace_min(races)
+        self.assertIn("pace_min", result.columns)
+        self.assertAlmostEqual(result.loc[0, "pace_min"], 39.0 / 3.1, places=4)
+
+    def test_leaves_existing_pace_min_unchanged(self):
+        races = pd.DataFrame({"pace_min": [8.0]})
+        result = ensure_race_pace_min(races)
+        pd.testing.assert_frame_equal(result, races)
 
 
 class FilterRaceResultsTests(unittest.TestCase):
