@@ -30,7 +30,7 @@ sync:
         echo "CI_PUSH_TOKEN is required to commit data/ back to the repository."
         exit 1
       fi
-    - PYTHONPATH=src python -m strava_analytics.strava
+    - PYTHONPATH=src python -m strava_analytics.pipeline
     - |
       if git diff --quiet -- data/ && [ -z "$(git ls-files --others --exclude-standard -- data/)" ]; then
         echo "No data changes to commit."

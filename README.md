@@ -10,7 +10,7 @@ Versioning follows [Semantic Versioning](https://semver.org/); see [CHANGELOG.md
 
 ## What the pipeline does
 
-The main script in [`src/strava_analytics/strava.py`](src/strava_analytics/strava.py) refreshes a Strava API token, downloads recent activities, processes each activity, and writes several CSV files into the [data](data) folder:
+The main script in [`src/strava_analytics/pipeline.py`](src/strava_analytics/pipeline.py) refreshes a Strava API token, downloads recent activities, processes each activity, and writes several CSV files into the [data](data) folder:
 
 - [data/strava_run_analysis.csv](data/strava_run_analysis.csv): run-specific enrichment including pace, HR, and easy/hard time metrics
 - [data/strava_ride_analysis.csv](data/strava_ride_analysis.csv): ride exports
@@ -18,6 +18,7 @@ The main script in [`src/strava_analytics/strava.py`](src/strava_analytics/strav
 - [data/strava_hike_analysis.csv](data/strava_hike_analysis.csv): hike exports
 - [data/strava_run_pace_analysis.csv](data/strava_run_pace_analysis.csv): per-run pace-bin summaries keyed by activity ID
 - [data/activities_last_week.csv](data/activities_last_week.csv): a rolling 7-day summary of recent activity data
+- [data/strava_gear.csv](data/strava_gear.csv): shoe mileage (Strava gear distance plus pre-tracking baselines); active shoes are refreshed each run, retired rows are kept but not updated
 
 ## Requirements
 
@@ -41,7 +42,7 @@ The script expects these environment variables to be defined before it runs:
 From the repository root:
 
 ```bash
-PYTHONPATH=src python -m strava_analytics.strava
+PYTHONPATH=src python -m strava_analytics.pipeline
 ```
 
 The script will refresh the access token, fetch activities, and rewrite the CSV outputs in the data directory.

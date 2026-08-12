@@ -13,7 +13,7 @@ try:
 except ImportError:
     import _bootstrap  # noqa: F401
 
-from strava_analytics.activity_utils import last_full_week_bounds
+from strava_analytics.activities import last_full_week_bounds
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"

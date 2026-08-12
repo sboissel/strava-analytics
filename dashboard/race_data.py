@@ -14,7 +14,7 @@ except ImportError:
     import _bootstrap  # noqa: F401
 
 from data import DATA_DIR, format_full_date, latest_activity_label, load_runs, normalize_utc
-from strava_analytics.activity_utils import race_distance_label
+from strava_analytics.activities import race_distance_label
 
 RACE_TYPE_ORDER = ["5k", "5M", "10k", "Half", "Marathon", "Other"]
 PRS_ONLY_FILTER = "PRs only"

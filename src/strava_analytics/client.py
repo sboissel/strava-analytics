@@ -1,4 +1,6 @@
-"""Strava API client and pipeline entrypoint for refreshing tokens and syncing activities."""
+"""Thin Strava OAuth and API client."""
+
+from __future__ import annotations
 
 import os
 import time
@@ -7,37 +9,13 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 import requests
 
-from strava_analytics.activity_utils import (
-    process_activities,
-    save_activities_last_week,
-    update_activity_analysis_csvs,
-    update_run_pace_analysis_csv,
-)
+from strava_analytics.csv_io import read_last_activity_id
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-LAST_ACTIVITY_ID_FILENAME = "highest_activity_id.txt"
-
-
-def last_activity_id_path(data_dir: Path) -> Path:
-    """Return the path to the saved last-activity-id file."""
-    return data_dir / LAST_ACTIVITY_ID_FILENAME
-
-
-def read_last_activity_id(data_dir: Path) -> str:
-    """Read the last known activity ID from disk."""
-    path = last_activity_id_path(data_dir)
-    if not path.exists():
-        return "0"
-    return path.read_text().strip()
-
-
-def write_last_activity_id(data_dir: Path, activity_id: Union[int, str]) -> None:
-    """Persist the last known activity ID to disk."""
-    last_activity_id_path(data_dir).write_text(str(activity_id))
 
 
 class StravaClient:
-    """Thin client for Strava OAuth and activity API calls."""
+    """Thin client for Strava OAuth and activity/gear API calls."""
 
     def __init__(
         self,
@@ -188,44 +166,30 @@ class StravaClient:
 
         return res.json()
 
+    def get_gear(self, gear_id: str) -> Dict[str, Any]:
+        """Retrieve a Strava gear (shoe/bike) record by ID.
 
-def main(data_dir: Optional[Path] = None) -> None:
-    """Run the Strava analytics pipeline.
+        Parameters
+        ----------
+        gear_id : str
+            The Strava gear identifier (for example ``g33031373``).
 
-    Parameters
-    ----------
-    data_dir : pathlib.Path, optional
-        Directory for activity CSVs and the last-activity-id file. Defaults to
-        ``data`` under the repository root.
-    """
-    data_dir = data_dir or (REPO_ROOT / "data")
+        Returns
+        -------
+        dict
+            Gear payload including ``distance`` (meters) and ``retired``.
 
-    client = StravaClient.from_env(data_dir=data_dir)
-    client.refresh_access_token()
-    print("Token refreshed")
+        Raises
+        ------
+        RuntimeError
+            If the API request fails.
+        """
+        access_token = self._require_access_token()
+        url = f"https://www.strava.com/api/v3/gear/{gear_id}"
+        headers = {"Authorization": f"Bearer {access_token}"}
 
-    print("Getting activities...")
-    activities = client.get_activities()
+        res = requests.get(url, headers=headers, timeout=30)
+        if res.status_code != 200:
+            raise RuntimeError(f"Strava gear request failed: {res.status_code} {res.text[:200]}")
 
-    print(f"Processing {len(activities)} activities...")
-    df, pace_summaries = process_activities(
-        activities, client.get_streams, client.last_activity_id
-    )
-
-    if df.empty:
-        print("No new activities to process.")
-    else:
-        update_activity_analysis_csvs(df, data_dir)
-        write_last_activity_id(data_dir, df["activity_id"].max())
-
-        pace_output = data_dir / "strava_run_pace_analysis.csv"
-        update_run_pace_analysis_csv(pace_summaries, pace_output)
-        print(f"Saved run pace summary: {pace_output}")
-
-    weekly_output = data_dir / "activities_last_week.csv"
-    save_activities_last_week(data_dir, weekly_output)
-    print(f"Saved weekly summary: {weekly_output}")
-
-
-if __name__ == "__main__":
-    main()
+        return res.json()

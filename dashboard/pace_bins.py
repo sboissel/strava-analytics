@@ -7,7 +7,7 @@ try:
 except ImportError:
     import _bootstrap  # noqa: F401
 
-from strava_analytics.activity_utils import PACE_BIN_LABELS
+from strava_analytics.activities import PACE_BIN_LABELS
 
 PACE_BIN_DISPLAY_LABELS: dict[str, str] = {
     "under_700": "Under 7:00",

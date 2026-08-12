@@ -6,26 +6,28 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pandas as pd
 
-from strava_analytics.activity_utils import (
+from strava_analytics.activities import (
     HR_EASY_THRESHOLD,
     _activity_base_row,
-    _drop_header_like_rows,
     _enrich_run_from_streams,
-    activity_analysis_columns,
-    activity_analysis_paths,
     compute_hr_easy_stats,
     compute_run_pace_summary_from_streams,
     format_time,
+    last_full_week_bounds,
     pace_bin_for_seconds,
     process_activities,
-    run_pace_columns,
-    save_activities_last_week,
-    speed_to_pace_seconds,
-    last_full_week_bounds,
     race_distance_label,
+    run_pace_columns,
+    speed_to_pace_seconds,
+    week_summary_bounds,
+)
+from strava_analytics.csv_io import (
+    _drop_header_like_rows,
+    activity_analysis_columns,
+    activity_analysis_paths,
+    save_activities_last_week,
     update_activity_analysis_csvs,
     update_run_pace_analysis_csv,
-    week_summary_bounds,
 )
 
 
@@ -333,7 +335,7 @@ class ActivityProcessingTests(unittest.TestCase):
 
         get_streams = Mock(side_effect=get_streams_side_effect)
 
-        with patch("strava_analytics.activity_utils.time.sleep", return_value=None):
+        with patch("strava_analytics.activities.time.sleep", return_value=None):
             result, pace_summaries = process_activities(
                 activities, get_streams, last_activity_id="100"
             )
@@ -385,7 +387,7 @@ class ActivityProcessingTests(unittest.TestCase):
         ]
         get_streams = Mock(return_value={"heartrate": {"data": []}, "distance": {"data": []}, "time": {"data": []}})
 
-        with patch("strava_analytics.activity_utils.time.sleep", return_value=None):
+        with patch("strava_analytics.activities.time.sleep", return_value=None):
             result, _ = process_activities(activities, get_streams, last_activity_id="0")
 
         self.assertEqual(result.loc[result["activity_id"] == 301, "race_distance"].iloc[0], "5k")
