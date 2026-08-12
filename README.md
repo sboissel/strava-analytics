@@ -2,6 +2,7 @@
 
 [![pipeline status](https://gitlab.com/sandrineboissel/strava-analytics/badges/main/pipeline.svg)](https://gitlab.com/sandrineboissel/strava-analytics/-/commits/main)
 [![coverage report](https://gitlab.com/sandrineboissel/strava-analytics/badges/main/coverage.svg)](https://gitlab.com/sandrineboissel/strava-analytics/-/commits/main)
+[![version](https://img.shields.io/gitlab/v/tag/sandrineboissel/strava-analytics?sort=semver&label=version)](https://gitlab.com/sandrineboissel/strava-analytics/-/tags)
 
 This repository collects Strava activity exports, enriches them with pace and HR summaries, and writes CSV files for weekly analysis and run pace breakdowns.
 
