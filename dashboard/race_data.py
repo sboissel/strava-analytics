@@ -12,7 +12,7 @@ try:
 except ImportError:
     import _bootstrap  # noqa: F401
 
-from data import DATA_DIR, latest_activity_label, load_runs
+from data import DATA_DIR, format_full_date, latest_activity_label, load_runs, normalize_utc
 from strava_analytics.activity_utils import race_distance_label
 
 RACE_TYPE_ORDER = ["5k", "5M", "10k", "Half", "Marathon", "Other"]
@@ -39,26 +39,6 @@ def parse_duration_minutes(value: object) -> float | None:
     else:
         return None
     return hours * 60.0 + minutes + seconds / 60.0
-
-
-def format_race_time_hmm(minutes: float | None) -> str:
-    """Format minutes as h:mm (or m:ss when under one hour)."""
-    if minutes is None or pd.isna(minutes):
-        return "—"
-    total_seconds = int(round(float(minutes) * 60))
-    hours, rem = divmod(total_seconds, 3600)
-    mins, secs = divmod(rem, 60)
-    if hours > 0:
-        return f"{hours}:{mins:02d}"
-    return f"{mins}:{secs:02d}"
-
-
-def format_race_date(ts: pd.Timestamp) -> str:
-    """Format a race date like January 1, 2026 (platform-safe, no %-d)."""
-    stamp = pd.Timestamp(ts)
-    if stamp.tzinfo is not None:
-        stamp = stamp.tz_convert("UTC")
-    return f"{stamp.strftime('%B')} {stamp.day}, {stamp.year}"
 
 
 def format_pace_from_minutes(minutes: float | None, distance_miles: float | None) -> str:
@@ -180,20 +160,12 @@ def filter_race_results(
             out = out.loc[out["race_type"] == race_type]
 
     if start is not None:
-        start_ts = pd.Timestamp(start)
-        if start_ts.tzinfo is None:
-            start_ts = start_ts.tz_localize("UTC")
-        else:
-            start_ts = start_ts.tz_convert("UTC")
-        out = out.loc[out["date"] >= start_ts.normalize()]
+        start_ts = normalize_utc(pd.Timestamp(start))
+        out = out.loc[out["date"] >= start_ts]
 
     if end is not None:
-        end_ts = pd.Timestamp(end)
-        if end_ts.tzinfo is None:
-            end_ts = end_ts.tz_localize("UTC")
-        else:
-            end_ts = end_ts.tz_convert("UTC")
-        out = out.loc[out["date"] <= end_ts.normalize() + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)]
+        end_ts = normalize_utc(pd.Timestamp(end))
+        out = out.loc[out["date"] <= end_ts + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)]
 
     return out.sort_values("date").reset_index(drop=True)
 

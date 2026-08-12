@@ -17,13 +17,14 @@ from data import (
     DATA_DIR,
     PERIOD_CONFIG,
     PeriodGrain,
-    _format_full_date,
-    _format_full_month,
-    _reference_end,
+    format_full_month,
+    normalize_utc,
+    reference_end,
     current_period_key,
     filter_to_recent_periods,
     generate_period_index,
     load_runs,
+    window_mask,
 )
 
 MONTH_COLUMNS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -47,12 +48,7 @@ DAY_COLUMNS = [str(day) for day in range(1, 32)]
 
 
 def _normalize_as_of(runs: pd.DataFrame, as_of: pd.Timestamp | None) -> pd.Timestamp:
-    end = as_of or _reference_end(runs)
-    if end.tzinfo is None:
-        end = end.tz_localize("UTC")
-    else:
-        end = end.tz_convert("UTC")
-    return end.normalize()
+    return normalize_utc(as_of or reference_end(runs))
 
 
 def _filter_runs_in_window(
@@ -60,18 +56,18 @@ def _filter_runs_in_window(
 ) -> pd.DataFrame:
     if runs.empty:
         return runs
-    return runs.loc[(runs["date"] >= start) & (runs["date"] < end)].copy()
+    return runs.loc[window_mask(runs, start, end)].copy()
 
 
 def _month_tooltip_label(month_key: str) -> str:
     """Full month label from a YYYY-MM key (e.g. March 2026)."""
-    return _format_full_month(pd.Timestamp(f"{month_key}-01", tz="UTC"))
+    return format_full_month(pd.Timestamp(f"{month_key}-01", tz="UTC"))
 
 
 def _day_tooltip_label(month_key: str, day: int) -> str:
     """Full calendar date from month key and day-of-month (e.g. March 14, 2026)."""
     year_str, _month_str = month_key.split("-")
-    month_name = _format_full_month(pd.Timestamp(f"{month_key}-01", tz="UTC")).split()[0]
+    month_name = format_full_month(pd.Timestamp(f"{month_key}-01", tz="UTC")).split()[0]
     return f"{month_name} {day}, {year_str}"
 
 
@@ -112,11 +108,6 @@ def _load_pace_runs_cached(csv_mtime: float, runs_mtime: float, data_dir_str: st
     return _load_pace_runs_uncached(Path(data_dir_str))
 
 
-def load_pace_analysis(data_dir: Path = DATA_DIR) -> pd.DataFrame:
-    """Alias for load_pace_runs (pace analysis rows with activity dates)."""
-    return load_pace_runs(data_dir)
-
-
 def load_pace_runs(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     """Load pace analysis rows merged with activity dates."""
     pace_path = data_dir / "strava_run_pace_analysis.csv"
@@ -137,14 +128,7 @@ def aggregate_pace_hr_by_period(
     seconds_col = f"seconds_{bin_key}"
     hr_col = f"avg_hr_{bin_key}"
     n = int(PERIOD_CONFIG[grain]["count"])
-    end = as_of
-    if end is None:
-        end = _reference_end(pace_runs)
-    elif end.tzinfo is None:
-        end = end.tz_localize("UTC")
-    else:
-        end = end.tz_convert("UTC")
-    end = end.normalize()
+    end = normalize_utc(as_of) if as_of is not None else reference_end(pace_runs)
 
     full_index = generate_period_index(grain, end, n)
     current_key = current_period_key(grain, end)
@@ -225,7 +209,7 @@ def _month_calendar_matrix(
     tooltips = np.full((len(years), len(MONTH_COLUMNS)), "", dtype=object)
     for y_idx, year in enumerate(years):
         for m_idx in range(len(MONTH_COLUMNS)):
-            tooltips[y_idx, m_idx] = _format_full_month(
+            tooltips[y_idx, m_idx] = format_full_month(
                 pd.Timestamp(year=year, month=m_idx + 1, day=1, tz="UTC")
             )
 

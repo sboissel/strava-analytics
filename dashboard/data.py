@@ -60,32 +60,61 @@ def latest_activity_label(df: pd.DataFrame) -> str:
     return f"{latest.month}/{latest.day}/{latest.year}"
 
 
+def format_full_date(ts: pd.Timestamp) -> str:
+    """Format a timestamp as a full calendar date (e.g. January 1, 2026)."""
+    stamp = pd.Timestamp(ts)
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("UTC")
+    return f"{stamp.strftime('%B')} {stamp.day}, {stamp.year}"
+
+
+def format_full_month(ts: pd.Timestamp) -> str:
+    """Format a timestamp as full month and year (e.g. January 2026)."""
+    return f"{ts.strftime('%B')} {ts.year}"
+
+
+def normalize_utc(ts: pd.Timestamp) -> pd.Timestamp:
+    """Normalize a timestamp to UTC midnight."""
+    stamp = pd.Timestamp(ts)
+    if stamp.tzinfo is None:
+        stamp = stamp.tz_localize("UTC")
+    else:
+        stamp = stamp.tz_convert("UTC")
+    return stamp.normalize()
+
+
+def window_mask(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
+    """Return rows with date in [start, end)."""
+    return (df["date"] >= start) & (df["date"] < end)
+
+
 def _format_mdy_label(dates: pd.Series) -> pd.Series:
     """Format timestamps as abbreviated month-day-year (e.g. Jan 6, 26)."""
     return dates.dt.strftime("%b ") + dates.dt.day.astype(str) + dates.dt.strftime(", %y")
 
 
-def _format_full_date(ts: pd.Timestamp) -> str:
-    """Format a timestamp as a full calendar date (e.g. January 1, 2026)."""
-    return f"{ts.strftime('%B')} {ts.day}, {ts.year}"
-
-
-def _format_full_month(ts: pd.Timestamp) -> str:
-    """Format a timestamp as full month and year (e.g. January 2026)."""
-    return f"{ts.strftime('%B')} {ts.year}"
-
-
 def period_tooltip_label(period_key: str, grain: PeriodGrain) -> str:
     """Return a full-date hover label for a sortable period key."""
     if grain == "Day":
-        return _format_full_date(pd.Timestamp(period_key, tz="UTC"))
+        return format_full_date(pd.Timestamp(period_key, tz="UTC"))
     if grain == "Week":
         year_str, week_str = period_key.split("-")
         monday = pd.Timestamp.fromisocalendar(int(year_str), int(week_str), 1).tz_localize("UTC")
-        return _format_full_date(monday)
+        return format_full_date(monday)
     if grain == "Month":
-        return _format_full_month(pd.Timestamp(f"{period_key}-01", tz="UTC"))
+        return format_full_month(pd.Timestamp(f"{period_key}-01", tz="UTC"))
     return period_key
+
+
+def with_period_columns(df: pd.DataFrame, grain: PeriodGrain) -> pd.DataFrame:
+    """Attach sortable period key/label columns used by aggregators."""
+    if df.empty:
+        return df
+    work = df.copy()
+    key, label = _period_key_and_label(work["date"], grain)
+    work["_period_key"] = key
+    work["_period_label"] = label
+    return work
 
 
 def _period_key_and_label(dates: pd.Series, grain: PeriodGrain) -> tuple[pd.Series, pd.Series]:
@@ -111,24 +140,16 @@ def _period_key_and_label(dates: pd.Series, grain: PeriodGrain) -> tuple[pd.Seri
 
 def current_period_key(grain: PeriodGrain, as_of: pd.Timestamp) -> str:
     """Return the period_key for the calendar period containing as_of."""
-    if as_of.tzinfo is None:
-        as_of = as_of.tz_localize("UTC")
-    else:
-        as_of = as_of.tz_convert("UTC")
-    key, _ = _period_key_and_label(pd.Series([as_of.normalize()]), grain)
+    as_of = normalize_utc(as_of)
+    key, _ = _period_key_and_label(pd.Series([as_of]), grain)
     return key.iloc[0]
 
 
-def _reference_end(df: pd.DataFrame) -> pd.Timestamp:
+def reference_end(df: pd.DataFrame) -> pd.Timestamp:
     """Return the latest activity date normalized to UTC midnight."""
     if df.empty:
         return pd.Timestamp.now(tz="UTC").normalize()
-    as_of = df["date"].max()
-    if as_of.tzinfo is None:
-        as_of = as_of.tz_localize("UTC")
-    else:
-        as_of = as_of.tz_convert("UTC")
-    return as_of.normalize()
+    return normalize_utc(df["date"].max())
 
 
 def generate_period_index(
@@ -164,7 +185,7 @@ def filter_to_recent_periods(df: pd.DataFrame, grain: PeriodGrain) -> pd.DataFra
     if df.empty:
         return df
 
-    end = _reference_end(df)
+    end = reference_end(df)
     n = int(PERIOD_CONFIG[grain]["count"])
     keep_keys = set(generate_period_index(grain, end, n)["period_key"])
 
@@ -183,14 +204,7 @@ def aggregate_period_metrics(
 ) -> pd.DataFrame:
     """Aggregate miles and easy/hard mileage shares by period label."""
     n = int(PERIOD_CONFIG[grain]["count"])
-    end = as_of
-    if end is None:
-        end = _reference_end(df)
-    elif end.tzinfo is None:
-        end = end.tz_localize("UTC")
-    else:
-        end = end.tz_convert("UTC")
-    end = end.normalize()
+    end = normalize_utc(as_of) if as_of is not None else reference_end(df)
 
     full_index = generate_period_index(grain, end, n)
 
@@ -204,7 +218,7 @@ def aggregate_period_metrics(
         out["in_progress"] = out["period_key"] == current_key
         return out
 
-    work = df.copy()
+    work = with_period_columns(df.copy(), grain)
     has_hr = work["%_easy"].notna() & work["distance_miles"].notna()
     work["easy_miles"] = 0.0
     work["hard_miles"] = 0.0
@@ -252,10 +266,6 @@ def aggregate_period_metrics(
     ]
 
 
-def _window_mask(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
-    return (df["date"] >= start) & (df["date"] < end)
-
-
 def easy_hard_ratio_label(df: pd.DataFrame) -> tuple[str, float | None]:
     """Return E:H display string and easy percentage for coloring."""
     easy = df["mt_min_easy"].fillna(0).sum()
@@ -277,19 +287,14 @@ def key_indicators(df: pd.DataFrame, as_of: pd.Timestamp | None = None) -> dict[
             "miles_last_week": 0.0,
         }
 
-    as_of = as_of or df["date"].max()
-    if as_of.tzinfo is None:
-        as_of = as_of.tz_localize("UTC")
-    else:
-        as_of = as_of.tz_convert("UTC")
-    today = as_of.normalize()
+    as_of = normalize_utc(as_of or df["date"].max())
     week_start, week_end = last_full_week_bounds(as_of)
 
-    month_start = today - pd.Timedelta(days=30)
-    month_end = today + pd.Timedelta(days=1)
+    month_start = as_of - pd.Timedelta(days=30)
+    month_end = as_of + pd.Timedelta(days=1)
 
-    last_week = df.loc[_window_mask(df, week_start, week_end)]
-    last_month = df.loc[_window_mask(df, month_start, month_end)]
+    last_week = df.loc[window_mask(df, week_start, week_end)]
+    last_month = df.loc[window_mask(df, month_start, month_end)]
 
     return {
         "eh_last_week": easy_hard_ratio_label(last_week),

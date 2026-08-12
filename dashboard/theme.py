@@ -109,7 +109,8 @@ def miles_legend_labels(grain: str = "Week") -> list[tuple[str, str]]:
 
 
 FONT_BODY = '"Inter", "Helvetica Neue", Helvetica, Arial, sans-serif'
-FONT_DISPLAY = '"Inter", "Helvetica Neue", Helvetica, Arial, sans-serif'
+CHART_TITLE_SIZE_PX = 18
+CHART_TITLE_FONT_WEIGHT = 600
 
 # Vertical section whitespace — single source of truth for controls→chart and chart→chart gaps.
 LAYOUT_GAP = "1.8rem"
@@ -187,7 +188,7 @@ GLOBAL_CSS = f"""
     color: {EASY};
   }}
   .hero-title {{
-    font-family: {FONT_DISPLAY};
+    font-family: {FONT_BODY};
     font-weight: 700;
     font-size: clamp(2rem, 3vw, 2.55rem);
     line-height: 1.05;
@@ -252,7 +253,7 @@ GLOBAL_CSS = f"""
   [data-testid="stHeadingWithActionElements"] h1,
   [data-testid="stHeadingWithActionElements"] h2,
   [data-testid="stHeadingWithActionElements"] h3 {{
-    font-family: {FONT_DISPLAY} !important;
+    font-family: {FONT_BODY} !important;
     color: {INK} !important;
   }}
 
@@ -390,14 +391,14 @@ GLOBAL_CSS = f"""
   }}
   /* Race Results: table section */
   [data-testid="stElementContainer"]:has(#race-results-table)
-    + [data-testid="stElementContainer"]:has(.race-results-table-label) {{
+    + [data-testid="stElementContainer"]:has(.chart-section-title) {{
     margin-top: var(--chart-race-table-margin-top) !important;
   }}
-  [data-testid="stElementContainer"]:has(.race-results-table-label)
+  [data-testid="stElementContainer"]:has(.chart-section-title)
     + [data-testid="stElementContainer"]:has([data-testid="stDataFrame"]) {{
     margin-top: 0.35rem !important;
   }}
-  [data-testid="stElementContainer"]:has(.race-results-table-label)
+  [data-testid="stElementContainer"]:has(.chart-section-title)
     + [data-testid="stElementContainer"]:has([data-testid="stDataFrame"]) [data-testid="stDataFrame"] {{
     background: rgba(255, 255, 255, 0.82);
     border: 1px solid rgba(21, 32, 40, 0.06);
@@ -444,7 +445,7 @@ GLOBAL_CSS = f"""
     display: none;
   }}
   .controls-title {{
-    font-family: {FONT_DISPLAY};
+    font-family: {FONT_BODY};
     font-size: 0.95rem;
     font-weight: 700;
     letter-spacing: -0.01em;
@@ -504,11 +505,11 @@ GLOBAL_CSS = f"""
     font-weight: 500 !important;
     color: {INK} !important;
   }}
-  /* Training Insights: narrower selectboxes (three-quarters nested-column width). */
-  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stSelectbox"],
-  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stSelectbox"],
-  [data-testid="stColumn"]:has(.insights-controls-panel) div[data-baseweb="select"] > div,
-  [data-testid="column"]:has(.insights-controls-panel) div[data-baseweb="select"] > div,
+  /* Compact controls panels (Insights + Race Results): narrow selectboxes. */
+  [data-testid="stColumn"]:has(.controls-panel--compact) [data-testid="stSelectbox"],
+  [data-testid="column"]:has(.controls-panel--compact) [data-testid="stSelectbox"],
+  [data-testid="stColumn"]:has(.controls-panel--compact) div[data-baseweb="select"] > div,
+  [data-testid="column"]:has(.controls-panel--compact) div[data-baseweb="select"] > div,
   [data-testid="stElementContainer"]:has(.controls-select-narrow)
     + [data-testid="stElementContainer"] [data-testid="stSelectbox"],
   [data-testid="stElementContainer"]:has(.controls-select-narrow)
@@ -528,18 +529,29 @@ GLOBAL_CSS = f"""
     opacity: 0.55;
     margin: 0 0 0.65rem 0;
   }}
-  /* Training Insights: meta dividers match narrow select width. */
-  [data-testid="stColumn"]:has(.insights-controls-panel) .controls-meta-divider,
-  [data-testid="column"]:has(.insights-controls-panel) .controls-meta-divider {{
+  /* Compact controls: meta dividers and labels match narrow select width. */
+  [data-testid="stColumn"]:has(.controls-panel--compact) .controls-meta-divider,
+  [data-testid="column"]:has(.controls-panel--compact) .controls-meta-divider,
+  [data-testid="stColumn"]:has(.controls-panel--compact) .controls-section-label,
+  [data-testid="column"]:has(.controls-panel--compact) .controls-section-label,
+  [data-testid="stColumn"]:has(.controls-panel--compact) .controls-filter-label,
+  [data-testid="column"]:has(.controls-panel--compact) .controls-filter-label,
+  [data-testid="stColumn"]:has(.controls-panel--compact) .controls-meta,
+  [data-testid="column"]:has(.controls-panel--compact) .controls-meta,
+  [data-testid="stColumn"]:has(.controls-panel--compact) .race-date-inputs,
+  [data-testid="column"]:has(.controls-panel--compact) .race-date-inputs {{
     width: 75%;
     max-width: 75%;
   }}
-  /* Training Insights: shrink outer panel card to content (symmetric 1.2rem padding). */
-  [data-testid="stColumn"]:has(.insights-controls-panel),
-  [data-testid="column"]:has(.insights-controls-panel) {{
+  [data-testid="stColumn"]:has(.controls-panel--compact),
+  [data-testid="column"]:has(.controls-panel--compact) {{
     width: fit-content !important;
     max-width: 28rem;
     flex: 0 0 auto !important;
+  }}
+  [data-testid="stColumn"]:has(.race-controls-panel),
+  [data-testid="column"]:has(.race-controls-panel) {{
+    max-width: 24rem;
   }}
   /* Inner 2-col row: shrink-wrap columns; divider sits in visual whitespace. */
   [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"],
@@ -570,23 +582,6 @@ GLOBAL_CSS = f"""
     width: 75%;
     max-width: 75%;
   }}
-  /* Race Results: narrow controls like Insights */
-  [data-testid="stColumn"]:has(.race-controls-panel) [data-testid="stSelectbox"],
-  [data-testid="column"]:has(.race-controls-panel) [data-testid="stSelectbox"],
-  [data-testid="stColumn"]:has(.race-controls-panel) div[data-baseweb="select"] > div,
-  [data-testid="column"]:has(.race-controls-panel) div[data-baseweb="select"] > div {{
-    max-width: 75% !important;
-    width: 75% !important;
-  }}
-  [data-testid="stColumn"]:has(.race-controls-panel) .controls-filter-label,
-  [data-testid="column"]:has(.race-controls-panel) .controls-filter-label,
-  [data-testid="stColumn"]:has(.race-controls-panel) .controls-meta,
-  [data-testid="column"]:has(.race-controls-panel) .controls-meta,
-  [data-testid="stColumn"]:has(.race-controls-panel) .race-date-inputs,
-  [data-testid="column"]:has(.race-controls-panel) .race-date-inputs {{
-    width: 75%;
-    max-width: 75%;
-  }}
   /* Race Results: side-by-side date pickers */
   [data-testid="stElementContainer"]:has(.race-date-inputs)
     + [data-testid="stElementContainer"] [data-testid="stHorizontalBlock"] {{
@@ -614,17 +609,6 @@ GLOBAL_CSS = f"""
     + [data-testid="stElementContainer"] [data-testid="stDateInput"] [data-baseweb="input"]:focus-within {{
     border-color: rgba(91, 155, 213, 0.45) !important;
     box-shadow: 0 0 0 3px rgba(91, 155, 213, 0.1) !important;
-  }}
-  [data-testid="stColumn"]:has(.race-controls-panel) .controls-meta-divider,
-  [data-testid="column"]:has(.race-controls-panel) .controls-meta-divider {{
-    width: 75%;
-    max-width: 75%;
-  }}
-  [data-testid="stColumn"]:has(.race-controls-panel),
-  [data-testid="column"]:has(.race-controls-panel) {{
-    width: fit-content !important;
-    max-width: 24rem;
-    flex: 0 0 auto !important;
   }}
   [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1),
   [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1),
@@ -667,15 +651,6 @@ GLOBAL_CSS = f"""
   .controls-meta .meta-line:last-of-type {{
     margin-bottom: 0.65rem;
   }}
-  .controls-chart-filter {{
-    margin-top: 0.15rem;
-  }}
-  .controls-chart-filter .controls-meta-divider {{
-    margin: 0.35rem 0 0.75rem 0;
-  }}
-  .controls-chart-filter .controls-filter-label {{
-    margin-bottom: 0.42rem;
-  }}
   .controls-date-filter {{
     margin-top: 0.15rem;
   }}
@@ -699,7 +674,7 @@ GLOBAL_CSS = f"""
     color: {INK};
   }}
   .panel-title {{
-    font-family: {FONT_DISPLAY};
+    font-family: {FONT_BODY};
     font-size: 1.25rem;
     font-weight: 700;
     color: {INK};
@@ -844,7 +819,7 @@ GLOBAL_CSS = f"""
     opacity: 1;
   }}
   .kpi-value {{
-    font-family: {FONT_DISPLAY};
+    font-family: {FONT_BODY};
     font-size: 2rem;
     font-weight: 700;
     line-height: 1;
@@ -865,70 +840,12 @@ GLOBAL_CSS = f"""
     color: {MUTED} !important;
   }}
 
-  .placeholder {{
-    background: rgba(255,255,255,0.78);
-    border: 1px dashed rgba(21, 32, 40, 0.08);
-    border-radius: 20px;
-    padding: 2.5rem 1.5rem;
-    text-align: center;
-    color: {MUTED};
-  }}
-  .placeholder strong {{
-    display: block;
-    font-family: {FONT_DISPLAY};
-    font-size: 1.35rem;
+  .chart-section-title {{
+    font-family: {FONT_BODY};
+    font-size: {CHART_TITLE_SIZE_PX}px;
+    font-weight: {CHART_TITLE_FONT_WEIGHT};
     color: {INK};
-    margin-bottom: 0.4rem;
-  }}
-
-  .race-results-table-label {{
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: {MUTED};
     margin: 0 0 0.55rem 0;
-  }}
-  .race-results-table-wrap {{
-    background: rgba(255, 255, 255, 0.82);
-    border: 1px solid rgba(21, 32, 40, 0.06);
-    border-radius: 20px;
-    padding: 0.35rem 0.15rem 0.45rem;
-    box-shadow: 0 10px 30px rgba(21, 32, 40, 0.04);
-    overflow-x: auto;
-  }}
-  .race-results-table {{
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.88rem;
-  }}
-  .race-results-table th {{
-    text-align: left;
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: {MUTED};
-    padding: 0.65rem 0.85rem 0.55rem;
-    border-bottom: 1px solid {LINE};
-    white-space: nowrap;
-  }}
-  .race-results-table td {{
-    padding: 0.62rem 0.85rem;
-    color: {INK};
-    border-bottom: 1px solid rgba(21, 32, 40, 0.05);
-    vertical-align: middle;
-  }}
-  .race-results-table tbody tr:last-child td {{
-    border-bottom: none;
-  }}
-  .race-results-table tbody tr:hover td {{
-    background: rgba(91, 155, 213, 0.04);
-  }}
-  .race-results-table td.race-pr {{
-    text-align: center;
-    font-size: 1rem;
-    width: 3rem;
   }}
   .race-results-empty {{
     background: rgba(255, 255, 255, 0.78);

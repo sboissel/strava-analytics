@@ -10,14 +10,15 @@ from charts import PLOTLY_CONFIG, mileage_heatmap_chart, pace_hr_line_chart
 from data import PERIOD_CONFIG, PeriodGrain, latest_activity_label, load_runs
 from insights_data import (
     aggregate_pace_hr_by_period,
-    load_pace_analysis,
+    heatmap_showing_label,
+    load_pace_runs,
     mileage_heatmap_matrix,
 )
 from pace_bins import DEFAULT_PACE_BIN_KEY, PACE_BIN_OPTIONS
 from ui import render_insights_section_nav
 
 runs = load_runs()
-pace_runs = load_pace_analysis()
+pace_runs = load_pace_runs()
 pace_labels = [label for label, _ in PACE_BIN_OPTIONS]
 pace_keys = [key for _, key in PACE_BIN_OPTIONS]
 default_idx = pace_keys.index(DEFAULT_PACE_BIN_KEY)
@@ -35,7 +36,7 @@ panel_col, _ = st.columns([1.5, 1.5], gap="medium")
 with panel_col:
     st.markdown(
         """
-        <div class="controls-panel insights-controls-panel" aria-hidden="true"></div>
+        <div class="controls-panel controls-panel--compact insights-controls-panel" aria-hidden="true"></div>
         <div class="controls-title">Controls</div>
         """,
         unsafe_allow_html=True,
@@ -66,6 +67,10 @@ with panel_col:
             f"""
             <div class="controls-meta">
               <div class="controls-meta-divider" aria-hidden="true"></div>
+              <div class="meta-line">
+                <span class="meta-key">Heatmap</span>
+                <span class="meta-val">{heatmap_showing_label(grain)}</span>
+              </div>
               <div class="meta-line">
                 <span class="meta-key">Latest activity</span>
                 <span class="meta-val">{latest_activity_label(runs)}</span>

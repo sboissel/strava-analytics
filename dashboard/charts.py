@@ -6,7 +6,11 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+from data import format_full_date
+from race_data import RACE_TYPE_ORDER
 from theme import (
+    CHART_TITLE_FONT_WEIGHT,
+    CHART_TITLE_SIZE_PX,
     EASY,
     EASY_TARGET_FRAC,
     FONT_BODY,
@@ -56,7 +60,12 @@ LEGEND_OUTSIDE_RIGHT = dict(
 def _title(text: str) -> dict:
     return dict(
         text=text,
-        font=dict(size=18, color=INK, family=_plotly_font_family()),
+        font=dict(
+            size=CHART_TITLE_SIZE_PX,
+            color=INK,
+            family=_plotly_font_family(),
+            weight=CHART_TITLE_FONT_WEIGHT,
+        ),
         x=0,
         xanchor="left",
         y=1,
@@ -463,7 +472,6 @@ RACE_TYPE_COLORS: dict[str, str] = {
     "Other": "#9AA5AD",
 }
 
-RACE_TYPE_ORDER = ["5k", "5M", "10k", "Half", "Marathon", "Other"]
 # Stars extend past the circle bounding box at the same `size`; use a larger
 # value so tips render fully and visually match size-9 circles.
 PR_STAR_SIZE = 10
@@ -500,10 +508,6 @@ def _race_time_axis_ticks(min_minutes: float, max_minutes: float) -> tuple[list[
     return ticks, labels
 
 
-def _format_race_hover_date(ts: pd.Timestamp) -> str:
-    return f"{ts.strftime('%B')} {ts.day}, {ts.year}"
-
-
 def race_results_scatter(races: pd.DataFrame) -> go.Figure:
     """Race finish times over time, colored by race type with PR star markers."""
     fig = go.Figure()
@@ -528,7 +532,7 @@ def race_results_scatter(races: pd.DataFrame) -> go.Figure:
             continue
         hover = [
             (
-                _format_race_hover_date(row["date"]),
+                format_full_date(row["date"]),
                 row.get("name", ""),
                 row.get("elapsed_time_min", ""),
                 race_type,
@@ -561,7 +565,7 @@ def race_results_scatter(races: pd.DataFrame) -> go.Figure:
     if not pr_rows.empty:
         pr_hover = [
             (
-                _format_race_hover_date(row["date"]),
+                format_full_date(row["date"]),
                 row.get("name", ""),
                 row.get("elapsed_time_min", ""),
                 row.get("race_type", ""),

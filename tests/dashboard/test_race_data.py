@@ -4,9 +4,9 @@ import unittest
 
 import pandas as pd
 
+from dashboard.data import format_full_date
 from dashboard.race_data import (
     filter_race_results,
-    format_race_date,
     mark_personal_records,
     parse_duration_minutes,
     race_table_rows,
@@ -97,16 +97,16 @@ class FilterRaceResultsTests(unittest.TestCase):
         self.assertNotIn("Other", result["race_type"].tolist())
 
 
-class FormatRaceDateTests(unittest.TestCase):
-    """Full calendar date formatting for the race table."""
+class FormatFullDateTests(unittest.TestCase):
+    """Full calendar date formatting."""
 
     def test_formats_full_month_name(self):
         ts = pd.Timestamp("2026-01-01", tz="UTC")
-        self.assertEqual(format_race_date(ts), "January 1, 2026")
+        self.assertEqual(format_full_date(ts), "January 1, 2026")
 
     def test_no_leading_zero_on_day(self):
         ts = pd.Timestamp("2019-05-19T14:00:00Z")
-        self.assertEqual(format_race_date(ts), "May 19, 2019")
+        self.assertEqual(format_full_date(ts), "May 19, 2019")
 
 
 class RaceTableRowsTests(unittest.TestCase):

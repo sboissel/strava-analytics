@@ -59,7 +59,7 @@ date_min, date_max = race_date_bounds(all_races)
 with panel_col:
     st.markdown(
         """
-        <div class="controls-panel race-controls-panel" aria-hidden="true"></div>
+        <div class="controls-panel controls-panel--compact race-controls-panel" aria-hidden="true"></div>
         <div class="controls-title">Controls</div>
         """,
         unsafe_allow_html=True,
@@ -92,13 +92,8 @@ with panel_col:
     bounds_min = date_min.date()
     bounds_max = date_max.date()
     if "race_date_start" not in st.session_state:
-        if "race_date_range" in st.session_state:
-            legacy_start, legacy_end = st.session_state.race_date_range
-            st.session_state.race_date_start = legacy_start
-            st.session_state.race_date_end = legacy_end
-        else:
-            st.session_state.race_date_start = bounds_min
-            st.session_state.race_date_end = bounds_max
+        st.session_state.race_date_start = bounds_min
+        st.session_state.race_date_end = bounds_max
 
     date_disabled = all_races.empty
     start_col, end_col = st.columns(2, gap="small")
@@ -162,5 +157,5 @@ st.markdown(
     '<div id="race-results-table" class="page-anchor"></div>',
     unsafe_allow_html=True,
 )
-st.markdown('<div class="race-results-table-label">Race history</div>', unsafe_allow_html=True)
+st.markdown('<div class="chart-section-title">Race History</div>', unsafe_allow_html=True)
 _render_race_table(race_table_rows(filtered))

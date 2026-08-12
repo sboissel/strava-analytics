@@ -11,7 +11,6 @@ from data import (
     PERIOD_CONFIG,
     PeriodGrain,
     aggregate_period_metrics,
-    filter_to_recent_periods,
     key_indicators,
     latest_activity_label,
     load_runs,
@@ -102,9 +101,8 @@ with right:
         unsafe_allow_html=True,
     )
 
-period_runs = filter_to_recent_periods(runs, grain)
 as_of = runs["date"].max() if not runs.empty else None
-period_metrics = aggregate_period_metrics(period_runs, grain, as_of=as_of)
+period_metrics = aggregate_period_metrics(runs, grain, as_of=as_of)
 
 st.markdown('<div id="chart-compliance" class="page-anchor"></div>', unsafe_allow_html=True)
 st.plotly_chart(
