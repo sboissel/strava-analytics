@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+try:
+    from . import _bootstrap  # noqa: F401
+except ImportError:
+    import _bootstrap  # noqa: F401
+
 from strava_analytics.activity_utils import PACE_BIN_LABELS
 
 PACE_BIN_DISPLAY_LABELS: dict[str, str] = {
@@ -19,6 +24,6 @@ PACE_BIN_DISPLAY_LABELS: dict[str, str] = {
 }
 
 PACE_BIN_OPTIONS: list[tuple[str, str]] = [
-    (PACE_BIN_DISPLAY_LABELS[key], key) for key in PACE_BIN_LABELS
+    (PACE_BIN_DISPLAY_LABELS.get(key, key.replace("_", " ")), key) for key in PACE_BIN_LABELS
 ]
 DEFAULT_PACE_BIN_KEY = "800_830"

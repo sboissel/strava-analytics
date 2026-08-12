@@ -219,6 +219,13 @@ def aggregate_period_metrics(
         return out
 
     work = with_period_columns(df.copy(), grain)
+    keep_keys = set(full_index["period_key"])
+    work = work.loc[work["_period_key"].isin(keep_keys)]
+    if "distance_miles" not in work.columns:
+        work["distance_miles"] = 0.0
+    if "%_easy" not in work.columns:
+        work["%_easy"] = np.nan
+
     has_hr = work["%_easy"].notna() & work["distance_miles"].notna()
     work["easy_miles"] = 0.0
     work["hard_miles"] = 0.0
@@ -268,6 +275,8 @@ def aggregate_period_metrics(
 
 def easy_hard_ratio_label(df: pd.DataFrame) -> tuple[str, float | None]:
     """Return E:H display string and easy percentage for coloring."""
+    if df.empty or "mt_min_easy" not in df.columns or "mt_min_hard" not in df.columns:
+        return "—", None
     easy = df["mt_min_easy"].fillna(0).sum()
     hard = df["mt_min_hard"].fillna(0).sum()
     total = easy + hard
@@ -299,5 +308,9 @@ def key_indicators(df: pd.DataFrame, as_of: pd.Timestamp | None = None) -> dict[
     return {
         "eh_last_week": easy_hard_ratio_label(last_week),
         "eh_last_month": easy_hard_ratio_label(last_month),
-        "miles_last_week": float(last_week["distance_miles"].fillna(0).sum()),
+        "miles_last_week": float(
+            last_week["distance_miles"].fillna(0).sum()
+            if "distance_miles" in last_week.columns
+            else 0.0
+        ),
     }

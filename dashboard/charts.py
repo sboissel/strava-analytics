@@ -6,6 +6,11 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+try:
+    from . import _bootstrap  # noqa: F401
+except ImportError:
+    import _bootstrap  # noqa: F401
+
 from data import format_full_date
 from race_data import RACE_TYPE_ORDER
 from theme import (
