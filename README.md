@@ -1,5 +1,8 @@
 # strava-analytics
 
+[![pipeline status](https://gitlab.com/sandrineboissel/strava-analytics/badges/main/pipeline.svg)](https://gitlab.com/sandrineboissel/strava-analytics/-/commits/main)
+[![coverage report](https://gitlab.com/sandrineboissel/strava-analytics/badges/main/coverage.svg)](https://gitlab.com/sandrineboissel/strava-analytics/-/commits/main)
+
 This repository collects Strava activity exports, enriches them with pace and HR summaries, and writes CSV files for weekly analysis and run pace breakdowns.
 
 ## What the pipeline does
@@ -44,6 +47,12 @@ The script will refresh the access token, fetch activities, and rewrite the CSV 
 
 ```bash
 pytest
+```
+
+With coverage:
+
+```bash
+pytest --cov=strava_analytics --cov-report=term-missing
 ```
 
 ## Notes

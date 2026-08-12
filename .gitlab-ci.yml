@@ -5,6 +5,7 @@ stages:
 
 test:
   stage: test
+  coverage: '/TOTAL.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
     - pip install -r requirements.txt
-    - pytest -q
+    - pytest -q --cov=strava_analytics --cov-report=term-missing
