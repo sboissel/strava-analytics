@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -107,6 +108,15 @@ def _load_race_results_uncached(data_dir: Path) -> pd.DataFrame:
         for _, row in races.iterrows()
     ]
     races["elapsed_min"] = races["elapsed_time_min"].map(parse_duration_minutes)
+    valid_pace = (
+        races["elapsed_min"].notna()
+        & races["distance_miles"].notna()
+        & (races["distance_miles"] > 0)
+    )
+    races["pace_min"] = np.nan
+    races.loc[valid_pace, "pace_min"] = (
+        races.loc[valid_pace, "elapsed_min"] / races.loc[valid_pace, "distance_miles"]
+    )
     races["elapsed_pace"] = [
         format_pace_from_minutes(elapsed, dist)
         for elapsed, dist in zip(races["elapsed_min"], races["distance_miles"], strict=False)

@@ -121,11 +121,11 @@ def render_sidebar_section_nav(grain: str) -> None:
     )
 
 
-def render_race_section_nav() -> None:
+def render_race_section_nav(*, chart_label: str = "Finish Times") -> None:
     """In-page section links for Race Results."""
     render_section_nav(
         [
-            ("chart-race-results", "Finish Times"),
+            ("chart-race-results", chart_label),
             ("race-results-table", "Race History"),
         ],
         aria_label="Race Results sections",

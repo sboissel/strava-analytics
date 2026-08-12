@@ -81,6 +81,22 @@ with panel_col:
         key="race_type_filter",
     )
     st.markdown(
+        '<div class="controls-filter-label">Chart</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="controls-select-narrow" aria-hidden="true"></div>',
+        unsafe_allow_html=True,
+    )
+    chart_label = st.selectbox(
+        "Chart",
+        options=["Finish Times", "Pace"],
+        index=0,
+        label_visibility="collapsed",
+        key="race_chart_metric",
+    )
+    chart_metric = "pace" if chart_label == "Pace" else "time"
+    st.markdown(
         '<div class="controls-date-filter">'
         '<div class="controls-filter-label">Date range</div></div>',
         unsafe_allow_html=True,
@@ -141,14 +157,14 @@ with panel_col:
         unsafe_allow_html=True,
     )
 
-render_race_section_nav()
+render_race_section_nav(chart_label=chart_label)
 
 st.markdown(
     '<div id="chart-race-results" class="page-anchor"></div>',
     unsafe_allow_html=True,
 )
 st.plotly_chart(
-    race_results_scatter(filtered),
+    race_results_scatter(filtered, metric=chart_metric),
     use_container_width=True,
     config=PLOTLY_CONFIG,
 )

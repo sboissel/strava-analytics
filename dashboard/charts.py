@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -469,8 +471,8 @@ def mileage_heatmap_chart(
 
 
 RACE_TYPE_COLORS: dict[str, str] = {
-    "5k": "#4E9F9A",
-    "5M": "#5B8DB8",
+    "5k": "#3A9D8F",
+    "5M": "#4C78A8",
     "10k": "#7A6FA8",
     "Half": "#D99A3D",
     "Marathon": "#C85C5C",
@@ -483,6 +485,9 @@ PR_STAR_SIZE = 10
 PR_LEGEND_STAR_SIZE = 9
 PR_LEGEND_STAR_LINE_WIDTH = 1
 PR_Y_PAD = 6.0
+PR_PACE_Y_PAD = 0.5
+
+RaceChartMetric = Literal["time", "pace"]
 
 
 def _race_time_axis_ticks(min_minutes: float, max_minutes: float) -> tuple[list[float], list[str]]:
@@ -513,41 +518,111 @@ def _race_time_axis_ticks(min_minutes: float, max_minutes: float) -> tuple[list[
     return ticks, labels
 
 
-def race_results_scatter(races: pd.DataFrame) -> go.Figure:
-    """Race finish times over time, colored by race type with PR star markers."""
+def _race_pace_axis_ticks(min_pace: float, max_pace: float) -> tuple[list[float], list[str]]:
+    """Build y-axis tick positions and m:ss labels for pace in min/mile."""
+    if min_pace >= max_pace:
+        max_pace = min_pace + 1.0
+    span = max_pace - min_pace
+    if span <= 2.0:
+        step = 0.25
+    elif span <= 5.0:
+        step = 0.5
+    else:
+        step = 1.0
+    start = max(0.0, (min_pace // step) * step)
+    ticks: list[float] = []
+    value = start
+    while value <= max_pace + step * 0.5:
+        ticks.append(value)
+        value += step
+    labels = []
+    for pace in ticks:
+        total_seconds = int(round(pace * 60))
+        mins, secs = divmod(total_seconds, 60)
+        labels.append(f"{mins}:{secs:02d}")
+    return ticks, labels
+
+
+def _format_race_distance(miles: object) -> str:
+    if miles is None or (isinstance(miles, float) and pd.isna(miles)):
+        return "—"
+    return f"{float(miles):.2f} mi"
+
+
+def _race_hover_row(row: pd.Series, race_type: str) -> tuple[str, str, str, str, str, str]:
+    return (
+        format_full_date(row["date"]),
+        row.get("name", ""),
+        row.get("elapsed_time_min", ""),
+        race_type,
+        _format_race_distance(row.get("distance_miles")),
+        row.get("elapsed_pace", "—") or "—",
+    )
+
+
+_RACE_HOVER_TEMPLATE = (
+    "<b>%{customdata[0]}</b><br>"
+    "%{customdata[1]}<br>"
+    "Time: %{customdata[2]}<br>"
+    "Distance: %{customdata[4]}<br>"
+    "Pace: %{customdata[5]}<br>"
+    "Type: %{customdata[3]}<extra></extra>"
+)
+_RACE_PR_HOVER_TEMPLATE = (
+    "<b>%{customdata[0]}</b><br>"
+    "%{customdata[1]}<br>"
+    "Time: %{customdata[2]}<br>"
+    "Distance: %{customdata[4]}<br>"
+    "Pace: %{customdata[5]}<br>"
+    "Type: %{customdata[3]}<br>"
+    "PR<extra></extra>"
+)
+
+
+def race_results_scatter(
+    races: pd.DataFrame, *, metric: RaceChartMetric = "time"
+) -> go.Figure:
+    """Race finish times or pace over time, colored by race type with PR star markers."""
+    if metric == "pace":
+        title = "Pace"
+        y_col = "pace_min"
+        y_title = "Pace (min/mi)"
+        y_pad_floor = 0.25
+        y_pad_extra = PR_PACE_Y_PAD
+        tick_fn = _race_pace_axis_ticks
+    else:
+        title = "Finish Times"
+        y_col = "elapsed_min"
+        y_title = "Race time (h:mm)"
+        y_pad_floor = 5.0
+        y_pad_extra = PR_Y_PAD
+        tick_fn = _race_time_axis_ticks
+
     fig = go.Figure()
     if races.empty:
-        fig.update_layout(title=_title("Finish Times"), **CHART_LAYOUT)
+        fig.update_layout(title=_title(title), **CHART_LAYOUT)
         return fig
 
-    work = races.dropna(subset=["elapsed_min"]).copy()
+    work = races.dropna(subset=[y_col]).copy()
     if work.empty:
-        fig.update_layout(title=_title("Finish Times"), **CHART_LAYOUT)
+        fig.update_layout(title=_title(title), **CHART_LAYOUT)
         return fig
 
-    y_min = float(work["elapsed_min"].min())
-    y_max = float(work["elapsed_min"].max())
-    y_pad = max((y_max - y_min) * 0.12, 5.0)
-    y_range = [max(0.0, y_min - y_pad - PR_Y_PAD), y_max + y_pad]
-    tickvals, ticktext = _race_time_axis_ticks(y_range[0], y_range[1])
+    y_min = float(work[y_col].min())
+    y_max = float(work[y_col].max())
+    y_pad = max((y_max - y_min) * 0.12, y_pad_floor)
+    y_range = [max(0.0, y_min - y_pad - y_pad_extra), y_max + y_pad]
+    tickvals, ticktext = tick_fn(y_range[0], y_range[1])
 
     for race_type in RACE_TYPE_ORDER:
         subset = work.loc[(work["race_type"] == race_type) & (~work["is_pr"])]
         if subset.empty:
             continue
-        hover = [
-            (
-                format_full_date(row["date"]),
-                row.get("name", ""),
-                row.get("elapsed_time_min", ""),
-                race_type,
-            )
-            for _, row in subset.iterrows()
-        ]
+        hover = [_race_hover_row(row, race_type) for _, row in subset.iterrows()]
         fig.add_trace(
             go.Scatter(
                 x=subset["date"],
-                y=subset["elapsed_min"],
+                y=subset[y_col],
                 mode="markers",
                 name=race_type,
                 marker=dict(
@@ -557,25 +632,14 @@ def race_results_scatter(races: pd.DataFrame) -> go.Figure:
                     opacity=0.92,
                 ),
                 customdata=hover,
-                hovertemplate=(
-                    "<b>%{customdata[0]}</b><br>"
-                    "%{customdata[1]}<br>"
-                    "Time: %{customdata[2]}<br>"
-                    "Type: %{customdata[3]}<extra></extra>"
-                ),
+                hovertemplate=_RACE_HOVER_TEMPLATE,
             )
         )
 
     pr_rows = work.loc[work["is_pr"]]
     if not pr_rows.empty:
         pr_hover = [
-            (
-                format_full_date(row["date"]),
-                row.get("name", ""),
-                row.get("elapsed_time_min", ""),
-                row.get("race_type", ""),
-            )
-            for _, row in pr_rows.iterrows()
+            _race_hover_row(row, row.get("race_type", "")) for _, row in pr_rows.iterrows()
         ]
         pr_colors = [
             RACE_TYPE_COLORS.get(race_type, MUTED)
@@ -584,7 +648,7 @@ def race_results_scatter(races: pd.DataFrame) -> go.Figure:
         fig.add_trace(
             go.Scatter(
                 x=pr_rows["date"],
-                y=pr_rows["elapsed_min"],
+                y=pr_rows[y_col],
                 mode="markers",
                 name="PR",
                 marker=dict(
@@ -594,13 +658,7 @@ def race_results_scatter(races: pd.DataFrame) -> go.Figure:
                     line=dict(width=0),
                 ),
                 customdata=pr_hover,
-                hovertemplate=(
-                    "<b>%{customdata[0]}</b><br>"
-                    "%{customdata[1]}<br>"
-                    "Time: %{customdata[2]}<br>"
-                    "Type: %{customdata[3]}<br>"
-                    "PR<extra></extra>"
-                ),
+                hovertemplate=_RACE_PR_HOVER_TEMPLATE,
                 showlegend=False,
             )
         )
@@ -624,7 +682,7 @@ def race_results_scatter(races: pd.DataFrame) -> go.Figure:
     x_min = work["date"].min()
     x_max = work["date"].max()
     fig.update_layout(
-        title=_title("Finish Times"),
+        title=_title(title),
         legend={**LEGEND_OUTSIDE_RIGHT, "itemsizing": "trace"},
         hoverlabel=_hoverlabel(),
         xaxis=dict(
@@ -638,7 +696,7 @@ def race_results_scatter(races: pd.DataFrame) -> go.Figure:
         ),
         yaxis=dict(
             title=dict(
-                text="Race time (h:mm)",
+                text=y_title,
                 font=dict(size=12, color=MUTED),
                 standoff=18,
             ),
