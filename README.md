@@ -75,6 +75,8 @@ The `sync` job runs only for scheduled pipelines; the `test` job still runs on n
 
 ## Runner's Dashboard
 
+**Live app:** [https://strava-analytics-sboissel.streamlit.app/](https://strava-analytics-sboissel.streamlit.app/)
+
 A Streamlit app under [`dashboard/`](dashboard) mirrors the Tableau training overview (with Insights and Race pages stubbed for next).
 
 ```bash
@@ -84,7 +86,7 @@ streamlit run dashboard/streamlit_app.py
 
 ### Streamlit Community Cloud
 
-Deploy from GitHub at [share.streamlit.io](https://share.streamlit.io):
+Hosted at [strava-analytics-sboissel.streamlit.app](https://strava-analytics-sboissel.streamlit.app/) from GitHub via [share.streamlit.io](https://share.streamlit.io):
 
 | Setting | Value |
 | ------- | ----- |
@@ -102,6 +104,8 @@ Data updates when the GitLab weekly sync commits to `main` and the GitLab→GitH
 pip install -r requirements.txt -r requirements-dev.txt
 pytest
 ```
+
+Tests live under `tests/src/` (pipeline modules) and `tests/dashboard/` (Streamlit dashboard modules), with filenames matching the modules they cover (`test_data.py` → `dashboard/data.py`, etc.).
 
 With coverage:
 

@@ -111,11 +111,29 @@ def miles_legend_labels(grain: str = "Week") -> list[tuple[str, str]]:
 FONT_BODY = '"Inter", "Helvetica Neue", Helvetica, Arial, sans-serif'
 FONT_DISPLAY = '"Inter", "Helvetica Neue", Helvetica, Arial, sans-serif'
 
+# Vertical section whitespace — single source of truth for controls→chart and chart→chart gaps.
+LAYOUT_GAP = "1.8rem"
+
+# Per-chart top margin (space above each chart title). Edit individually.
+CHART_COMPLIANCE_MARGIN_TOP = "2.25rem"      # Overview: 80:20 compliance
+CHART_MILEAGE_MARGIN_TOP = "0.1rem"         # Overview: mileage
+CHART_PACE_HR_MARGIN_TOP = "2.75rem"          # Insights: HR line
+CHART_MILEAGE_HEATMAP_MARGIN_TOP = "3.25rem"  # Insights: heatmap
+CHART_RACE_RESULTS_MARGIN_TOP = LAYOUT_GAP      # Race Results: scatter
+CHART_RACE_TABLE_MARGIN_TOP = "0.75rem"         # Race Results: table
+
 GLOBAL_CSS = f"""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
   .stApp {{
+    --layout-gap: {LAYOUT_GAP};
+    --chart-compliance-margin-top: {CHART_COMPLIANCE_MARGIN_TOP};
+    --chart-mileage-margin-top: {CHART_MILEAGE_MARGIN_TOP};
+    --chart-pace-hr-margin-top: {CHART_PACE_HR_MARGIN_TOP};
+    --chart-mileage-heatmap-margin-top: {CHART_MILEAGE_HEATMAP_MARGIN_TOP};
+    --chart-race-results-margin-top: {CHART_RACE_RESULTS_MARGIN_TOP};
+    --chart-race-table-margin-top: {CHART_RACE_TABLE_MARGIN_TOP};
     background:
       radial-gradient(1200px 500px at 10% -10%, #d5e6df 0%, transparent 55%),
       radial-gradient(900px 420px at 100% 0%, #d9e3ec 0%, transparent 50%),
@@ -312,10 +330,80 @@ GLOBAL_CSS = f"""
     outline: none;
   }}
   .page-anchor,
-  #key-indicators,
   #chart-compliance,
-  #chart-mileage {{
+  #chart-mileage,
+  #chart-pace-hr,
+  #chart-mileage-heatmap,
+  #chart-race-results,
+  #race-results-table {{
     scroll-margin-top: 1.25rem;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }}
+  #key-indicators {{
+    scroll-margin-top: 1.25rem;
+  }}
+  /* Main page stack: spacing is explicit via --layout-gap (not Streamlit gap). */
+  .block-container > div[data-testid="stVerticalBlock"] {{
+    gap: 0 !important;
+  }}
+  /* Scroll anchors: zero footprint; chart containers supply section gap above. */
+  [data-testid="stElementContainer"]:has(.page-anchor) {{
+    margin: 0 !important;
+    padding: 0 !important;
+  }}
+  /* Plotly chart containers: zero bottom; gap comes from each chart's top margin. */
+  [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-bottom: 0 !important;
+  }}
+  /* Overview: compliance chart */
+  [data-testid="stElementContainer"]:has(#chart-compliance)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: var(--chart-compliance-margin-top) !important;
+    margin-bottom: 0 !important;
+  }}
+  /* Overview: mileage chart */
+  [data-testid="stElementContainer"]:has(#chart-mileage)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: var(--chart-mileage-margin-top) !important;
+    margin-bottom: 0 !important;
+  }}
+  /* Insights: pace vs HR chart */
+  [data-testid="stElementContainer"]:has(#chart-pace-hr)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: var(--chart-pace-hr-margin-top) !important;
+    margin-bottom: 0 !important;
+  }}
+  /* Insights: mileage heatmap chart */
+  [data-testid="stElementContainer"]:has(#chart-mileage-heatmap)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: var(--chart-mileage-heatmap-margin-top) !important;
+    margin-bottom: 0 !important;
+  }}
+  /* Race Results: scatter chart */
+  [data-testid="stElementContainer"]:has(#chart-race-results)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: var(--chart-race-results-margin-top) !important;
+    margin-bottom: 0 !important;
+  }}
+  /* Race Results: table section */
+  [data-testid="stElementContainer"]:has(#race-results-table)
+    + [data-testid="stElementContainer"]:has(.race-results-table-label) {{
+    margin-top: var(--chart-race-table-margin-top) !important;
+  }}
+  [data-testid="stElementContainer"]:has(.race-results-table-label)
+    + [data-testid="stElementContainer"]:has([data-testid="stDataFrame"]) {{
+    margin-top: 0.35rem !important;
+  }}
+  [data-testid="stElementContainer"]:has(.race-results-table-label)
+    + [data-testid="stElementContainer"]:has([data-testid="stDataFrame"]) [data-testid="stDataFrame"] {{
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(21, 32, 40, 0.06);
+    border-radius: 20px;
+    box-shadow: 0 10px 30px rgba(21, 32, 40, 0.04);
+    overflow: hidden;
   }}
 
   .panel {{
@@ -336,9 +424,24 @@ GLOBAL_CSS = f"""
     background: rgba(255, 255, 255, 0.82) !important;
     border: 1px solid rgba(21, 32, 40, 0.06) !important;
     border-radius: 20px !important;
-    padding: 1.25rem 1.2rem 1.3rem !important;
+    padding: 1.2rem !important;
     box-shadow: 0 10px 30px rgba(21, 32, 40, 0.04) !important;
     backdrop-filter: blur(10px);
+  }}
+  /* Nested columns inside a unified controls panel stay flush (no nested cards). */
+  [data-testid="stColumn"]:has(.controls-panel) [data-testid="stColumn"],
+  [data-testid="stColumn"]:has(.controls-panel) [data-testid="column"],
+  [data-testid="column"]:has(.controls-panel) [data-testid="stColumn"],
+  [data-testid="column"]:has(.controls-panel) [data-testid="column"] {{
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    backdrop-filter: none;
+  }}
+  .controls-panel:not(.controls-title) {{
+    display: none;
   }}
   .controls-title {{
     font-family: {FONT_DISPLAY};
@@ -349,6 +452,14 @@ GLOBAL_CSS = f"""
     color: {INK};
     margin: 0 0 1.05rem 0;
     line-height: 1.2;
+  }}
+  .controls-section-label {{
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: {MUTED};
+    margin: 0 0 0.9rem 0;
   }}
   .controls-filter-label {{
     font-size: 0.8rem;
@@ -393,6 +504,21 @@ GLOBAL_CSS = f"""
     font-weight: 500 !important;
     color: {INK} !important;
   }}
+  /* Training Insights: narrower selectboxes (three-quarters nested-column width). */
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stSelectbox"],
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stSelectbox"],
+  [data-testid="stColumn"]:has(.insights-controls-panel) div[data-baseweb="select"] > div,
+  [data-testid="column"]:has(.insights-controls-panel) div[data-baseweb="select"] > div,
+  [data-testid="stElementContainer"]:has(.controls-select-narrow)
+    + [data-testid="stElementContainer"] [data-testid="stSelectbox"],
+  [data-testid="stElementContainer"]:has(.controls-select-narrow)
+    + [data-testid="stElementContainer"] div[data-baseweb="select"] > div {{
+    max-width: 75% !important;
+    width: 75% !important;
+  }}
+  .controls-select-narrow {{
+    display: none;
+  }}
   .controls-meta {{
     margin-top: 0.3rem;
   }}
@@ -401,6 +527,132 @@ GLOBAL_CSS = f"""
     background: {LINE};
     opacity: 0.55;
     margin: 0 0 0.65rem 0;
+  }}
+  /* Training Insights: meta dividers match narrow select width. */
+  [data-testid="stColumn"]:has(.insights-controls-panel) .controls-meta-divider,
+  [data-testid="column"]:has(.insights-controls-panel) .controls-meta-divider {{
+    width: 75%;
+    max-width: 75%;
+  }}
+  /* Training Insights: shrink outer panel card to content (symmetric 1.2rem padding). */
+  [data-testid="stColumn"]:has(.insights-controls-panel),
+  [data-testid="column"]:has(.insights-controls-panel) {{
+    width: fit-content !important;
+    max-width: 28rem;
+    flex: 0 0 auto !important;
+  }}
+  /* Inner 2-col row: shrink-wrap columns; divider sits in visual whitespace. */
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"],
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] {{
+    display: grid !important;
+    grid-template-columns: max-content max-content !important;
+    width: max-content !important;
+    max-width: 100%;
+    align-items: stretch !important;
+    gap: var(--layout-gap) !important;
+  }}
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"],
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
+    width: auto !important;
+    min-width: 10.5rem;
+    flex: unset !important;
+    align-self: stretch !important;
+  }}
+  /* Match left-column dead zone: labels/meta use same 75% width as selectboxes. */
+  [data-testid="stColumn"]:has(.insights-controls-panel) .controls-section-label,
+  [data-testid="column"]:has(.insights-controls-panel) .controls-section-label,
+  [data-testid="stColumn"]:has(.insights-controls-panel) .controls-filter-label,
+  [data-testid="column"]:has(.insights-controls-panel) .controls-filter-label,
+  [data-testid="stColumn"]:has(.insights-controls-panel) .controls-meta,
+  [data-testid="column"]:has(.insights-controls-panel) .controls-meta {{
+    width: 75%;
+    max-width: 75%;
+  }}
+  /* Race Results: narrow controls like Insights */
+  [data-testid="stColumn"]:has(.race-controls-panel) [data-testid="stSelectbox"],
+  [data-testid="column"]:has(.race-controls-panel) [data-testid="stSelectbox"],
+  [data-testid="stColumn"]:has(.race-controls-panel) div[data-baseweb="select"] > div,
+  [data-testid="column"]:has(.race-controls-panel) div[data-baseweb="select"] > div {{
+    max-width: 75% !important;
+    width: 75% !important;
+  }}
+  [data-testid="stColumn"]:has(.race-controls-panel) .controls-filter-label,
+  [data-testid="column"]:has(.race-controls-panel) .controls-filter-label,
+  [data-testid="stColumn"]:has(.race-controls-panel) .controls-meta,
+  [data-testid="column"]:has(.race-controls-panel) .controls-meta,
+  [data-testid="stColumn"]:has(.race-controls-panel) .race-date-inputs,
+  [data-testid="column"]:has(.race-controls-panel) .race-date-inputs {{
+    width: 75%;
+    max-width: 75%;
+  }}
+  /* Race Results: side-by-side date pickers */
+  [data-testid="stElementContainer"]:has(.race-date-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stHorizontalBlock"] {{
+    width: 75% !important;
+    max-width: 75% !important;
+    gap: 0.45rem !important;
+  }}
+  [data-testid="stElementContainer"]:has(.race-date-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stDateInput"] input,
+  [data-testid="stElementContainer"]:has(.race-date-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stDateInput"] [data-baseweb="input"] {{
+    background: {SURFACE} !important;
+    border: 1px solid {LINE} !important;
+    border-radius: 10px !important;
+    min-height: 38px !important;
+    box-shadow: none !important;
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+    color: {INK} !important;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }}
+  [data-testid="stElementContainer"]:has(.race-date-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stDateInput"] input:focus-within,
+  [data-testid="stElementContainer"]:has(.race-date-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stDateInput"] [data-baseweb="input"]:focus-within {{
+    border-color: rgba(91, 155, 213, 0.45) !important;
+    box-shadow: 0 0 0 3px rgba(91, 155, 213, 0.1) !important;
+  }}
+  [data-testid="stColumn"]:has(.race-controls-panel) .controls-meta-divider,
+  [data-testid="column"]:has(.race-controls-panel) .controls-meta-divider {{
+    width: 75%;
+    max-width: 75%;
+  }}
+  [data-testid="stColumn"]:has(.race-controls-panel),
+  [data-testid="column"]:has(.race-controls-panel) {{
+    width: fit-content !important;
+    max-width: 24rem;
+    flex: 0 0 auto !important;
+  }}
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1),
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1),
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1),
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1) {{
+    position: relative !important;
+  }}
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2),
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2),
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2),
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) {{
+    border-left: none !important;
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+  }}
+  /* Center between 75%-width left content and right column; row height + 0.1rem. */
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1)::after,
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1)::after,
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1)::after,
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1)::after {{
+    content: "";
+    position: absolute;
+    top: 0;
+    left: calc(75% + (25% + var(--layout-gap)) / 2);
+    width: 1px;
+    height: calc(100% + 0.2rem);
+    background: {LINE};
+    pointer-events: none;
   }}
   .controls-meta .meta-line {{
     display: flex;
@@ -414,6 +666,24 @@ GLOBAL_CSS = f"""
   }}
   .controls-meta .meta-line:last-of-type {{
     margin-bottom: 0.65rem;
+  }}
+  .controls-chart-filter {{
+    margin-top: 0.15rem;
+  }}
+  .controls-chart-filter .controls-meta-divider {{
+    margin: 0.35rem 0 0.75rem 0;
+  }}
+  .controls-chart-filter .controls-filter-label {{
+    margin-bottom: 0.42rem;
+  }}
+  .controls-date-filter {{
+    margin-top: 0.15rem;
+  }}
+  .controls-date-filter .controls-filter-label {{
+    margin-bottom: 0.42rem;
+  }}
+  .race-date-inputs {{
+    display: none;
   }}
   .meta-key {{
     font-size: 0.72rem;
@@ -439,7 +709,11 @@ GLOBAL_CSS = f"""
   .panel-summary {{
     font-size: 0.92rem;
     color: {MUTED};
-    margin: 0 0 0.85rem 0;
+    margin: 0;
+  }}
+  /* Page subtitle → controls/KPI row: reliable gap (Streamlit vertical block gap is 0). */
+  [data-testid="stElementContainer"]:has(.panel-summary) {{
+    margin-bottom: calc(var(--layout-gap) * 1.5) !important;
   }}
   .panel-label {{
     font-size: 0.72rem;
@@ -477,7 +751,7 @@ GLOBAL_CSS = f"""
   .kpi-card::before {{
     content: "";
     position: absolute;
-    inset: 0 0 auto 0;
+    inset: 0 5% auto 5%;
     height: 3px;
     background: var(--accent, {MILES});
   }}
@@ -605,6 +879,65 @@ GLOBAL_CSS = f"""
     font-size: 1.35rem;
     color: {INK};
     margin-bottom: 0.4rem;
+  }}
+
+  .race-results-table-label {{
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: {MUTED};
+    margin: 0 0 0.55rem 0;
+  }}
+  .race-results-table-wrap {{
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(21, 32, 40, 0.06);
+    border-radius: 20px;
+    padding: 0.35rem 0.15rem 0.45rem;
+    box-shadow: 0 10px 30px rgba(21, 32, 40, 0.04);
+    overflow-x: auto;
+  }}
+  .race-results-table {{
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }}
+  .race-results-table th {{
+    text-align: left;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: {MUTED};
+    padding: 0.65rem 0.85rem 0.55rem;
+    border-bottom: 1px solid {LINE};
+    white-space: nowrap;
+  }}
+  .race-results-table td {{
+    padding: 0.62rem 0.85rem;
+    color: {INK};
+    border-bottom: 1px solid rgba(21, 32, 40, 0.05);
+    vertical-align: middle;
+  }}
+  .race-results-table tbody tr:last-child td {{
+    border-bottom: none;
+  }}
+  .race-results-table tbody tr:hover td {{
+    background: rgba(91, 155, 213, 0.04);
+  }}
+  .race-results-table td.race-pr {{
+    text-align: center;
+    font-size: 1rem;
+    width: 3rem;
+  }}
+  .race-results-empty {{
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px dashed rgba(21, 32, 40, 0.08);
+    border-radius: 20px;
+    padding: 1.5rem 1.25rem;
+    text-align: center;
+    color: {MUTED};
+    font-size: 0.92rem;
   }}
 
   /* Kill Streamlit structural borders that read as white section dividers */

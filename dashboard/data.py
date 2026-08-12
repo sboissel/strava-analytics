@@ -65,6 +65,29 @@ def _format_mdy_label(dates: pd.Series) -> pd.Series:
     return dates.dt.strftime("%b ") + dates.dt.day.astype(str) + dates.dt.strftime(", %y")
 
 
+def _format_full_date(ts: pd.Timestamp) -> str:
+    """Format a timestamp as a full calendar date (e.g. January 1, 2026)."""
+    return f"{ts.strftime('%B')} {ts.day}, {ts.year}"
+
+
+def _format_full_month(ts: pd.Timestamp) -> str:
+    """Format a timestamp as full month and year (e.g. January 2026)."""
+    return f"{ts.strftime('%B')} {ts.year}"
+
+
+def period_tooltip_label(period_key: str, grain: PeriodGrain) -> str:
+    """Return a full-date hover label for a sortable period key."""
+    if grain == "Day":
+        return _format_full_date(pd.Timestamp(period_key, tz="UTC"))
+    if grain == "Week":
+        year_str, week_str = period_key.split("-")
+        monday = pd.Timestamp.fromisocalendar(int(year_str), int(week_str), 1).tz_localize("UTC")
+        return _format_full_date(monday)
+    if grain == "Month":
+        return _format_full_month(pd.Timestamp(f"{period_key}-01", tz="UTC"))
+    return period_key
+
+
 def _period_key_and_label(dates: pd.Series, grain: PeriodGrain) -> tuple[pd.Series, pd.Series]:
     """Map timestamps to sortable period keys and display labels."""
     if grain == "Day":
@@ -126,7 +149,14 @@ def generate_period_index(
         dates = pd.date_range(end=year_start, periods=count, freq="YS", tz=end.tz)
 
     keys, labels = _period_key_and_label(pd.Series(dates), grain)
-    return pd.DataFrame({"period_key": keys.to_numpy(), "period_label": labels.to_numpy()})
+    tooltips = keys.map(lambda k: period_tooltip_label(k, grain))
+    return pd.DataFrame(
+        {
+            "period_key": keys.to_numpy(),
+            "period_label": labels.to_numpy(),
+            "period_tooltip": tooltips.to_numpy(),
+        }
+    )
 
 
 def filter_to_recent_periods(df: pd.DataFrame, grain: PeriodGrain) -> pd.DataFrame:
@@ -210,7 +240,15 @@ def aggregate_period_metrics(
     merged["hard_frac"] = merged["hard_frac"].fillna(0.0)
     merged["in_progress"] = merged["period_key"] == current_key
     return merged[
-        ["period_key", "period_label", "total_miles", "easy_frac", "hard_frac", "in_progress"]
+        [
+            "period_key",
+            "period_label",
+            "period_tooltip",
+            "total_miles",
+            "easy_frac",
+            "hard_frac",
+            "in_progress",
+        ]
     ]
 
 

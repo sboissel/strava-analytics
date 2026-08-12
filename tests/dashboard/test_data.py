@@ -1,4 +1,4 @@
-"""Tests for dashboard data helpers."""
+"""Tests for dashboard.data."""
 
 import unittest
 

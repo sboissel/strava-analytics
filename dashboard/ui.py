@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import html
 
-from charts import compliance_title, mileage_title
+from charts import compliance_title, heatmap_title, mileage_title, pace_hr_title
 from theme import (
     TRAFFIC_GREEN,
     TRAFFIC_LIME,
@@ -76,6 +76,27 @@ def kpi_label_html(label: str, tooltip: str) -> str:
     )
 
 
+def render_insights_section_nav(
+    hr_grain: str, heatmap_grain: str, pace_label: str
+) -> None:
+    """In-page section links for Training Insights."""
+    import streamlit as st
+
+    hr_title = html.escape(pace_hr_title(hr_grain, pace_label))
+    heatmap = html.escape(heatmap_title(heatmap_grain))
+    nav_html = f"""
+<div class="sidebar-section-nav">
+  <div class="sidebar-section-nav-label">On this page</div>
+  <nav class="sidebar-section-nav-links" aria-label="Training Insights sections">
+    <a href="#chart-pace-hr">{hr_title}</a>
+    <a href="#chart-mileage-heatmap">{heatmap}</a>
+  </nav>
+</div>
+"""
+    with st.sidebar:
+        st.markdown(nav_html, unsafe_allow_html=True)
+
+
 def render_sidebar_section_nav(grain: str) -> None:
     """In-page section links in the sidebar, below st.navigation."""
     import streamlit as st
@@ -89,6 +110,23 @@ def render_sidebar_section_nav(grain: str) -> None:
     <a href="#key-indicators">Key Indicators</a>
     <a href="#chart-compliance">{compliance}</a>
     <a href="#chart-mileage">{mileage}</a>
+  </nav>
+</div>
+"""
+    with st.sidebar:
+        st.markdown(nav_html, unsafe_allow_html=True)
+
+
+def render_race_section_nav() -> None:
+    """In-page section links for Race Results."""
+    import streamlit as st
+
+    nav_html = """
+<div class="sidebar-section-nav">
+  <div class="sidebar-section-nav-label">On this page</div>
+  <nav class="sidebar-section-nav-links" aria-label="Race Results sections">
+    <a href="#chart-race-results">Race Finish Times</a>
+    <a href="#race-results-table">Race history</a>
   </nav>
 </div>
 """
