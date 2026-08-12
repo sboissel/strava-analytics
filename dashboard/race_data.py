@@ -23,7 +23,18 @@ _RACE_LOADER_VERSION = 2
 
 
 def parse_duration_minutes(value: object) -> float | None:
-    """Parse H:MM:SS, HH:MM:SS, or M:SS strings into total minutes."""
+    """Parse duration strings into total minutes.
+
+    Parameters
+    ----------
+    value : object
+        Duration value, typically ``H:MM:SS``, ``HH:MM:SS``, or ``M:SS``.
+
+    Returns
+    -------
+    float or None
+        Total elapsed minutes, or ``None`` when the value is missing or invalid.
+    """
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return None
     text = str(value).strip()
@@ -45,7 +56,20 @@ def parse_duration_minutes(value: object) -> float | None:
 
 
 def format_pace_from_minutes(minutes: float | None, distance_miles: float | None) -> str:
-    """Format min/mile pace from elapsed minutes and distance."""
+    """Format min/mile pace from elapsed minutes and distance.
+
+    Parameters
+    ----------
+    minutes : float or None
+        Elapsed time in minutes.
+    distance_miles : float or None
+        Race distance in miles.
+
+    Returns
+    -------
+    str
+        Pace string such as ``"7:30"``, or ``"—"`` when inputs are invalid.
+    """
     if (
         minutes is None
         or pd.isna(minutes)
@@ -73,7 +97,19 @@ def _normalize_race_type(raw: object, distance_miles: float | None) -> str:
 
 
 def mark_personal_records(df: pd.DataFrame) -> pd.DataFrame:
-    """Flag fastest elapsed time per race type (excluding Other)."""
+    """Flag fastest elapsed time per race type.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Race dataframe with ``race_type`` and ``elapsed_min`` columns.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Copy of ``df`` with an ``is_pr`` boolean column. Rows with race type
+        ``"Other"`` are never marked as PRs.
+    """
     if df.empty:
         out = df.copy()
         out["is_pr"] = False
@@ -141,7 +177,18 @@ def _add_pace_columns(races: pd.DataFrame) -> pd.DataFrame:
 
 
 def ensure_race_pace_min(races: pd.DataFrame) -> pd.DataFrame:
-    """Backfill pace_min when missing, e.g. from a stale Streamlit cache entry."""
+    """Backfill ``pace_min`` when missing from cached race data.
+
+    Parameters
+    ----------
+    races : pandas.DataFrame
+        Race dataframe that may lack a ``pace_min`` column.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Copy with ``pace_min`` and ``elapsed_pace`` populated when missing.
+    """
     if races.empty or "pace_min" in races.columns:
         return races
     return _add_pace_columns(races)
@@ -156,14 +203,39 @@ def _load_race_results_cached(
 
 
 def load_race_results(data_dir: Path = DATA_DIR) -> pd.DataFrame:
-    """Load race activities with parsed times, types, and PR flags."""
+    """Load race activities with parsed times, types, and PR flags.
+
+    Parameters
+    ----------
+    data_dir : pathlib.Path, optional
+        Directory containing ``strava_run_analysis.csv``. Defaults to the
+        repository ``data`` folder.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Race rows sorted by date descending with parsed elapsed time, pace,
+        normalized race type, and PR flags.
+    """
     path = data_dir / "strava_run_analysis.csv"
     mtime = path.stat().st_mtime if path.exists() else 0.0
     return _load_race_results_cached(mtime, str(data_dir), _RACE_LOADER_VERSION)
 
 
 def race_type_options(races: pd.DataFrame) -> list[str]:
-    """Return filter options with All first, then known types present in data."""
+    """Return race-type filter options for the controls panel.
+
+    Parameters
+    ----------
+    races : pandas.DataFrame
+        Race dataframe with a ``race_type`` column.
+
+    Returns
+    -------
+    list[str]
+        Options starting with ``"All"`` and ``"PRs only"``, followed by known
+        race types present in the data.
+    """
     options = ["All", PRS_ONLY_FILTER]
     if races.empty:
         return options + RACE_TYPE_ORDER
@@ -183,7 +255,25 @@ def filter_race_results(
     start: pd.Timestamp | None = None,
     end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    """Apply race type and inclusive date-range filters."""
+    """Apply race type and inclusive date-range filters.
+
+    Parameters
+    ----------
+    races : pandas.DataFrame
+        Race dataframe to filter.
+    race_type : str, optional
+        Race type filter, ``"All"``, ``"PRs only"``, or a specific type.
+        Defaults to ``"All"``.
+    start : pandas.Timestamp, optional
+        Inclusive start of the date range.
+    end : pandas.Timestamp, optional
+        Inclusive end of the date range.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Filtered races sorted by date ascending.
+    """
     if races.empty:
         return races
 
@@ -206,7 +296,18 @@ def filter_race_results(
 
 
 def race_date_bounds(races: pd.DataFrame) -> tuple[pd.Timestamp, pd.Timestamp]:
-    """Return min/max race dates for slider defaults."""
+    """Return min and max race dates for date-picker defaults.
+
+    Parameters
+    ----------
+    races : pandas.DataFrame
+        Race dataframe with a ``date`` column.
+
+    Returns
+    -------
+    tuple[pandas.Timestamp, pandas.Timestamp]
+        Normalized UTC start and end dates, or today's date twice when empty.
+    """
     if races.empty:
         today = pd.Timestamp.now(tz="UTC").normalize()
         return today, today
@@ -216,7 +317,18 @@ def race_date_bounds(races: pd.DataFrame) -> tuple[pd.Timestamp, pd.Timestamp]:
 
 
 def race_summary_meta(races: pd.DataFrame) -> str:
-    """Short meta line for controls panel."""
+    """Return a short summary line for the controls panel.
+
+    Parameters
+    ----------
+    races : pandas.DataFrame
+        Race dataframe with a ``date`` column.
+
+    Returns
+    -------
+    str
+        Count and latest-activity summary, or ``"No races"`` when empty.
+    """
     if races.empty:
         return "No races"
     count = len(races)
@@ -230,7 +342,18 @@ def _race_table_date(series: pd.Series) -> pd.Series:
 
 
 def race_table_rows(races: pd.DataFrame) -> pd.DataFrame:
-    """Display columns for the race results table (default sort: date ascending)."""
+    """Build display columns for the race results table.
+
+    Parameters
+    ----------
+    races : pandas.DataFrame
+        Filtered race dataframe.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Table-ready columns sorted by date ascending.
+    """
     columns = ["Name", "Date", "Race Type", "Miles", "Time", "Pace", "PR"]
     if races.empty:
         return pd.DataFrame(columns=columns)

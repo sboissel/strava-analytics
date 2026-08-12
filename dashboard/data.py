@@ -46,14 +46,43 @@ def _load_runs_cached(csv_mtime: float, data_dir_str: str) -> pd.DataFrame:
 
 
 def load_runs(data_dir: Path = DATA_DIR) -> pd.DataFrame:
-    """Load run analysis rows with parsed dates and numeric fields."""
+    """Load run analysis rows with parsed dates and numeric fields.
+
+    Parameters
+    ----------
+    data_dir : pathlib.Path, optional
+        Directory containing ``strava_run_analysis.csv``. Defaults to the
+        repository ``data`` folder.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Run rows sorted by activity date with parsed timestamps and numeric
+        columns for distance and heart-rate metrics.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the run analysis CSV is missing from ``data_dir``.
+    """
     path = data_dir / "strava_run_analysis.csv"
     mtime = path.stat().st_mtime if path.exists() else 0.0
     return _load_runs_cached(mtime, str(data_dir))
 
 
 def latest_activity_label(df: pd.DataFrame) -> str:
-    """Return the latest activity date as M/D/YYYY."""
+    """Return the latest activity date as M/D/YYYY.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Run dataframe with a ``date`` column.
+
+    Returns
+    -------
+    str
+        Formatted latest date, or ``"—"`` when ``df`` is empty.
+    """
     if df.empty:
         return "—"
     latest = df["date"].max()
@@ -61,7 +90,18 @@ def latest_activity_label(df: pd.DataFrame) -> str:
 
 
 def format_full_date(ts: pd.Timestamp) -> str:
-    """Format a timestamp as a full calendar date (e.g. January 1, 2026)."""
+    """Format a timestamp as a full calendar date.
+
+    Parameters
+    ----------
+    ts : pandas.Timestamp
+        Timestamp to format.
+
+    Returns
+    -------
+    str
+        Full date string such as ``January 1, 2026``.
+    """
     stamp = pd.Timestamp(ts)
     if stamp.tzinfo is not None:
         stamp = stamp.tz_convert("UTC")
@@ -69,12 +109,34 @@ def format_full_date(ts: pd.Timestamp) -> str:
 
 
 def format_full_month(ts: pd.Timestamp) -> str:
-    """Format a timestamp as full month and year (e.g. January 2026)."""
+    """Format a timestamp as full month and year.
+
+    Parameters
+    ----------
+    ts : pandas.Timestamp
+        Timestamp to format.
+
+    Returns
+    -------
+    str
+        Month and year string such as ``January 2026``.
+    """
     return f"{ts.strftime('%B')} {ts.year}"
 
 
 def normalize_utc(ts: pd.Timestamp) -> pd.Timestamp:
-    """Normalize a timestamp to UTC midnight."""
+    """Normalize a timestamp to UTC midnight.
+
+    Parameters
+    ----------
+    ts : pandas.Timestamp
+        Timestamp to normalize.
+
+    Returns
+    -------
+    pandas.Timestamp
+        UTC-normalized timestamp at midnight.
+    """
     stamp = pd.Timestamp(ts)
     if stamp.tzinfo is None:
         stamp = stamp.tz_localize("UTC")
@@ -84,7 +146,22 @@ def normalize_utc(ts: pd.Timestamp) -> pd.Timestamp:
 
 
 def window_mask(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
-    """Return rows with date in [start, end)."""
+    """Return rows with date in ``[start, end)``.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Run dataframe with a ``date`` column.
+    start : pandas.Timestamp
+        Inclusive window start.
+    end : pandas.Timestamp
+        Exclusive window end.
+
+    Returns
+    -------
+    pandas.Series
+        Boolean mask selecting rows inside the window.
+    """
     return (df["date"] >= start) & (df["date"] < end)
 
 
@@ -94,7 +171,20 @@ def _format_mdy_label(dates: pd.Series) -> pd.Series:
 
 
 def period_tooltip_label(period_key: str, grain: PeriodGrain) -> str:
-    """Return a full-date hover label for a sortable period key."""
+    """Return a full-date hover label for a sortable period key.
+
+    Parameters
+    ----------
+    period_key : str
+        Sortable period identifier for the selected grain.
+    grain : PeriodGrain
+        Calendar aggregation grain (``Day``, ``Week``, ``Month``, or ``Year``).
+
+    Returns
+    -------
+    str
+        Human-readable tooltip label for chart hovers.
+    """
     if grain == "Day":
         return format_full_date(pd.Timestamp(period_key, tz="UTC"))
     if grain == "Week":
@@ -107,7 +197,20 @@ def period_tooltip_label(period_key: str, grain: PeriodGrain) -> str:
 
 
 def with_period_columns(df: pd.DataFrame, grain: PeriodGrain) -> pd.DataFrame:
-    """Attach sortable period key/label columns used by aggregators."""
+    """Attach sortable period key and label columns used by aggregators.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Run dataframe with a ``date`` column.
+    grain : PeriodGrain
+        Calendar aggregation grain.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Copy of ``df`` with ``_period_key`` and ``_period_label`` columns.
+    """
     if df.empty:
         return df
     work = df.copy()
@@ -139,14 +242,38 @@ def _period_key_and_label(dates: pd.Series, grain: PeriodGrain) -> tuple[pd.Seri
 
 
 def current_period_key(grain: PeriodGrain, as_of: pd.Timestamp) -> str:
-    """Return the period_key for the calendar period containing as_of."""
+    """Return the period key for the calendar period containing ``as_of``.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    as_of : pandas.Timestamp
+        Reference timestamp.
+
+    Returns
+    -------
+    str
+        Sortable period key for the containing calendar period.
+    """
     as_of = normalize_utc(as_of)
     key, _ = _period_key_and_label(pd.Series([as_of]), grain)
     return key.iloc[0]
 
 
 def reference_end(df: pd.DataFrame) -> pd.Timestamp:
-    """Return the latest activity date normalized to UTC midnight."""
+    """Return the latest activity date normalized to UTC midnight.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Run dataframe with a ``date`` column.
+
+    Returns
+    -------
+    pandas.Timestamp
+        Latest activity date in UTC, or the current UTC date when ``df`` is empty.
+    """
     if df.empty:
         return pd.Timestamp.now(tz="UTC").normalize()
     return normalize_utc(df["date"].max())
@@ -155,7 +282,22 @@ def reference_end(df: pd.DataFrame) -> pd.Timestamp:
 def generate_period_index(
     grain: PeriodGrain, end: pd.Timestamp, count: int
 ) -> pd.DataFrame:
-    """Build ordered period keys and labels for the last N calendar periods ending at end."""
+    """Build ordered period keys and labels for the last N calendar periods.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    end : pandas.Timestamp
+        End of the period range.
+    count : int
+        Number of calendar periods to include.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Frame with ``period_key``, ``period_label``, and ``period_tooltip`` columns.
+    """
     end = end.normalize()
     if grain == "Day":
         dates = pd.date_range(end=end, periods=count, freq="D", tz=end.tz)
@@ -181,7 +323,20 @@ def generate_period_index(
 
 
 def filter_to_recent_periods(df: pd.DataFrame, grain: PeriodGrain) -> pd.DataFrame:
-    """Keep rows belonging to the last N calendar periods for the selected grain."""
+    """Keep rows belonging to the last N calendar periods for the selected grain.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Run dataframe with a ``date`` column.
+    grain : PeriodGrain
+        Calendar aggregation grain.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Filtered copy containing only rows in the configured recent window.
+    """
     if df.empty:
         return df
 
@@ -202,7 +357,23 @@ def aggregate_period_metrics(
     *,
     as_of: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    """Aggregate miles and easy/hard mileage shares by period label."""
+    """Aggregate miles and easy/hard mileage shares by period label.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Run dataframe with distance and easy-percentage columns.
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    as_of : pandas.Timestamp, optional
+        Reference end date for the period window. Defaults to the latest activity.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per period with mileage totals, easy/hard fractions, and an
+        ``in_progress`` flag for the current calendar period.
+    """
     n = int(PERIOD_CONFIG[grain]["count"])
     end = normalize_utc(as_of) if as_of is not None else reference_end(df)
 
@@ -274,7 +445,19 @@ def aggregate_period_metrics(
 
 
 def easy_hard_ratio_label(df: pd.DataFrame) -> tuple[str, float | None]:
-    """Return E:H display string and easy percentage for coloring."""
+    """Return easy:hard display string and easy percentage for coloring.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Run dataframe with ``mt_min_easy`` and ``mt_min_hard`` columns.
+
+    Returns
+    -------
+    tuple[str, float or None]
+        Display ratio such as ``"80:20"`` and the easy percentage, or ``("—", None)``
+        when heart-rate minutes are unavailable.
+    """
     if df.empty or "mt_min_easy" not in df.columns or "mt_min_hard" not in df.columns:
         return "—", None
     easy = df["mt_min_easy"].fillna(0).sum()
@@ -288,7 +471,21 @@ def easy_hard_ratio_label(df: pd.DataFrame) -> tuple[str, float | None]:
 
 
 def key_indicators(df: pd.DataFrame, as_of: pd.Timestamp | None = None) -> dict[str, object]:
-    """Compute E:H last full week / last 30 days and miles last full week."""
+    """Compute easy:hard and mileage KPI values for overview cards.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Run dataframe with date, distance, and heart-rate minute columns.
+    as_of : pandas.Timestamp, optional
+        Reference date for week and month windows. Defaults to the latest activity.
+
+    Returns
+    -------
+    dict[str, object]
+        Keys ``eh_last_week``, ``eh_last_month``, and ``miles_last_week`` with
+        ratio tuples and weekly mileage totals.
+    """
     if df.empty:
         return {
             "eh_last_week": ("—", None),

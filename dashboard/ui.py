@@ -18,12 +18,39 @@ from theme import (
 
 
 def band_dot(color_hex: str) -> str:
-    """Small colored circle for KPI tooltip band rows."""
+    """Return HTML for a small colored circle in KPI tooltips.
+
+    Parameters
+    ----------
+    color_hex : str
+        CSS hex color for the dot.
+
+    Returns
+    -------
+    str
+        HTML ``span`` element markup for the colored dot.
+    """
     return f'<span class="band-dot" style="background:{color_hex}"></span>'
 
 
 def eh_kpi_tooltip(period: str) -> str:
-    """Tooltip body for easy:hard KPI cards."""
+    """Return tooltip HTML for easy:hard KPI cards.
+
+    Parameters
+    ----------
+    period : str
+        Window identifier, either ``"week"`` or ``"month"``.
+
+    Returns
+    -------
+    str
+        HTML tooltip body describing the ratio definition and target bands.
+
+    Raises
+    ------
+    KeyError
+        If ``period`` is not ``"week"`` or ``"month"``.
+    """
     period_desc = {
         "week": "the last full Mon–Sun week",
         "month": "the last 30 days",
@@ -45,7 +72,13 @@ def eh_kpi_tooltip(period: str) -> str:
 
 
 def miles_kpi_tooltip() -> str:
-    """Tooltip body for weekly mileage KPI card."""
+    """Return tooltip HTML for the weekly mileage KPI card.
+
+    Returns
+    -------
+    str
+        HTML tooltip body describing mileage definition and target bands.
+    """
     band_lines = "<br>".join(
         f"{band_dot(color)}{html.escape(label)}"
         for color, label in reversed(miles_legend_labels("Week"))
@@ -63,7 +96,20 @@ def miles_kpi_tooltip() -> str:
 
 
 def kpi_label_html(label: str, tooltip: str) -> str:
-    """Render a KPI label with a muted info icon and hover tooltip."""
+    """Render a KPI label with a muted info icon and hover tooltip.
+
+    Parameters
+    ----------
+    label : str
+        Visible KPI label text.
+    tooltip : str
+        HTML tooltip body shown on hover.
+
+    Returns
+    -------
+    str
+        HTML markup for the KPI label row.
+    """
     safe_label = html.escape(label)
     return (
         f'<div class="kpi-label">'
@@ -77,7 +123,20 @@ def kpi_label_html(label: str, tooltip: str) -> str:
 
 
 def render_section_nav(sections: list[tuple[str, str]], *, aria_label: str) -> None:
-    """Render in-page section links in the sidebar."""
+    """Render in-page section links in the Streamlit sidebar.
+
+    Parameters
+    ----------
+    sections : list[tuple[str, str]]
+        Pairs of anchor id and link label.
+    aria_label : str
+        Accessible name for the navigation landmark.
+
+    Returns
+    -------
+    None
+        Renders sidebar HTML via Streamlit.
+    """
     import streamlit as st
 
     links = "".join(
@@ -99,7 +158,22 @@ def render_section_nav(sections: list[tuple[str, str]], *, aria_label: str) -> N
 def render_insights_section_nav(
     hr_grain: str, heatmap_grain: str, pace_label: str
 ) -> None:
-    """In-page section links for Training Insights."""
+    """Render in-page section links for Training Insights.
+
+    Parameters
+    ----------
+    hr_grain : str
+        Period grain label for the pace-vs-HR chart title.
+    heatmap_grain : str
+        Period grain label for the mileage heatmap title.
+    pace_label : str
+        Selected pace-bin display label.
+
+    Returns
+    -------
+    None
+        Renders sidebar navigation links via Streamlit.
+    """
     render_section_nav(
         [
             ("chart-pace-hr", pace_hr_title(hr_grain, pace_label)),
@@ -110,7 +184,18 @@ def render_insights_section_nav(
 
 
 def render_sidebar_section_nav(grain: str) -> None:
-    """In-page section links for Training Overview."""
+    """Render in-page section links for Training Overview.
+
+    Parameters
+    ----------
+    grain : str
+        Period grain used for chart section titles.
+
+    Returns
+    -------
+    None
+        Renders sidebar navigation links via Streamlit.
+    """
     render_section_nav(
         [
             ("key-indicators", "Key Indicators"),
@@ -122,7 +207,18 @@ def render_sidebar_section_nav(grain: str) -> None:
 
 
 def render_race_section_nav(*, chart_label: str = "Finish Times") -> None:
-    """In-page section links for Race Results."""
+    """Render in-page section links for Race Results.
+
+    Parameters
+    ----------
+    chart_label : str, optional
+        Label for the scatter chart link. Defaults to ``"Finish Times"``.
+
+    Returns
+    -------
+    None
+        Renders sidebar navigation links via Streamlit.
+    """
     render_section_nav(
         [
             ("chart-race-results", chart_label),

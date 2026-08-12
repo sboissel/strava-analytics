@@ -93,6 +93,18 @@ def _period_tooltips(period_df: pd.DataFrame) -> list[str]:
 
 
 def compliance_title(grain: str) -> str:
+    """Return the 80:20 compliance chart title for a period grain.
+
+    Parameters
+    ----------
+    grain : str
+        Period grain label.
+
+    Returns
+    -------
+    str
+        Chart title string for the selected grain.
+    """
     return {
         "Day": "Daily 80:20 Compliance",
         "Week": "Weekly 80:20 Compliance",
@@ -102,6 +114,18 @@ def compliance_title(grain: str) -> str:
 
 
 def mileage_title(grain: str) -> str:
+    """Return the total mileage chart title for a period grain.
+
+    Parameters
+    ----------
+    grain : str
+        Period grain label.
+
+    Returns
+    -------
+    str
+        Chart title string for the selected grain.
+    """
     return {
         "Day": "Daily Mileage",
         "Week": "Weekly Mileage",
@@ -193,7 +217,20 @@ def _format_miles_goal(goal: float) -> str:
 
 
 def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
-    """100% stacked easy vs hard mileage share with an 80% target line."""
+    """Build a 100% stacked easy vs hard mileage compliance chart.
+
+    Parameters
+    ----------
+    period_df : pandas.DataFrame
+        Aggregated period metrics from ``aggregate_period_metrics``.
+    grain : str
+        Period grain label used for axis formatting.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Stacked bar chart with an 80% easy target line.
+    """
     title = compliance_title(grain)
     fig = go.Figure()
     if period_df.empty:
@@ -260,7 +297,20 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
 
 
 def mileage_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
-    """Total miles by period, colored by goal bands, with a scaled goal line."""
+    """Build a total mileage bar chart colored by goal bands.
+
+    Parameters
+    ----------
+    period_df : pandas.DataFrame
+        Aggregated period metrics from ``aggregate_period_metrics``.
+    grain : str
+        Period grain label used for goal scaling and axis formatting.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Bar chart with a scaled mileage goal line and legend bands.
+    """
     title = mileage_title(grain)
     fig = go.Figure()
     if period_df.empty:
@@ -327,10 +377,36 @@ def mileage_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
 
 
 def pace_hr_title(grain: str, pace_label: str) -> str:
+    """Return the pace-vs-HR line chart title for a pace bin label.
+
+    Parameters
+    ----------
+    grain : str
+        Period grain label.
+    pace_label : str
+        Human-readable pace-bin label.
+
+    Returns
+    -------
+    str
+        Chart title string for the selected pace range.
+    """
     return f"Average HR for {pace_label} min/mile pace"
 
 
 def heatmap_title(grain: str) -> str:
+    """Return the mileage heatmap title for a period grain.
+
+    Parameters
+    ----------
+    grain : str
+        Period grain label.
+
+    Returns
+    -------
+    str
+        Chart title string for the selected grain.
+    """
     return {
         "Day": "Daily Mileage by Month",
         "Week": "Weekly Mileage by Month",
@@ -340,7 +416,22 @@ def heatmap_title(grain: str) -> str:
 
 
 def pace_hr_line_chart(period_df: pd.DataFrame, grain: str, pace_label: str) -> go.Figure:
-    """Average heart rate by period for a selected pace bin."""
+    """Build an average heart-rate line chart for a selected pace bin.
+
+    Parameters
+    ----------
+    period_df : pandas.DataFrame
+        Pace-HR period aggregates from ``aggregate_pace_hr_by_period``.
+    grain : str
+        Period grain label used for axis formatting.
+    pace_label : str
+        Human-readable pace-bin label for the chart title.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Line chart of average heart rate by calendar period.
+    """
     title = pace_hr_title(grain, pace_label)
     fig = go.Figure()
     if period_df.empty:
@@ -410,7 +501,28 @@ def mileage_heatmap_chart(
     grain: str,
     tooltip_matrix=None,
 ) -> go.Figure:
-    """Mileage heatmap with goal-centered three-color scale."""
+    """Build a mileage heatmap with a goal-centered three-color scale.
+
+    Parameters
+    ----------
+    matrix : array-like
+        Two-dimensional mileage values for heatmap cells.
+    y_labels : list[str]
+        Y-axis category labels.
+    x_labels : list[str]
+        X-axis category labels.
+    title : str
+        Chart title text.
+    grain : str
+        Period grain used to scale the mileage goal for the color scale.
+    tooltip_matrix : array-like, optional
+        Per-cell tooltip text aligned with ``matrix``.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Heatmap figure with goal-centered color scale.
+    """
     fig = go.Figure()
     if matrix.size == 0 or not x_labels:
         fig.update_layout(title=_title(title), **CHART_LAYOUT)
@@ -582,7 +694,20 @@ _RACE_PR_HOVER_TEMPLATE = (
 def race_results_scatter(
     races: pd.DataFrame, *, metric: RaceChartMetric = "time"
 ) -> go.Figure:
-    """Race finish times or pace over time, colored by race type with PR star markers."""
+    """Build a race finish-time or pace scatter chart over time.
+
+    Parameters
+    ----------
+    races : pandas.DataFrame
+        Filtered race dataframe with date, type, and metric columns.
+    metric : {"time", "pace"}, optional
+        Y-axis metric selection. Defaults to ``"time"``.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Scatter plot colored by race type with PR star markers.
+    """
     if metric == "pace":
         title = "Pace"
         y_col = "pace_min"

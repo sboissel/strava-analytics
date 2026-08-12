@@ -32,7 +32,19 @@ _MILES_BAND_EDGES = (10.0, 14.0, 18.0, 22.0, 25.0, 28.0)
 
 
 def eh_color(easy_pct: float | None) -> str:
-    """Traffic-light color for easy-percentage KPIs and tooltips."""
+    """Return a traffic-light color for easy-percentage KPIs.
+
+    Parameters
+    ----------
+    easy_pct : float or None
+        Percentage of time spent in the easy heart-rate zone.
+
+    Returns
+    -------
+    str
+        Hex color from the dashboard traffic-light palette, or ``INK`` when
+        ``easy_pct`` is ``None``.
+    """
     if easy_pct is None:
         return INK
     if easy_pct >= EH_BAND_THRESHOLDS[0]:
@@ -47,7 +59,19 @@ def eh_color(easy_pct: float | None) -> str:
 
 
 def miles_goal(grain: str = "Week") -> float:
-    """Extrapolate the 20 mi/week center goal to the selected period grain."""
+    """Extrapolate the weekly mileage goal to the selected period grain.
+
+    Parameters
+    ----------
+    grain : str, optional
+        Period grain (``Day``, ``Week``, ``Month``, or ``Year``). Defaults to
+        ``"Week"``.
+
+    Returns
+    -------
+    float
+        Target mileage for the selected grain, scaled from the 20 mi/week center.
+    """
     if grain == "Day":
         return WEEKLY_MILES_GOAL / 7.0
     if grain == "Month":
@@ -58,7 +82,21 @@ def miles_goal(grain: str = "Week") -> float:
 
 
 def miles_color(miles: float | None, grain: str = "Week") -> str:
-    """Color mileage by goal bands, scaled so Day/Month/Year match Week proportions."""
+    """Return a traffic-light color for mileage against goal bands.
+
+    Parameters
+    ----------
+    miles : float or None
+        Total mileage for the period.
+    grain : str, optional
+        Period grain used to scale goal bands. Defaults to ``"Week"``.
+
+    Returns
+    -------
+    str
+        Hex color from the dashboard traffic-light palette, or ``INK`` when
+        ``miles`` is ``None``.
+    """
     if miles is None:
         return INK
     scale = miles_goal(grain) / WEEKLY_MILES_GOAL
@@ -89,7 +127,18 @@ def _miles_legend_pair(lo1: int, hi1: int, lo2: int, hi2: int) -> str:
 
 
 def miles_legend_labels(grain: str = "Week") -> list[tuple[str, str]]:
-    """Legend (color, label) pairs for mileage goal bands, scaled to the grain."""
+    """Return legend color and label pairs for mileage goal bands.
+
+    Parameters
+    ----------
+    grain : str, optional
+        Period grain used to scale band labels. Defaults to ``"Week"``.
+
+    Returns
+    -------
+    list[tuple[str, str]]
+        Pairs of hex color and mileage-band label strings.
+    """
     scale = miles_goal(grain) / WEEKLY_MILES_GOAL
     lo_red, lo_orange, lo_yellow, hi_green, hi_yellow, hi_orange = (
         int(round(edge * scale)) for edge in _MILES_BAND_EDGES

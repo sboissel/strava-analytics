@@ -41,7 +41,18 @@ HEATMAP_SHOWING: dict[PeriodGrain, str] = {
 
 
 def heatmap_showing_label(grain: PeriodGrain) -> str:
-    """Human-readable date window for the mileage heatmap layout."""
+    """Return the human-readable heatmap date window for a grain.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Calendar aggregation grain.
+
+    Returns
+    -------
+    str
+        Description of the heatmap layout window, or an empty string when unknown.
+    """
     return HEATMAP_SHOWING.get(grain, "")
 WEEK_COLUMNS = ["W1", "W2", "W3", "W4", "W5"]
 DAY_COLUMNS = [str(day) for day in range(1, 32)]
@@ -109,7 +120,24 @@ def _load_pace_runs_cached(csv_mtime: float, runs_mtime: float, data_dir_str: st
 
 
 def load_pace_runs(data_dir: Path = DATA_DIR) -> pd.DataFrame:
-    """Load pace analysis rows merged with activity dates."""
+    """Load pace analysis rows merged with activity dates.
+
+    Parameters
+    ----------
+    data_dir : pathlib.Path, optional
+        Directory containing pace and run analysis CSVs. Defaults to the
+        repository ``data`` folder.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Pace-bin seconds and average heart-rate columns joined to run dates.
+
+    Raises
+    ------
+    FileNotFoundError
+        If required CSV files are missing from ``data_dir``.
+    """
     pace_path = data_dir / "strava_run_pace_analysis.csv"
     runs_path = data_dir / "strava_run_analysis.csv"
     pace_mtime = pace_path.stat().st_mtime if pace_path.exists() else 0.0
@@ -124,7 +152,24 @@ def aggregate_pace_hr_by_period(
     *,
     as_of: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    """Distance-normalized average HR for a pace bin, aggregated by calendar period."""
+    """Aggregate distance-normalized average HR for a pace bin by period.
+
+    Parameters
+    ----------
+    pace_runs : pandas.DataFrame
+        Pace analysis rows merged with activity dates.
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    bin_key : str
+        Internal pace-bin key such as ``"800_830"``.
+    as_of : pandas.Timestamp, optional
+        Reference end date for the period window. Defaults to the latest activity.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per period with ``avg_hr`` and an ``in_progress`` flag.
+    """
     seconds_col = f"seconds_{bin_key}"
     hr_col = f"avg_hr_{bin_key}"
     n = int(PERIOD_CONFIG[grain]["count"])
@@ -318,7 +363,23 @@ def mileage_heatmap_matrix(
     *,
     as_of: pd.Timestamp | None = None,
 ) -> tuple[np.ndarray, list[str], list[str], str, np.ndarray]:
-    """Build heatmap matrix, axis labels, title, and tooltip labels for the selected grain."""
+    """Build mileage heatmap matrix, labels, title, and tooltips.
+
+    Parameters
+    ----------
+    runs : pandas.DataFrame
+        Run dataframe with ``date`` and ``distance_miles`` columns.
+    grain : PeriodGrain
+        Calendar aggregation grain selecting the heatmap layout.
+    as_of : pandas.Timestamp, optional
+        Reference end date for the heatmap window. Defaults to the latest activity.
+
+    Returns
+    -------
+    tuple[numpy.ndarray, list[str], list[str], str, numpy.ndarray]
+        Mileage matrix, y-axis labels, x-axis labels, chart title, and tooltip
+        text matrix.
+    """
     titles = {
         "Day": "Daily Mileage by Month (Last 12 Months)",
         "Week": "Weekly Mileage by Month (Last 2 Years)",
