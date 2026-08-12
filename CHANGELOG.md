@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-08-12
+
+### Added
+
+- Streamlit **Race Results** page with finish-time scatter chart, PR star markers, race history table, and type/date filters.
+- Chart toggle between **Finish Times** and **Pace** on Race Results.
+- Richer race chart tooltips (date, name, time, distance, pace, type).
+
+### Changed
+
+- Dashboard module cleanup: shared data helpers, consolidated nav/CSS, removed dead code.
+- README updated for dashboard layout and `PYTHONPATH=.:src`.
+
+### Fixed
+
+- Streamlit Cloud `KeyError` from bootstrap imports and missing CSV columns.
+- Pace chart `KeyError` when cached race data lacked `pace_min`.
+
 ## [1.1.0] — 2026-08-12
 
 ### Added
