@@ -9,19 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Streamlit **Race Results** page with finish-time scatter chart, PR star markers, race history table, and type/date filters.
-- Chart toggle between **Finish Times** and **Pace** on Race Results.
-- Richer race chart tooltips (date, name, time, distance, pace, type).
-
-### Changed
-
-- Dashboard module cleanup: shared data helpers, consolidated nav/CSS, removed dead code.
-- README updated for dashboard layout and `PYTHONPATH=.:src`.
-
-### Fixed
-
-- Streamlit Cloud `KeyError` from bootstrap imports and missing CSV columns.
-- Pace chart `KeyError` when cached race data lacked `pace_min`.
+- Streamlit **Runner's Dashboard** (`dashboard/`) with three pages: **Training Overview** (KPIs, 80:20 compliance, mileage charts), **Training Insights** (pace-bin HR trends and mileage heatmaps), and **Race Results** (finish-time/pace scatter chart, PR markers, race history table, and filters).
+- Shared dashboard modules for data loading, Plotly charts, theme/CSS, and navigation.
+- Dashboard unit tests under `tests/dashboard/` for `data`, `insights_data`, and `race_data`.
 
 ## [1.1.0] — 2026-08-12
 
