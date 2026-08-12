@@ -7,6 +7,9 @@ __pycache__/
 venv/
 env/
 
+# Local pyenv pin (CI/Streamlit use 3.11 from config)
+.python-version
+
 # Secrets and local env
 .env
 .env.*
