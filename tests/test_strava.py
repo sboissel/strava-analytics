@@ -56,6 +56,25 @@ class StravaClientTests(unittest.TestCase):
         self.assertEqual(client.refresh_token, "env_refresh")
         self.assertEqual(client.last_activity_id, "42")
 
+    def test_from_env_defaults_data_dir_to_repo_data(self):
+        """Ensure from_env uses the repo data directory when none is provided."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            data_dir = repo_root / "data"
+            data_dir.mkdir()
+            (data_dir / "highest_activity_id.txt").write_text("7\n")
+            env = {
+                "CLIENT_ID": "env_client",
+                "CLIENT_SECRET": "env_secret",
+                "REFRESH_TOKEN": "env_refresh",
+            }
+            with patch("strava_analytics.strava.REPO_ROOT", repo_root), patch.dict(
+                "os.environ", env, clear=False
+            ):
+                client = StravaClient.from_env()
+
+        self.assertEqual(client.last_activity_id, "7")
+
     def test_refresh_access_token_stores_token_on_client(self):
         """Ensure a successful OAuth response updates the client access token."""
         client = make_client()
@@ -73,6 +92,38 @@ class StravaClientTests(unittest.TestCase):
         self.assertEqual(client.access_token, "abc123")
         self.assertEqual(client.refresh_token, "new-refresh")
         post_mock.assert_called_once()
+
+    def test_refresh_access_token_keeps_refresh_token_when_absent(self):
+        """Ensure a token response without refresh_token leaves the existing value unchanged."""
+        client = make_client()
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"access_token": "abc123"}
+
+        with patch("strava_analytics.strava.requests.post", return_value=mock_response):
+            client.refresh_access_token()
+
+        self.assertEqual(client.access_token, "abc123")
+        self.assertEqual(client.refresh_token, "test_refresh")
+
+    def test_refresh_access_token_raises_for_failed_request(self):
+        """Ensure a non-200 OAuth response raises a descriptive runtime error."""
+        client = make_client()
+        mock_response = Mock()
+        mock_response.status_code = 401
+        mock_response.text = "unauthorized"
+
+        with patch("strava_analytics.strava.requests.post", return_value=mock_response):
+            with self.assertRaisesRegex(RuntimeError, r"401 unauthorized"):
+                client.refresh_access_token()
+
+    def test_require_access_token_raises_when_refresh_leaves_token_unset(self):
+        """Ensure _require_access_token fails if refresh does not populate access_token."""
+        client = make_client()
+
+        with patch.object(client, "refresh_access_token", return_value={}):
+            with self.assertRaisesRegex(RuntimeError, r"Failed to obtain an access token"):
+                client.get_activities()
 
     def test_get_activities_paginates_until_last_known_activity(self):
         """Ensure activity fetch loops until it reaches the latest known activity ID."""
@@ -93,6 +144,27 @@ class StravaClientTests(unittest.TestCase):
             activities = client.get_activities()
 
         self.assertEqual(len(activities), 2)
+        self.assertEqual(get_mock.call_count, 2)
+
+    def test_get_activities_stops_on_empty_page(self):
+        """Ensure activity fetch stops when a page returns no activities."""
+        client = make_client(last_activity_id="999")
+        client.access_token = "token"
+
+        first_page = Mock()
+        first_page.status_code = 200
+        first_page.json.return_value = [{"id": 1}]
+
+        empty_page = Mock()
+        empty_page.status_code = 200
+        empty_page.json.return_value = []
+
+        with patch(
+            "strava_analytics.strava.requests.get", side_effect=[first_page, empty_page]
+        ) as get_mock, patch("strava_analytics.strava.time.sleep", return_value=None):
+            activities = client.get_activities()
+
+        self.assertEqual(activities, [{"id": 1}])
         self.assertEqual(get_mock.call_count, 2)
 
     def test_get_streams_refreshes_access_token_when_missing(self):
@@ -174,6 +246,84 @@ class MainPipelineTests(unittest.TestCase):
             update_pace_mock.assert_not_called()
             self.assertTrue((data_dir / "activities_last_week.csv").exists())
             self.assertEqual(read_last_activity_id(data_dir), "1")
+
+    def test_main_writes_analysis_when_new_activities_exist(self):
+        """Ensure main updates analysis CSVs, last activity ID, and pace summary for new rows."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            write_last_activity_id(data_dir, 1)
+            for activity_type in ["run", "ride", "swim", "hike"]:
+                (data_dir / f"strava_{activity_type}_analysis.csv").write_text(
+                    "type,date,distance_miles\n"
+                )
+
+            client = make_client(last_activity_id="1")
+            client.access_token = "token"
+            new_df = pd.DataFrame(
+                [
+                    {
+                        "activity_id": 50,
+                        "name": "Run",
+                        "type": "Run",
+                        "date": "2024-01-01T00:00:00Z",
+                        "distance_miles": 1.0,
+                    },
+                    {
+                        "activity_id": 99,
+                        "name": "Ride",
+                        "type": "Ride",
+                        "date": "2024-01-02T00:00:00Z",
+                        "distance_miles": 10.0,
+                    },
+                ]
+            )
+            pace_summaries = [{"activity_id": 50, "seconds_under_700": 0}]
+
+            with patch("strava_analytics.strava.StravaClient.from_env", return_value=client), patch.object(
+                client, "refresh_access_token", return_value={"access_token": "token"}
+            ), patch.object(client, "get_activities", return_value=[{"id": 99}]), patch(
+                "strava_analytics.strava.process_activities",
+                return_value=(new_df, pace_summaries),
+            ), patch(
+                "strava_analytics.strava.update_activity_analysis_csvs"
+            ) as update_csvs_mock, patch(
+                "strava_analytics.strava.update_run_pace_analysis_csv"
+            ) as update_pace_mock:
+                main(data_dir=data_dir)
+
+            update_csvs_mock.assert_called_once()
+            update_pace_mock.assert_called_once_with(
+                pace_summaries, data_dir / "strava_run_pace_analysis.csv"
+            )
+            self.assertEqual(read_last_activity_id(data_dir), "99")
+            self.assertTrue((data_dir / "activities_last_week.csv").exists())
+
+    def test_main_defaults_data_dir_to_repo_data(self):
+        """Ensure main uses the repo data directory when none is provided."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            data_dir = repo_root / "data"
+            data_dir.mkdir()
+            write_last_activity_id(data_dir, 1)
+            for activity_type in ["run", "ride", "swim", "hike"]:
+                (data_dir / f"strava_{activity_type}_analysis.csv").write_text(
+                    "type,date,distance_miles\n"
+                )
+
+            client = make_client(last_activity_id="1")
+            client.access_token = "token"
+
+            with patch("strava_analytics.strava.REPO_ROOT", repo_root), patch(
+                "strava_analytics.strava.StravaClient.from_env", return_value=client
+            ) as from_env_mock, patch.object(
+                client, "refresh_access_token", return_value={"access_token": "token"}
+            ), patch.object(client, "get_activities", return_value=[]), patch(
+                "strava_analytics.strava.process_activities", return_value=(pd.DataFrame(), [])
+            ):
+                main()
+
+            from_env_mock.assert_called_once_with(data_dir=data_dir)
+            self.assertTrue((data_dir / "activities_last_week.csv").exists())
 
 
 if __name__ == "__main__":
