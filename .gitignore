@@ -2,9 +2,16 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Secrets and local env
 .env
 .env.*
+*.pem
+*.key
 
 .pytest_cache/
 .coverage
@@ -21,10 +28,17 @@ build/
 .mypy_cache/
 .ruff_cache/
 
-# Streamlit — never commit secrets (config.toml is OK to track)
+# Streamlit — never commit secrets (config.toml at repo root is OK to track)
 **/.streamlit/secrets.toml
 
-# Local debug artifacts
+# Local debug / scratch artifacts
 dashboard/_debug_*.png
+*.log
+logs/
 
+# Editor / OS
 .DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
