@@ -5,6 +5,8 @@
 
 This repository collects Strava activity exports, enriches them with pace and HR summaries, and writes CSV files for weekly analysis and run pace breakdowns.
 
+Versioning follows [Semantic Versioning](https://semver.org/); see [CHANGELOG.md](CHANGELOG.md).
+
 ## What the pipeline does
 
 The main script in [python/strava.py](python/strava.py) refreshes a Strava API token, downloads recent activities, processes each activity, and writes several CSV files into the [data](data) folder:
