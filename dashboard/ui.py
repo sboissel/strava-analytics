@@ -25,8 +25,8 @@ def band_dot(color_hex: str) -> str:
 def eh_kpi_tooltip(period: str) -> str:
     """Tooltip body for easy:hard KPI cards."""
     period_desc = {
-        "week": "the previous Mon–Sun week",
-        "month": "the previous calendar month",
+        "week": "the last full Mon–Sun week",
+        "month": "the last 30 days",
     }[period]
     return (
         "<strong>Definition</strong>"
@@ -52,7 +52,7 @@ def miles_kpi_tooltip() -> str:
     )
     return (
         "<strong>Definition</strong>"
-        "Total run mileage for the previous Mon–Sun week."
+        "Total run mileage for the last full Mon–Sun week."
         "<br><br>"
         "<strong>Target</strong>"
         f"~{WEEKLY_MILES_GOAL:.0f} mi/week."

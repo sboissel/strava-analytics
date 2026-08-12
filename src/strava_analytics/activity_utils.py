@@ -359,7 +359,9 @@ def process_activities(
         row = _activity_base_row(act)
 
         if act["type"] == "Run":
-            row["race"] = True if act["workout_type"] == 1 else False
+            is_race = act["workout_type"] == 1
+            row["race"] = is_race
+            row["race_distance"] = race_distance_label(row["distance_miles"], is_race)
             summary = _enrich_run_from_streams(row, activity_id, get_streams)
             if summary is not None:
                 pace_summaries.append(summary)
@@ -426,6 +428,7 @@ def activity_analysis_columns(activity_type: str) -> List[str]:
             "mt_min_easy",
             "mt_min_hard",
             "race",
+            "race_distance",
         ]
     return base_columns
 
@@ -551,6 +554,40 @@ def _drop_header_like_rows(df: pd.DataFrame) -> pd.DataFrame:
         df = df.loc[df["date"].str.lower() != "date"].copy()
 
     return df
+
+
+def last_full_week_bounds(as_of: Optional[pd.Timestamp] = None) -> Tuple[pd.Timestamp, pd.Timestamp]:
+    """Return ``[start, end)`` for the most recent completed Mon–Sun week.
+
+    Unlike ``week_summary_bounds``, this always uses the previous full calendar
+    week (Mon 00:00 UTC through the following Mon 00:00 UTC exclusive), even on
+    Sundays when the current week is still in progress.
+    """
+    as_of = as_of or pd.Timestamp.now(tz="UTC")
+    if as_of.tzinfo is None:
+        as_of = as_of.tz_localize("UTC")
+    else:
+        as_of = as_of.tz_convert("UTC")
+
+    today = as_of.normalize()
+    weekday = int(today.dayofweek)
+    last_sunday = today - pd.Timedelta(days=weekday + 1)
+    week_start = last_sunday - pd.Timedelta(days=6)
+    week_end = last_sunday + pd.Timedelta(days=1)
+    return week_start, week_end
+
+
+def race_distance_label(distance_miles: float, is_race: bool) -> Optional[str]:
+    """Map race activity distance to a standard race-distance bucket."""
+    if not is_race:
+        return None
+    if distance_miles >= 25.5:
+        return "Marathon"
+    if 12.0 <= distance_miles <= 14.5:
+        return "Half"
+    if 2.8 <= distance_miles <= 3.5:
+        return "5k"
+    return "Other"
 
 
 def week_summary_bounds(as_of: Optional[pd.Timestamp] = None) -> Tuple[pd.Timestamp, pd.Timestamp]:

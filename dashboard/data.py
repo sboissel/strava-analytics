@@ -10,7 +10,7 @@ import streamlit as st
 
 import _bootstrap  # noqa: F401
 
-from strava_analytics.activity_utils import week_summary_bounds
+from strava_analytics.activity_utils import last_full_week_bounds
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"
@@ -228,7 +228,7 @@ def easy_hard_ratio_label(df: pd.DataFrame) -> tuple[str, float | None]:
 
 
 def key_indicators(df: pd.DataFrame, as_of: pd.Timestamp | None = None) -> dict[str, object]:
-    """Compute E:H last week/month and miles last week relative to as_of."""
+    """Compute E:H last full week / last 30 days and miles last full week."""
     if df.empty:
         return {
             "eh_last_week": ("—", None),
@@ -242,10 +242,10 @@ def key_indicators(df: pd.DataFrame, as_of: pd.Timestamp | None = None) -> dict[
     else:
         as_of = as_of.tz_convert("UTC")
     today = as_of.normalize()
-    week_start, week_end = week_summary_bounds(as_of)
+    week_start, week_end = last_full_week_bounds(as_of)
 
-    month_start = (today.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
-    month_end = today.replace(day=1)
+    month_start = today - pd.Timedelta(days=30)
+    month_end = today + pd.Timedelta(days=1)
 
     last_week = df.loc[_window_mask(df, week_start, week_end)]
     last_month = df.loc[_window_mask(df, month_start, month_end)]

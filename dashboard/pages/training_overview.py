@@ -89,7 +89,7 @@ with right:
               <div class="kpi-value">{eh_week}</div>
             </div>
             <div class="kpi-card" style="--accent:{month_color}">
-              {kpi_label_html("E:H Last Month", eh_kpi_tooltip("month"))}
+              {kpi_label_html("E:H Last 30 Days", eh_kpi_tooltip("month"))}
               <div class="kpi-value">{eh_month}</div>
             </div>
             <div class="kpi-card" style="--accent:{miles_accent}">

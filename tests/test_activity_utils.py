@@ -21,6 +21,8 @@ from strava_analytics.activity_utils import (
     run_pace_columns,
     save_activities_last_week,
     speed_to_pace_seconds,
+    last_full_week_bounds,
+    race_distance_label,
     update_activity_analysis_csvs,
     update_run_pace_analysis_csv,
     week_summary_bounds,
@@ -350,6 +352,69 @@ class ActivityProcessingTests(unittest.TestCase):
                 ((200, ["heartrate", "distance", "time"]),),
             ],
         )
+
+    def test_process_activities_sets_race_distance_for_races(self):
+        """Ensure race runs get a race_distance bucket based on distance."""
+        activities = [
+            {
+                "id": 301,
+                "name": "5k Race",
+                "type": "Run",
+                "start_date": "2024-01-01T00:00:00Z",
+                "distance": 5000.0,
+                "moving_time": 1200,
+                "elapsed_time": 1200,
+                "total_elevation_gain": 0,
+                "average_speed": 4.17,
+                "max_speed": 5.0,
+                "workout_type": 1,
+            },
+            {
+                "id": 302,
+                "name": "Trail race",
+                "type": "Run",
+                "start_date": "2024-01-02T00:00:00Z",
+                "distance": 12000.0,
+                "moving_time": 3600,
+                "elapsed_time": 3600,
+                "total_elevation_gain": 100,
+                "average_speed": 3.33,
+                "max_speed": 4.0,
+                "workout_type": 1,
+            },
+        ]
+        get_streams = Mock(return_value={"heartrate": {"data": []}, "distance": {"data": []}, "time": {"data": []}})
+
+        with patch("strava_analytics.activity_utils.time.sleep", return_value=None):
+            result, _ = process_activities(activities, get_streams, last_activity_id="0")
+
+        self.assertEqual(result.loc[result["activity_id"] == 301, "race_distance"].iloc[0], "5k")
+        self.assertEqual(result.loc[result["activity_id"] == 302, "race_distance"].iloc[0], "Other")
+
+
+class RaceDistanceLabelTests(unittest.TestCase):
+    """Test race_distance_label buckets."""
+
+    def test_race_distance_label_returns_none_for_non_race(self):
+        self.assertIsNone(race_distance_label(13.1, False))
+
+    def test_race_distance_label_maps_standard_distances(self):
+        self.assertEqual(race_distance_label(3.1, True), "5k")
+        self.assertEqual(race_distance_label(13.1, True), "Half")
+        self.assertEqual(race_distance_label(26.2, True), "Marathon")
+        self.assertEqual(race_distance_label(7.5, True), "Other")
+
+
+class LastFullWeekBoundsTests(unittest.TestCase):
+    """Test last_full_week_bounds always uses the previous complete week."""
+
+    def test_last_full_week_bounds_uses_previous_week_on_sunday(self):
+        """Sunday should still use the previous completed Mon–Sun week."""
+        sunday = pd.Timestamp("2026-08-16T15:00:00Z")
+        start, end = last_full_week_bounds(sunday)
+
+        self.assertEqual(start, pd.Timestamp("2026-08-03T00:00:00Z"))
+        self.assertEqual(end, pd.Timestamp("2026-08-10T00:00:00Z"))
 
 
 class CsvProcessingTests(unittest.TestCase):
