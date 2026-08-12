@@ -23,8 +23,38 @@ def make_client(last_activity_id: str = "0") -> StravaClient:
     )
 
 
+class LastActivityIdHelperTests(unittest.TestCase):
+    """Test read_last_activity_id and write_last_activity_id."""
+
+    def test_read_and_write_last_activity_id(self):
+        """Ensure last activity ID helpers round-trip through the data directory file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            write_last_activity_id(data_dir, 123)
+            self.assertEqual(read_last_activity_id(data_dir), "123")
+
+
 class StravaClientTests(unittest.TestCase):
-    """Test StravaClient API helpers using mocked responses."""
+    """Test StravaClient methods in source-file order."""
+
+    def test_from_env_reads_credentials_and_last_activity_id(self):
+        """Ensure from_env loads credentials from the environment and last activity ID from disk."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            (data_dir / "highest_activity_id.txt").write_text("42\n")
+
+            env = {
+                "CLIENT_ID": "env_client",
+                "CLIENT_SECRET": "env_secret",
+                "REFRESH_TOKEN": "env_refresh",
+            }
+            with patch.dict("os.environ", env, clear=False):
+                client = StravaClient.from_env(data_dir=data_dir)
+
+        self.assertEqual(client.client_id, "env_client")
+        self.assertEqual(client.client_secret, "env_secret")
+        self.assertEqual(client.refresh_token, "env_refresh")
+        self.assertEqual(client.last_activity_id, "42")
 
     def test_refresh_access_token_stores_token_on_client(self):
         """Ensure a successful OAuth response updates the client access token."""
@@ -111,31 +141,9 @@ class StravaClientTests(unittest.TestCase):
 
         self.assertEqual(payload, {"distance": {"data": [1, 2]}})
 
-    def test_from_env_reads_credentials_and_last_activity_id(self):
-        """Ensure from_env loads credentials from the environment and last activity ID from disk."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            data_dir = Path(tmpdir)
-            (data_dir / "highest_activity_id.txt").write_text("42\n")
 
-            env = {
-                "CLIENT_ID": "env_client",
-                "CLIENT_SECRET": "env_secret",
-                "REFRESH_TOKEN": "env_refresh",
-            }
-            with patch.dict("os.environ", env, clear=False):
-                client = StravaClient.from_env(data_dir=data_dir)
-
-        self.assertEqual(client.client_id, "env_client")
-        self.assertEqual(client.client_secret, "env_secret")
-        self.assertEqual(client.refresh_token, "env_refresh")
-        self.assertEqual(client.last_activity_id, "42")
-
-    def test_read_and_write_last_activity_id(self):
-        """Ensure last activity ID helpers round-trip through the data directory file."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            data_dir = Path(tmpdir)
-            write_last_activity_id(data_dir, 123)
-            self.assertEqual(read_last_activity_id(data_dir), "123")
+class MainPipelineTests(unittest.TestCase):
+    """Test main pipeline orchestration."""
 
     def test_main_skips_writes_when_no_new_activities(self):
         """Ensure main still writes the weekly summary when processing returns no rows."""

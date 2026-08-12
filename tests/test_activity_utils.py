@@ -3,10 +3,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pandas as pd
 
 from strava_analytics.activity_utils import (
+    HR_EASY_THRESHOLD,
+    _activity_base_row,
     _drop_header_like_rows,
+    _enrich_run_from_streams,
     activity_analysis_columns,
     activity_analysis_paths,
     compute_hr_easy_stats,
@@ -23,8 +27,154 @@ from strava_analytics.activity_utils import (
 )
 
 
+class HeartRateAnalysisTests(unittest.TestCase):
+    """Test compute_hr_easy_stats."""
+
+    def test_compute_hr_easy_stats_returns_none_for_empty_streams(self):
+        """Ensure empty HR or time streams return no easy/hard stats."""
+        self.assertEqual(compute_hr_easy_stats([], [0, 600]), (None, None, None))
+        self.assertEqual(compute_hr_easy_stats([120, 160], []), (None, None, None))
+
+    def test_compute_hr_easy_stats_returns_expected_durations(self):
+        """Validate that easy and hard duration calculations are based on the HR threshold correctly."""
+        easy_hr = HR_EASY_THRESHOLD - 22
+        hard_hr = HR_EASY_THRESHOLD + 18
+        pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(
+            hr_stream=[easy_hr, hard_hr, easy_hr],
+            time_stream=[0, 600, 1200],
+        )
+
+        self.assertEqual(pct_easy, 50.0)
+        self.assertEqual(mt_min_easy, 10.0)
+        self.assertEqual(mt_min_hard, 10.0)
+
+    def test_compute_hr_easy_stats_treats_threshold_hr_as_hard(self):
+        """Ensure HR equal to the threshold is hard (easy is strictly below)."""
+        easy_hr = HR_EASY_THRESHOLD - 1
+        pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(
+            hr_stream=[easy_hr, HR_EASY_THRESHOLD, easy_hr],
+            time_stream=[0, 600, 1200],
+        )
+
+        self.assertEqual(pct_easy, 50.0)
+        self.assertEqual(mt_min_easy, 10.0)
+        self.assertEqual(mt_min_hard, 10.0)
+
+    def test_compute_hr_easy_stats_trims_mismatched_stream_lengths(self):
+        """Ensure mismatched HR/time lengths are trimmed to the shared prefix before scoring."""
+        easy_hr = HR_EASY_THRESHOLD - 22
+        hard_hr = HR_EASY_THRESHOLD + 18
+        pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(
+            hr_stream=[easy_hr, hard_hr, easy_hr, hard_hr],
+            time_stream=[0, 600, 1200],
+        )
+
+        self.assertEqual(pct_easy, 50.0)
+        self.assertEqual(mt_min_easy, 10.0)
+        self.assertEqual(mt_min_hard, 10.0)
+
+    def test_compute_hr_easy_stats_ignores_non_finite_samples(self):
+        """Ensure NaN/inf HR or time samples are dropped while finite pairs are scored."""
+        easy_hr = HR_EASY_THRESHOLD - 22
+        hard_hr = HR_EASY_THRESHOLD + 18
+        pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(
+            hr_stream=[easy_hr, np.nan, hard_hr],
+            time_stream=[0, 300, 600],
+        )
+
+        self.assertEqual(pct_easy, 0.0)
+        self.assertEqual(mt_min_easy, 0.0)
+        self.assertEqual(mt_min_hard, 10.0)
+
+
+class PaceFormattingTests(unittest.TestCase):
+    """Test speed_to_pace_seconds, format_time, pace_bin_for_seconds, and run_pace_columns."""
+
+    def test_speed_and_duration_helpers_format_values(self):
+        """Ensure speed conversion and time formatting return the expected values."""
+        self.assertEqual(speed_to_pace_seconds(3.0), 536)
+        self.assertEqual(speed_to_pace_seconds(0), None)
+        self.assertEqual(format_time(536, include_hours=False), "08:56")
+        self.assertEqual(format_time(3661, include_hours=True), "01:01:01")
+        self.assertIsNone(format_time(None, include_hours=False))
+
+    def test_pace_bin_for_seconds_uses_expected_labels(self):
+        """Check that pace thresholds map to the expected pace-bin labels."""
+        self.assertEqual(pace_bin_for_seconds(419), "under_700")
+        self.assertEqual(pace_bin_for_seconds(420), "700_730")
+        self.assertEqual(pace_bin_for_seconds(690), "over_1130")
+
+    def test_run_pace_columns_returns_expected_order(self):
+        """Ensure the canonical run-pace column list starts with the activity ID and includes pace bins."""
+        columns = run_pace_columns()
+        self.assertEqual(columns[0], "activity_id")
+        self.assertIn("seconds_under_700", columns)
+        self.assertIn("avg_hr_over_1130", columns)
+
+
 class PaceSummaryTests(unittest.TestCase):
-    """Test pace summary aggregation and binning helpers."""
+    """Test compute_run_pace_summary_from_streams."""
+
+    def test_compute_run_pace_summary_from_streams_returns_none_for_empty_streams(self):
+        """Ensure missing distance, time, or HR streams return no pace summary."""
+        distance = [0.0, 1609.34]
+        time_vals = [0.0, 420.0]
+        hr = [150.0, 150.0]
+
+        self.assertIsNone(
+            compute_run_pace_summary_from_streams(1, [], time_vals, hr)
+        )
+        self.assertIsNone(
+            compute_run_pace_summary_from_streams(1, distance, [], hr)
+        )
+        self.assertIsNone(
+            compute_run_pace_summary_from_streams(1, distance, time_vals, [])
+        )
+
+    def test_compute_run_pace_summary_from_streams_trims_to_shared_length(self):
+        """Ensure streams are trimmed to the shared prefix before binning."""
+        summary = compute_run_pace_summary_from_streams(
+            activity_id=123,
+            distance_meters=[0.0, 1609.34, 3218.68, 99999.0],
+            time_seconds=[0.0, 420.0, 900.0],
+            hr_values=[150.0, 150.0, 150.0],
+        )
+
+        self.assertEqual(summary["seconds_700_730"], 420)
+        self.assertEqual(summary["seconds_800_830"], 480)
+        self.assertIsNone(
+            compute_run_pace_summary_from_streams(
+                activity_id=1,
+                distance_meters=[0.0],
+                time_seconds=[0.0, 420.0],
+                hr_values=[150.0, 150.0],
+            )
+        )
+
+    def test_compute_run_pace_summary_from_streams_skips_non_finite_samples(self):
+        """Ensure non-finite distance/time samples are skipped while finite segments are scored."""
+        summary = compute_run_pace_summary_from_streams(
+            activity_id=123,
+            distance_meters=[0.0, 1609.34, np.nan, 3218.68],
+            time_seconds=[0.0, 420.0, 500.0, 900.0],
+            hr_values=[150.0, 150.0, 150.0, 160.0],
+        )
+
+        self.assertEqual(summary["seconds_700_730"], 420)
+        self.assertAlmostEqual(summary["avg_hr_700_730"], 150.0)
+        self.assertEqual(summary["seconds_800_830"], 0)
+
+    def test_compute_run_pace_summary_from_streams_sets_avg_hr_nan_without_valid_hr(self):
+        """Ensure bins with elapsed time but no finite HR get avg_hr as NaN."""
+        summary = compute_run_pace_summary_from_streams(
+            activity_id=123,
+            distance_meters=[0.0, 1609.34],
+            time_seconds=[0.0, 420.0],
+            hr_values=[150.0, np.nan],
+        )
+
+        self.assertEqual(summary["seconds_700_730"], 420)
+        self.assertTrue(np.isnan(summary["avg_hr_700_730"]))
 
     def test_compute_run_pace_summary_from_streams(self):
         """Verify that pace-bin summaries are computed with the expected elapsed time and HR values."""
@@ -42,29 +192,104 @@ class PaceSummaryTests(unittest.TestCase):
         self.assertAlmostEqual(summary["avg_hr_800_830"], 150.0)
         self.assertIn("seconds_under_700", summary)
 
-    def test_ignores_runs_without_hr_data(self):
-        """Ensure runs without heart-rate data return no summary instead of producing invalid output."""
-        summary = compute_run_pace_summary_from_streams(
-            activity_id=456,
-            distance_meters=[0.0, 1609.34],
-            time_seconds=[0.0, 300.0],
-            hr_values=[],
-        )
 
-        self.assertIsNone(summary)
+class ActivityRowHelperTests(unittest.TestCase):
+    """Test _activity_base_row and _enrich_run_from_streams."""
 
-
-class ActivityProcessingTests(unittest.TestCase):
-    """Test activity enrichment helpers that consume a stream fetcher."""
-
-    def test_process_activities_enriches_run_rows_and_reuses_streams(self):
-        """Ensure runs are enriched and pace summaries reuse the same stream fetch."""
-        activities = [
+    def test_activity_base_row_maps_strava_fields(self):
+        """Ensure a raw Strava activity is mapped into the shared analysis row shape."""
+        row = _activity_base_row(
             {
                 "id": 123,
                 "name": "Morning Run",
                 "type": "Run",
                 "start_date": "2024-01-01T00:00:00Z",
+                "distance": 1609.34,
+                "moving_time": 600,
+                "elapsed_time": 660,
+                "total_elevation_gain": 30.48,
+                "average_speed": 2.68,
+                "max_speed": 3.0,
+            }
+        )
+
+        self.assertEqual(
+            row,
+            {
+                "activity_id": 123,
+                "name": "Morning Run",
+                "type": "Run",
+                "date": "2024-01-01T00:00:00Z",
+                "distance_miles": 1.0,
+                "moving_time_min": "00:10:00",
+                "elapsed_time_min": "00:11:00",
+                "elevation_gain_ft": 100.0,
+                "avg_pace": "10:00",
+                "avg_pace_sec": 600,
+                "max_pace": "08:56",
+                "max_pace_sec": 536,
+                "race": None,
+            },
+        )
+
+    def test_enrich_run_from_streams_adds_hr_stats_and_pace_summary(self):
+        """Ensure run rows gain HR fields and return a pace summary from streams."""
+        row = {"activity_id": 123}
+        get_streams = Mock(
+            return_value={
+                "heartrate": {"data": [120.0, 160.0]},
+                "distance": {"data": [0.0, 1609.34]},
+                "time": {"data": [0.0, 600.0]},
+            }
+        )
+
+        pace_summary = _enrich_run_from_streams(row, 123, get_streams)
+
+        self.assertEqual(row["avg_hr"], 140.0)
+        self.assertEqual(row["max_hr"], 160)
+        self.assertIn("%_easy", row)
+        self.assertEqual(pace_summary["activity_id"], 123)
+        self.assertEqual(pace_summary["seconds_1000_1030"], 600)
+        get_streams.assert_called_once_with(123, ["heartrate", "distance", "time"])
+
+
+class ActivityProcessingTests(unittest.TestCase):
+    """Test process_activities."""
+
+    def test_process_activities_enriches_run_rows_and_reuses_streams(self):
+        """Ensure runs are enriched, old IDs skipped, and streams fetched once per new run."""
+        activities = [
+            {
+                "id": 50,
+                "name": "Already Processed Run",
+                "type": "Run",
+                "start_date": "2023-12-01T00:00:00Z",
+                "distance": 1609.34,
+                "moving_time": 600,
+                "elapsed_time": 600,
+                "total_elevation_gain": 0,
+                "average_speed": 2.68,
+                "max_speed": 3.0,
+                "workout_type": 0,
+            },
+            {
+                "id": 123,
+                "name": "Morning Run",
+                "type": "Run",
+                "start_date": "2024-01-01T00:00:00Z",
+                "distance": 1609.34,
+                "moving_time": 600,
+                "elapsed_time": 600,
+                "total_elevation_gain": 0,
+                "average_speed": 2.68,
+                "max_speed": 3.0,
+                "workout_type": 0,
+            },
+            {
+                "id": 200,
+                "name": "No HR Run",
+                "type": "Run",
+                "start_date": "2024-01-02T00:00:00Z",
                 "distance": 1609.34,
                 "moving_time": 600,
                 "elapsed_time": 600,
@@ -88,99 +313,47 @@ class ActivityProcessingTests(unittest.TestCase):
             },
         ]
 
-        mock_streams = {
+        streams_with_hr = {
             "heartrate": {"data": [120.0, 160.0]},
             "distance": {"data": [0.0, 1609.34]},
             "time": {"data": [0.0, 600.0]},
         }
-        get_streams = Mock(return_value=mock_streams)
+        streams_without_hr = {
+            "heartrate": {"data": []},
+            "distance": {"data": [0.0, 1609.34]},
+            "time": {"data": [0.0, 600.0]},
+        }
+
+        def get_streams_side_effect(activity_id, keys):
+            if activity_id == 123:
+                return streams_with_hr
+            return streams_without_hr
+
+        get_streams = Mock(side_effect=get_streams_side_effect)
 
         with patch("strava_analytics.activity_utils.time.sleep", return_value=None):
-            result, pace_summaries = process_activities(activities, get_streams, last_activity_id="0")
+            result, pace_summaries = process_activities(
+                activities, get_streams, last_activity_id="100"
+            )
 
+        self.assertNotIn(50, result["activity_id"].tolist())
         self.assertIn("%_easy", result.columns)
         self.assertEqual(result.loc[result["activity_id"] == 123, "avg_hr"].iloc[0], 140.0)
+        self.assertTrue(pd.isna(result.loc[result["activity_id"] == 200, "avg_hr"].iloc[0]))
         self.assertEqual(result.loc[result["activity_id"] == 456, "type"].iloc[0], "Ride")
         self.assertEqual(len(pace_summaries), 1)
         self.assertEqual(pace_summaries[0]["activity_id"], 123)
-        get_streams.assert_called_once_with(123, ["heartrate", "distance", "time"])
-
-
-class PaceFormattingTests(unittest.TestCase):
-    """Test pace parsing and formatting helper functions."""
-
-    def test_pace_bin_for_seconds_uses_expected_labels(self):
-        """Check that pace thresholds map to the expected pace-bin labels."""
-        self.assertEqual(pace_bin_for_seconds(419), "under_700")
-        self.assertEqual(pace_bin_for_seconds(420), "700_730")
-        self.assertEqual(pace_bin_for_seconds(690), "over_1130")
-
-    def test_speed_and_duration_helpers_format_values(self):
-        """Ensure speed conversion and clock formatting return the expected values."""
-        self.assertEqual(speed_to_pace_seconds(3.0), 536)
-        self.assertEqual(format_time(536, include_hours=False), "08:56")
-        self.assertEqual(format_time(3661, include_hours=True), "01:01:01")
-        self.assertIsNone(format_time(None, include_hours=False))
-
-    def test_run_pace_columns_returns_expected_order(self):
-        """Ensure the canonical run-pace column list starts with the activity ID and includes pace bins."""
-        columns = run_pace_columns()
-        self.assertEqual(columns[0], "activity_id")
-        self.assertIn("seconds_under_700", columns)
-        self.assertIn("avg_hr_over_1130", columns)
-
-
-class HeartRateAnalysisTests(unittest.TestCase):
-    """Test heart-rate-based activity analysis helpers."""
-
-    def test_compute_hr_easy_stats_returns_expected_durations(self):
-        """Validate that easy and hard duration calculations are based on the HR threshold correctly."""
-        pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(
-            hr_stream=[120, 160, 140],
-            time_stream=[0, 600, 1200],
-            threshold=142,
+        self.assertEqual(
+            get_streams.call_args_list,
+            [
+                ((123, ["heartrate", "distance", "time"]),),
+                ((200, ["heartrate", "distance", "time"]),),
+            ],
         )
-
-        self.assertEqual(pct_easy, 50.0)
-        self.assertEqual(mt_min_easy, 10.0)
-        self.assertEqual(mt_min_hard, 10.0)
 
 
 class CsvProcessingTests(unittest.TestCase):
-    """Test CSV-based processing helpers that do not call the Strava API."""
-
-    def test_update_run_pace_analysis_csv_writes_summaries(self):
-        """Ensure the pace-analysis CSV file is populated from precomputed summaries."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = Path(tmpdir) / "pace.csv"
-            existing_df = pd.DataFrame({"activity_id": [999], "seconds_under_700": [10], "avg_hr_under_700": [100]})
-            existing_df.to_csv(output_path, index=False)
-
-            pace_summaries = [
-                {
-                    "activity_id": 123,
-                    "seconds_under_700": 0,
-                    "avg_hr_under_700": float("nan"),
-                    "seconds_700_730": 420,
-                    "avg_hr_700_730": 150.0,
-                }
-            ]
-
-            update_run_pace_analysis_csv(pace_summaries, output_path)
-            written = pd.read_csv(output_path)
-
-        self.assertIn("activity_id", written.columns)
-        self.assertIn("seconds_700_730", written.columns)
-        self.assertTrue(written[written["activity_id"].astype(str) == "123"].shape[0] == 1)
-
-    def test_update_run_pace_analysis_csv_skips_empty_summaries(self):
-        """Ensure empty pace summaries return early without writing."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = Path(tmpdir) / "pace.csv"
-
-            update_run_pace_analysis_csv([], output_path)
-
-            self.assertFalse(output_path.exists())
+    """Test CSV persistence helpers in source-file order."""
 
     def test_update_activity_analysis_csvs_merges_by_type(self):
         """Ensure per-type analysis CSVs are updated and existing rows are preserved."""
@@ -260,6 +433,68 @@ class CsvProcessingTests(unittest.TestCase):
         self.assertIn("avg_hr", run_df.columns)
         self.assertNotIn("avg_hr", ride_df.columns)
 
+    def test_update_activity_analysis_csvs_keeps_new_row_for_duplicate_activity_id(self):
+        """Ensure an activity present in both the CSV and new dataframe keeps the new values."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            existing_run = pd.DataFrame(
+                [
+                    {
+                        "activity_id": "123",
+                        "name": "Old Name",
+                        "type": "Run",
+                        "date": "2024-01-01T00:00:00Z",
+                        "distance_miles": "3.0",
+                        "moving_time_min": "00:30:00",
+                        "elapsed_time_min": "00:30:00",
+                        "elevation_gain_ft": "0",
+                        "avg_pace": "10:00",
+                        "avg_pace_sec": "600",
+                        "max_pace": "09:00",
+                        "max_pace_sec": "540",
+                    }
+                ]
+            )
+            for activity_type in ["Run", "Ride", "Swim", "Hike"]:
+                path = output_dir / f"strava_{activity_type.lower()}_analysis.csv"
+                if activity_type == "Run":
+                    existing_run.to_csv(path, index=False)
+                else:
+                    pd.DataFrame(columns=activity_analysis_columns(activity_type)).to_csv(path, index=False)
+
+            new_df = pd.DataFrame(
+                [
+                    {
+                        "activity_id": 123,
+                        "name": "Updated Run",
+                        "type": "Run",
+                        "date": "2024-02-01T00:00:00Z",
+                        "distance_miles": 1.0,
+                        "moving_time_min": "00:10:00",
+                        "elapsed_time_min": "00:10:00",
+                        "elevation_gain_ft": 0.0,
+                        "avg_pace": "10:00",
+                        "avg_pace_sec": 600,
+                        "max_pace": "09:00",
+                        "max_pace_sec": 540,
+                        "avg_hr": 145.0,
+                        "max_hr": 165,
+                        "%_easy": 40.0,
+                        "mt_min_easy": 4.0,
+                        "mt_min_hard": 6.0,
+                        "race": False,
+                    }
+                ]
+            )
+
+            update_activity_analysis_csvs(new_df, output_dir)
+            run_df = pd.read_csv(output_dir / "strava_run_analysis.csv")
+
+        self.assertEqual(len(run_df), 1)
+        self.assertEqual(str(run_df.iloc[0]["activity_id"]), "123")
+        self.assertEqual(run_df.iloc[0]["name"], "Updated Run")
+        self.assertEqual(float(run_df.iloc[0]["avg_hr"]), 145.0)
+
     def test_update_activity_analysis_csvs_skips_writes_for_empty_dataframe(self):
         """Ensure an empty activity dataframe does not rewrite analysis files."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -274,10 +509,65 @@ class CsvProcessingTests(unittest.TestCase):
             for path in activity_analysis_paths(output_dir):
                 self.assertIn("# sentinel", path.read_text())
 
-    def test_week_summary_bounds_uses_previous_week_on_weekdays(self):
-        """Ensure Monday-Saturday select the previous Mon-Sun calendar week."""
-        wednesday = pd.Timestamp("2026-08-12T15:00:00Z")
-        start, end = week_summary_bounds(wednesday)
+    def test_update_run_pace_analysis_csv_writes_summaries(self):
+        """Ensure the pace-analysis CSV file is populated from precomputed summaries."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "pace.csv"
+            existing_df = pd.DataFrame({"activity_id": [999], "seconds_under_700": [10], "avg_hr_under_700": [100]})
+            existing_df.to_csv(output_path, index=False)
+
+            pace_summaries = [
+                {
+                    "activity_id": 123,
+                    "seconds_under_700": 0,
+                    "avg_hr_under_700": float("nan"),
+                    "seconds_700_730": 420,
+                    "avg_hr_700_730": 150.0,
+                }
+            ]
+
+            update_run_pace_analysis_csv(pace_summaries, output_path)
+            written = pd.read_csv(output_path)
+
+        self.assertIn("activity_id", written.columns)
+        self.assertIn("seconds_700_730", written.columns)
+        self.assertTrue(written[written["activity_id"].astype(str) == "123"].shape[0] == 1)
+
+    def test_update_run_pace_analysis_csv_skips_empty_summaries(self):
+        """Ensure empty pace summaries return early without writing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "pace.csv"
+
+            update_run_pace_analysis_csv([], output_path)
+
+            self.assertFalse(output_path.exists())
+
+    def test_drop_header_like_rows_removes_header_rows(self):
+        """Ensure repeated header rows are removed from imported CSV-like dataframes."""
+        df = pd.DataFrame(
+            [
+                ["activity_id", "name", "type"],
+                ["123", "Run 1", "Run"],
+            ],
+            columns=["activity_id", "name", "type"],
+        )
+        cleaned = _drop_header_like_rows(df)
+
+        self.assertEqual(cleaned.shape[0], 1)
+        self.assertEqual(cleaned.iloc[0]["activity_id"], "123")
+
+    def test_week_summary_bounds_uses_previous_week_on_monday(self):
+        """Ensure Monday selects the previous Mon-Sun calendar week."""
+        monday = pd.Timestamp("2026-08-10T15:00:00Z")
+        start, end = week_summary_bounds(monday)
+
+        self.assertEqual(start, pd.Timestamp("2026-08-03T00:00:00Z"))
+        self.assertEqual(end, pd.Timestamp("2026-08-10T00:00:00Z"))
+
+    def test_week_summary_bounds_uses_previous_week_on_saturday(self):
+        """Ensure Saturday selects the previous Mon-Sun calendar week."""
+        saturday = pd.Timestamp("2026-08-15T15:00:00Z")
+        start, end = week_summary_bounds(saturday)
 
         self.assertEqual(start, pd.Timestamp("2026-08-03T00:00:00Z"))
         self.assertEqual(end, pd.Timestamp("2026-08-10T00:00:00Z"))
@@ -296,11 +586,17 @@ class CsvProcessingTests(unittest.TestCase):
             data_dir = Path(tmpdir)
             as_of = pd.Timestamp("2026-08-12T12:00:00Z")  # Wednesday -> previous week Aug 3-9
             pd.DataFrame(
-                [{"type": "Run", "date": "2026-08-05T10:00:00Z", "distance_miles": 3.1}]
+                [
+                    {"type": "Run", "date": "2026-08-05T10:00:00Z", "distance_miles": 3.1},
+                    {"type": "Run", "date": "2026-08-01T09:00:00Z", "distance_miles": 2.0},
+                ]
             ).to_csv(data_dir / "strava_run_analysis.csv", index=False)
             pd.DataFrame(
                 [{"type": "Ride", "date": "2026-08-08T10:00:00Z", "distance_miles": 10.0}]
             ).to_csv(data_dir / "strava_ride_analysis.csv", index=False)
+            pd.DataFrame(
+                [{"type": "Swim", "date": "2026-08-01T10:00:00Z", "distance_miles": 1.0}]
+            ).to_csv(data_dir / "strava_swim_analysis.csv", index=False)
             pd.DataFrame(
                 [{"type": "Hike", "date": "2026-08-11T10:00:00Z", "distance_miles": 2.0}]
             ).to_csv(data_dir / "strava_hike_analysis.csv", index=False)
@@ -311,20 +607,6 @@ class CsvProcessingTests(unittest.TestCase):
             self.assertTrue(output_path.exists())
             self.assertEqual(result.shape[0], 2)
             self.assertEqual(sorted(result["type"].tolist()), ["Ride", "Run"])
-
-    def test_drop_header_like_rows_removes_header_rows(self):
-        """Ensure repeated header rows are removed from imported CSV-like dataframes."""
-        df = pd.DataFrame(
-            [
-                ["activity_id", "name", "type"],
-                ["123", "Run 1", "Run"],
-            ],
-            columns=["activity_id", "name", "type"],
-        )
-        cleaned = _drop_header_like_rows(df)
-
-        self.assertEqual(cleaned.shape[0], 1)
-        self.assertEqual(cleaned.iloc[0]["activity_id"], "123")
 
 
 if __name__ == "__main__":

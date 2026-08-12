@@ -472,7 +472,9 @@ def update_activity_analysis_csvs(
 
         existing_df = pd.read_csv(filename, dtype=str, keep_default_na=False)
         existing_df = _drop_header_like_rows(existing_df)
-        typed_df = pd.concat([typed_df, existing_df], axis=0, sort=False).drop_duplicates(subset=["activity_id"])
+        typed_df = pd.concat([typed_df, existing_df], axis=0, sort=False)
+        typed_df["activity_id"] = typed_df["activity_id"].astype(str)
+        typed_df = typed_df.drop_duplicates(subset=["activity_id"])
         typed_df = typed_df.drop(columns=["zrfs", "vo2max"], errors="ignore")
         typed_df = typed_df.reindex(columns=activity_analysis_columns(activity_type))
         typed_df.to_csv(filename, index=False)
