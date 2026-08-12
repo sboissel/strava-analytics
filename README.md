@@ -9,7 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/); see [CHANGELOG.md
 
 ## What the pipeline does
 
-The main script in [python/strava.py](python/strava.py) refreshes a Strava API token, downloads recent activities, processes each activity, and writes several CSV files into the [data](data) folder:
+The main script in [`src/strava_analytics/strava.py`](src/strava_analytics/strava.py) refreshes a Strava API token, downloads recent activities, processes each activity, and writes several CSV files into the [data](data) folder:
 
 - [data/strava_run_analysis.csv](data/strava_run_analysis.csv): run-specific enrichment including pace, HR, and easy/hard time metrics
 - [data/strava_ride_analysis.csv](data/strava_ride_analysis.csv): ride exports
@@ -40,10 +40,37 @@ The script expects these environment variables to be defined before it runs:
 From the repository root:
 
 ```bash
-python python/strava.py
+PYTHONPATH=src python -m strava_analytics.strava
 ```
 
 The script will refresh the access token, fetch activities, and rewrite the CSV outputs in the data directory.
+
+## Weekly GitLab sync
+
+A scheduled GitLab CI job runs the pipeline every Sunday night and commits updated files under [`data/`](data) back to `main`.
+
+### 1. CI/CD variables
+
+In GitLab → **Settings → CI/CD → Variables**, add (masked / protected as appropriate):
+
+| Variable | Purpose |
+| -------- | ------- |
+| `CLIENT_ID` | Strava OAuth client ID |
+| `CLIENT_SECRET` | Strava OAuth client secret |
+| `REFRESH_TOKEN` | Strava refresh token |
+| `CI_PUSH_TOKEN` | Project access token with `write_repository` (used to push data commits; job token is not enough for protected `main`) |
+
+Create the push token under **Settings → Access tokens** (role: Maintainer, scope: `write_repository`).
+
+### 2. Pipeline schedule
+
+In GitLab → **Build → Pipeline schedules**:
+
+1. Create a schedule targeting `main`.
+2. Cron: `0 23 * * 0` (Sunday 23:00), timezone `Europe/Paris`.
+3. Save, then use **Play** once to verify after the variables are set.
+
+The `sync` job runs only for scheduled pipelines; the `test` job still runs on normal pushes.
 
 ## Running the tests
 

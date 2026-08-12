@@ -4,10 +4,12 @@ This repository lives on **GitLab** as the source of truth. A GitLab push mirror
 
 | Platform | Repository |
 | -------- | ---------- |
-| GitLab (source) | `https://gitlab.com/sboissel1/strava-analytics` |
+| GitLab (source) | `https://gitlab.com/sandrineboissel/strava-analytics` |
 | GitHub (mirror) | `https://github.com/sboissel/strava-analytics` |
 
-GitLab CI (`.gitlab-ci.yml`) runs tests on GitLab. Pushing to GitLab is enough for the mirror to update GitHub.
+GitLab CI (`.gitlab-ci.yml`) runs tests on push and a weekly scheduled sync that commits updated `data/` files back to `main`. Pushing to GitLab (including those CI commits) is enough for the mirror to update GitHub.
+
+See the **Weekly GitLab sync** section in [README.md](README.md) for CI variables and the Sunday pipeline schedule.
 
 ## 1. Create the GitHub repository
 
@@ -16,7 +18,7 @@ GitLab CI (`.gitlab-ci.yml`) runs tests on GitLab. Pushing to GitLab is enough f
 
 ## 2. Configure GitLab push mirror
 
-In GitLab (`https://gitlab.com/sboissel1/strava-analytics`):
+In GitLab (`https://gitlab.com/sandrineboissel/strava-analytics`):
 
 1. Go to **Settings → Repository → Mirroring repositories**.
 2. Under **Push to a remote repository**:
