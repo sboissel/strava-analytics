@@ -8,7 +8,10 @@ from typing import Literal
 import pandas as pd
 import streamlit as st
 
-import _bootstrap  # noqa: F401
+try:
+    from . import _bootstrap  # noqa: F401
+except ImportError:
+    import _bootstrap  # noqa: F401
 
 from strava_analytics.activity_utils import last_full_week_bounds
 
