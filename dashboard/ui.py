@@ -5,7 +5,16 @@ from __future__ import annotations
 import html
 import math
 
-from charts import compliance_title, heatmap_title, mileage_title, pace_hr_title
+from charts import (
+    RACE_EVENTS_TITLE,
+    RACE_STRIP_DIAMOND_COLOR,
+    RACE_STRIP_SQUARE_COLOR,
+    compliance_title,
+    elevation_title,
+    heatmap_title,
+    mileage_title,
+    pace_hr_title,
+)
 from data import format_full_date
 from theme import (
     TRAFFIC_GREEN,
@@ -28,6 +37,7 @@ from theme import (
 )
 
 
+
 def band_dot(color_hex: str) -> str:
     """Return HTML for a small colored circle in KPI tooltips.
 
@@ -42,6 +52,56 @@ def band_dot(color_hex: str) -> str:
         HTML ``span`` element markup for the colored dot.
     """
     return f'<span class="band-dot" style="background:{color_hex}"></span>'
+
+
+def band_diamond(color_hex: str) -> str:
+    """Return HTML for a small diamond swatch in race-strip tooltips."""
+    return f'<span class="band-diamond" style="background:{color_hex}"></span>'
+
+
+def band_square(color_hex: str) -> str:
+    """Return HTML for a small square swatch in race-strip tooltips."""
+    return f'<span class="band-square" style="background:{color_hex}"></span>'
+
+
+def race_weeks_legend_html() -> str:
+    """Return the Training race-strip label and hover legend.
+
+    The left panel label is **Races** (CSS ``text-transform: uppercase``
+    renders it as **RACES**). Hovering the ⓘ control (not the label or
+    strip) shows marker shapes: cool-gray squares for training periods and
+    muted-gold diamonds for race periods — same pattern as Shoes/KPI info icons.
+
+    Returns
+    -------
+    str
+        HTML markup for the frozen strip label and ``.kpi-tooltip`` legend.
+    """
+    title = RACE_EVENTS_TITLE
+    tooltip = (
+        f"<strong>{html.escape(title)}</strong>"
+        '<span class="race-legend-row">'
+        f'<span class="race-legend-marker">{band_square(RACE_STRIP_SQUARE_COLOR)}</span>'
+        "<span>Training period (no race)</span>"
+        "</span>"
+        '<span class="race-legend-row">'
+        f'<span class="race-legend-marker">{band_diamond(RACE_STRIP_DIAMOND_COLOR)}</span>'
+        "<span>Race in this period</span>"
+        "</span>"
+    )
+    return (
+        '<div class="race-week-legend">'
+        f'<span class="panel-label race-week-strip-label">{html.escape(title)}</span>'
+        '<span class="kpi-info" tabindex="0" role="button" '
+        f'aria-label="About {html.escape(title.lower())}">'
+        '<span aria-hidden="true">ⓘ</span>'
+        f'<span class="kpi-tooltip" role="tooltip">{tooltip}</span>'
+        "</span></div>"
+    )
+
+
+
+RACE_WEEK_STRIP_KEYS = ("race_week_strip",)
 
 
 def eh_kpi_tooltip(period: str) -> str:
@@ -319,10 +379,10 @@ def key_indicators_html(
 
 
 def metrics_inspect_anchor_html() -> str:
-    """Scroll target for the Metrics section nav ``Inspect`` link.
+    """Invisible scroll target for the Metrics Inspect expander.
 
     The visible Inspect title lives on the expander summary, styled as
-    ``.panel-label`` in CSS — this helper is an invisible anchor only.
+    ``.panel-label`` in CSS. Inspect is not a left-nav jump link.
     """
     return (
         '<div id="kpi-detail" class="metrics-inspect-anchor" aria-hidden="true"></div>'
@@ -746,8 +806,51 @@ def shoe_kpi_cards_html(gear, goal: float = SHOE_MILEAGE_GOAL) -> str:
     )
 
 
-def render_section_nav(sections: list[tuple[str, str]], *, aria_label: str) -> None:
-    """Render in-page section links in the Streamlit sidebar.
+# Page key, sidebar label, path relative to ``dashboard/streamlit_app.py``.
+# Labels follow ``st.Page`` titles in the entrypoint.
+NAV_PAGES: tuple[tuple[str, str, str], ...] = (
+    ("metrics", "Metrics", "pages/metrics.py"),
+    ("training", "Training", "pages/training.py"),
+    ("training_insights", "Training Insights", "pages/training_insights.py"),
+    ("race_results", "Race Results", "pages/race_results.py"),
+)
+
+METRICS_SECTIONS: list[tuple[str, str]] = [
+    ("achievements", "Achievements"),
+    ("key-indicators", "Key Indicators"),
+    ("shoe-mileage", "Shoes"),
+]
+
+
+def sidebar_nav_entries(
+    current_page: str,
+    sections: list[tuple[str, str]],
+) -> list[tuple[str, str, str]]:
+    """Return left-nav entries: page links first, then On this page jumps.
+
+    Parameters
+    ----------
+    current_page : str
+        ``NAV_PAGES`` key for the page being viewed. ``sections`` are the
+        in-page jumps for that page; they are appended after every page link.
+    sections : list[tuple[str, str]]
+        In-page jump pairs of anchor id and link label.
+
+    Returns
+    -------
+    list[tuple[str, str, str]]
+        ``(kind, key, label)`` rows. ``kind`` is ``"page"`` or ``"section"``.
+    """
+    entries: list[tuple[str, str, str]] = [
+        ("page", key, title) for key, title, _path in NAV_PAGES
+    ]
+    if any(key == current_page for key, _title, _path in NAV_PAGES):
+        entries.extend(("section", anchor, label) for anchor, label in sections)
+    return entries
+
+
+def section_nav_html(sections: list[tuple[str, str]], *, aria_label: str) -> str:
+    """Return HTML for the ``On this page`` jump-link block.
 
     Parameters
     ----------
@@ -758,16 +861,14 @@ def render_section_nav(sections: list[tuple[str, str]], *, aria_label: str) -> N
 
     Returns
     -------
-    None
-        Renders sidebar HTML via Streamlit.
+    str
+        Sidebar markup for in-page section links.
     """
-    import streamlit as st
-
     links = "".join(
         f'<a href="#{anchor}">{html.escape(label)}</a>'
         for anchor, label in sections
     )
-    nav_html = f"""
+    return f"""
 <div class="sidebar-section-nav">
   <div class="sidebar-section-nav-label">On this page</div>
   <nav class="sidebar-section-nav-links" aria-label="{html.escape(aria_label)}">
@@ -775,8 +876,50 @@ def render_section_nav(sections: list[tuple[str, str]], *, aria_label: str) -> N
   </nav>
 </div>
 """
+
+
+def render_section_nav(
+    sections: list[tuple[str, str]],
+    *,
+    aria_label: str,
+    current_page: str,
+) -> None:
+    """Render page links, then ``On this page`` jumps as a separate block.
+
+    Native ``st.navigation`` is hidden; this helper draws the full left nav
+    so page links come first and ``On this page`` sits at the bottom.
+
+    Parameters
+    ----------
+    sections : list[tuple[str, str]]
+        Pairs of anchor id and link label.
+    aria_label : str
+        Accessible name for the in-page navigation landmark.
+    current_page : str
+        ``NAV_PAGES`` key for the page being viewed.
+
+    Returns
+    -------
+    None
+        Renders sidebar HTML via Streamlit.
+    """
+    import streamlit as st
+
+    jumps = section_nav_html(sections, aria_label=aria_label)
     with st.sidebar:
-        st.markdown(nav_html, unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sidebar-nav-heading">Navigation</div>',
+            unsafe_allow_html=True,
+        )
+        for key, title, path in NAV_PAGES:
+            with st.container():
+                if key == current_page:
+                    st.markdown(
+                        '<div class="sidebar-nav-current-marker" aria-hidden="true"></div>',
+                        unsafe_allow_html=True,
+                    )
+                st.page_link(path, label=title, use_container_width=True)
+        st.markdown(jumps, unsafe_allow_html=True)
 
 
 def render_insights_section_nav(
@@ -804,24 +947,21 @@ def render_insights_section_nav(
             ("chart-mileage-heatmap", heatmap_title(heatmap_grain)),
         ],
         aria_label="Training Insights sections",
+        current_page="training_insights",
     )
 
 
 def render_metrics_section_nav() -> None:
-    """Render in-page section links for Metrics."""
+    """Render in-page section links for Metrics (no Inspect jump)."""
     render_section_nav(
-        [
-            ("achievements", "Achievements"),
-            ("key-indicators", "Key Indicators"),
-            ("kpi-detail", "Inspect"),
-            ("shoe-mileage", "Shoes"),
-        ],
+        METRICS_SECTIONS,
         aria_label="Metrics sections",
+        current_page="metrics",
     )
 
 
 def render_sidebar_section_nav(grain: str) -> None:
-    """Render in-page section links for Training Overview.
+    """Render in-page section links for Training.
 
     Parameters
     ----------
@@ -835,10 +975,13 @@ def render_sidebar_section_nav(grain: str) -> None:
     """
     render_section_nav(
         [
+            ("chart-race-weeks", RACE_EVENTS_TITLE),
             ("chart-compliance", compliance_title(grain)),
             ("chart-mileage", mileage_title(grain)),
+            ("chart-elevation", elevation_title(grain)),
         ],
-        aria_label="Training Overview sections",
+        aria_label="Training sections",
+        current_page="training",
     )
 
 
@@ -861,4 +1004,5 @@ def render_race_section_nav(*, chart_label: str = "Finish Times") -> None:
             ("race-results-table", "Race History"),
         ],
         aria_label="Race Results sections",
+        current_page="race_results",
     )

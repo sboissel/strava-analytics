@@ -1,5 +1,5 @@
 [client]
-# Minimal toolbar; sidebar nav must stay enabled for st.navigation(position="sidebar").
+# Minimal toolbar. Page list is drawn with st.page_link (st.navigation position="hidden").
 toolbarMode = "minimal"
 showSidebarNavigation = true
 runOnSave = true

@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Shoe/gear mileage tracking via `StravaClient.get_gear` and a `gear` pipeline module that applies baseline miles and writes `data/strava_gear.csv`.
+- Unit tests for gear CSV sync (`tests/src/test_gear.py`) and dashboard shoe UI (`tests/dashboard/test_gear_ui.py`).
+- **Metrics** dashboard page with **Achievements**, **Key Indicators**, Inspect, and **Shoes** mileage.
+- **Training** **Races** marker strip under Controls: cool-gray squares for training periods, gold diamonds for race periods, and an ⓘ legend; gold diamonds also mark race periods on the 80:20, mileage, and elevation charts.
+- Summed **elevation** chart (ft) on Training, on the same period axis as 80:20 and mileage.
+
+### Changed
+
+- Training charts use a sampled 5-swatch earthy palette (slate goal lines, teal mileage, gold race markers, peach Easy, terracotta Hard); elevation stays muted purple (`#8575A8`) since the strip has no purple.
+- Moved Key Indicators off **Training** onto **Metrics**; Training focuses on 80:20 compliance, mileage, and elevation trends.
+- Renamed the **Training Overview** page to **Training** (`training_overview.py` → `training.py`); renamed CSS `--sticky-race-strip-top` to `--race-strip-scroll-margin-top`.
+- Metrics section nav no longer includes Inspect (the expander remains on the page). Left-nav **On this page** jumps sit as a separate block below the page list, with extra space and a thin grey hairline above the heading.
+- Replaced per-chart race overlays with the shared **Races** strip plus chart-top diamond markers.
+- Training charts (80:20, mileage heatmap, elevation heatmap) share plot alignment; the unfinished current period uses gray hatching and a “Week/Day/… in progress” hover note.
+
 ## [1.2.0] — 2026-08-12
 
 ### Added

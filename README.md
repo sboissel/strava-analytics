@@ -78,7 +78,7 @@ The `sync` job runs only for scheduled pipelines; the `test` job still runs on n
 
 **Live app:** [https://strava-analytics-sboissel.streamlit.app/](https://strava-analytics-sboissel.streamlit.app/)
 
-A Streamlit app under [`dashboard/`](dashboard) provides four pages: **Metrics** (KPIs and shoe mileage), **Training Overview** (80:20 compliance, mileage), **Training Insights** (pace-bin HR trends and mileage heatmaps), and **Race Results** (finish times, PRs, and race history).
+A Streamlit app under [`dashboard/`](dashboard) provides four pages: **Metrics** (KPIs and shoe mileage), **Training** (80:20 compliance, mileage, and elevation), **Training Insights** (pace-bin HR trends and mileage heatmaps), and **Race Results** (finish times, PRs, and race history).
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt

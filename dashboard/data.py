@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -35,7 +36,13 @@ def _load_runs_uncached(data_dir: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
     df = df.dropna(subset=["date"]).copy()
-    for col in ("distance_miles", "%_easy", "mt_min_easy", "mt_min_hard"):
+    for col in (
+        "distance_miles",
+        "%_easy",
+        "mt_min_easy",
+        "mt_min_hard",
+        "elevation_gain_ft",
+    ):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df.sort_values("date")
@@ -411,12 +418,12 @@ def aggregate_period_metrics(
     *,
     as_of: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    """Aggregate miles and easy/hard mileage shares by period label.
+    """Aggregate miles, elevation, and easy/hard mileage shares by period.
 
     Parameters
     ----------
     df : pandas.DataFrame
-        Run dataframe with distance and easy-percentage columns.
+        Run dataframe with distance, elevation, and easy-percentage columns.
     grain : PeriodGrain
         Calendar aggregation grain.
     as_of : pandas.Timestamp, optional
@@ -425,8 +432,9 @@ def aggregate_period_metrics(
     Returns
     -------
     pandas.DataFrame
-        One row per period with mileage totals, easy/hard fractions, and an
-        ``in_progress`` flag for the current calendar period.
+        One row per period with mileage totals, summed elevation in feet,
+        easy/hard fractions, and an ``in_progress`` flag for the current
+        calendar period.
     """
     n = int(PERIOD_CONFIG[grain]["count"])
     end = normalize_utc(as_of) if as_of is not None else reference_end(df)
@@ -438,6 +446,7 @@ def aggregate_period_metrics(
     if df.empty:
         out = full_index.copy()
         out["total_miles"] = 0.0
+        out["total_elevation_ft"] = 0.0
         out["easy_frac"] = 0.0
         out["hard_frac"] = 0.0
         out["in_progress"] = out["period_key"] == current_key
@@ -450,6 +459,12 @@ def aggregate_period_metrics(
         work["distance_miles"] = 0.0
     if "%_easy" not in work.columns:
         work["%_easy"] = np.nan
+    if "elevation_gain_ft" not in work.columns:
+        work["elevation_gain_ft"] = 0.0
+    else:
+        work["elevation_gain_ft"] = pd.to_numeric(
+            work["elevation_gain_ft"], errors="coerce"
+        ).fillna(0.0)
 
     has_hr = work["%_easy"].notna() & work["distance_miles"].notna()
     work["easy_miles"] = 0.0
@@ -465,6 +480,7 @@ def aggregate_period_metrics(
             total_miles=("distance_miles", "sum"),
             easy_miles=("easy_miles", "sum"),
             hard_miles=("hard_miles", "sum"),
+            total_elevation_ft=("elevation_gain_ft", "sum"),
         )
         .rename(columns={"_period_key": "period_key", "_period_label": "period_label"})
     )
@@ -477,11 +493,20 @@ def aggregate_period_metrics(
     grouped.loc[positive, "hard_frac"] = grouped.loc[positive, "hard_miles"] / hr_total[positive]
 
     merged = full_index.merge(
-        grouped[["period_key", "total_miles", "easy_frac", "hard_frac"]],
+        grouped[
+            [
+                "period_key",
+                "total_miles",
+                "easy_frac",
+                "hard_frac",
+                "total_elevation_ft",
+            ]
+        ],
         on="period_key",
         how="left",
     )
     merged["total_miles"] = merged["total_miles"].fillna(0.0)
+    merged["total_elevation_ft"] = merged["total_elevation_ft"].fillna(0.0)
     merged["easy_frac"] = merged["easy_frac"].fillna(0.0)
     merged["hard_frac"] = merged["hard_frac"].fillna(0.0)
     merged["in_progress"] = merged["period_key"] == current_key
@@ -491,11 +516,187 @@ def aggregate_period_metrics(
             "period_label",
             "period_tooltip",
             "total_miles",
+            "total_elevation_ft",
             "easy_frac",
             "hard_frac",
             "in_progress",
         ]
     ]
+
+
+# Longest distance wins when a period has several races; ties use this order.
+_RACE_TYPE_PRIORITY = {
+    "Marathon": 5,
+    "Half": 4,
+    "10k": 3,
+    "5M": 2,
+    "5k": 1,
+    "Other": 0,
+}
+
+
+def _normalize_period_race_type(value: object) -> str:
+    """Return a Race Results type label, defaulting to Other."""
+    text = str(value).strip() if value is not None and not pd.isna(value) else ""
+    return text if text else "Other"
+
+
+def format_race_miles_label(miles: object) -> str:
+    """Format miles for Training race-marker hover (1–2 decimal places).
+
+    Parameters
+    ----------
+    miles : object
+        Distance in miles.
+
+    Returns
+    -------
+    str
+        Label such as ``"12.4 mi"`` or ``"6.21 mi"``, or ``"—"`` when missing.
+    """
+    if miles is None or (isinstance(miles, float) and pd.isna(miles)):
+        return "—"
+    try:
+        value = float(miles)
+    except (TypeError, ValueError):
+        return "—"
+    tenth = round(value, 1)
+    if abs(value - tenth) < 1e-6:
+        return f"{tenth:.1f} mi"
+    return f"{value:.2f} mi"
+
+
+def race_marker_hover_line(
+    name: object,
+    race_type: object,
+    distance_miles: object = None,
+) -> str:
+    """Build one race marker hover line: name + type, or name + miles for Other.
+
+    Known buckets (5k, Half, Marathon, …) append the type. ``Other`` (or a
+    missing type) appends distance in miles instead of the word ``Other``.
+    """
+    if name is None or (isinstance(name, float) and pd.isna(name)):
+        label = ""
+    else:
+        label = str(name).strip()
+    if not label or label.lower() == "nan":
+        label = "Race"
+    rtype = _normalize_period_race_type(race_type)
+    if rtype == "Other":
+        miles_txt = format_race_miles_label(distance_miles)
+        if miles_txt != "—":
+            return f"{label}<br>{miles_txt}"
+        return label
+    return f"{label}<br>{rtype}"
+
+
+def period_race_hover_text(group: pd.DataFrame) -> str:
+    """Join per-race hover lines for every race in a period group."""
+    if group.empty:
+        return "Race"
+    lines: list[str] = []
+    has_type = "race_type" in group.columns
+    has_dist = "distance_miles" in group.columns
+    has_name = "name" in group.columns
+    for _, row in group.iterrows():
+        name = row["name"] if has_name else ""
+        rtype = row["race_type"] if has_type else "Other"
+        dist = row["distance_miles"] if has_dist else None
+        lines.append(race_marker_hover_line(name, rtype, dist))
+    return "<br>".join(lines) if lines else "Race"
+
+
+def _primary_race_type(group: pd.DataFrame) -> str:
+    """Pick one race type for a period: longest distance, then type priority."""
+    if group.empty:
+        return "Other"
+    if "race_type" in group.columns:
+        types = group["race_type"].map(_normalize_period_race_type)
+    else:
+        types = pd.Series(["Other"] * len(group), index=group.index)
+    if "distance_miles" in group.columns:
+        dist = pd.to_numeric(group["distance_miles"], errors="coerce").fillna(-1.0)
+    else:
+        dist = pd.Series([-1.0] * len(group), index=group.index)
+    rank = types.map(_RACE_TYPE_PRIORITY).fillna(0)
+    order = pd.DataFrame({"dist": dist, "rank": rank}, index=group.index)
+    top_idx = order.sort_values(["dist", "rank"], ascending=False).index[0]
+    return str(types.loc[top_idx])
+
+
+def annotate_race_periods(
+    period_df: pd.DataFrame,
+    races: pd.DataFrame,
+    grain: PeriodGrain,
+) -> pd.DataFrame:
+    """Flag periods that contain at least one race activity.
+
+    A race period is the calendar day, ISO week, month, or year (matching
+    ``grain``) that contains a race activity date. Races are the same rows
+    used by Race Results (``race`` is true on run analysis).
+
+    When a period contains multiple races, ``race_names`` lists every name
+    and ``race_type`` is the primary type: longest ``distance_miles``, with
+    ties broken by Marathon > Half > 10k > 5M > 5k > Other. ``race_hover``
+    lists each race as name + type, or name + miles when the type is Other.
+
+    Parameters
+    ----------
+    period_df : pandas.DataFrame
+        Period index from ``aggregate_period_metrics``.
+    races : pandas.DataFrame
+        Race rows with a ``date`` column and optional ``name``, ``race_type``,
+        and ``distance_miles``.
+    grain : PeriodGrain
+        Calendar aggregation grain used for ``period_df``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Copy of ``period_df`` with ``is_race_period``, ``race_names``,
+        ``race_type``, and ``race_hover``.
+    """
+    out = period_df.copy()
+    out["is_race_period"] = False
+    out["race_names"] = ""
+    out["race_type"] = ""
+    out["race_hover"] = ""
+    if out.empty or races.empty or "date" not in races.columns:
+        return out
+
+    work = races.dropna(subset=["date"]).copy()
+    if work.empty:
+        return out
+
+    keys, _ = _period_key_and_label(work["date"], grain)
+    work["_period_key"] = keys
+    if "name" in work.columns:
+        names = work["name"].fillna("").astype(str).str.strip()
+    else:
+        names = pd.Series([""] * len(work), index=work.index)
+    work["_race_name"] = names
+
+    name_by_key = work.groupby("_period_key")["_race_name"].agg(
+        lambda series: " · ".join(name for name in series if name)
+    )
+    type_by_key = pd.Series(
+        {
+            key: _primary_race_type(group)
+            for key, group in work.groupby("_period_key")
+        }
+    )
+    hover_by_key = pd.Series(
+        {
+            key: period_race_hover_text(group)
+            for key, group in work.groupby("_period_key")
+        }
+    )
+    out["is_race_period"] = out["period_key"].isin(name_by_key.index)
+    out["race_names"] = out["period_key"].map(name_by_key).fillna("")
+    out["race_type"] = out["period_key"].map(type_by_key).fillna("")
+    out["race_hover"] = out["period_key"].map(hover_by_key).fillna("")
+    return out
 
 
 def easy_hard_ratio_label(df: pd.DataFrame) -> tuple[str, float | None]:
@@ -580,7 +781,7 @@ def _calendar_year_totals(df: pd.DataFrame) -> tuple[int | None, float, float]:
 
     "This year" is the UTC calendar year of ``reference_end(df)``: the latest
     activity date, or today (UTC) when ``df`` is empty. That matches Training
-    Overview / Insights, which use the dataset max date as ``as_of``.
+    / Insights, which use the dataset max date as ``as_of``.
     Activity start timestamps are filtered with ``date.year == this_year``.
     """
     if df.empty:

@@ -8,6 +8,8 @@ SURFACE = "#F7FAFC"
 CARD = "#FFFFFF"
 INK = "#152028"
 MUTED = "#5B6B75"
+# Transparent so Training charts show through the race-week strip.
+RACE_STRIP_BG = "rgba(0,0,0,0)"
 LINE = "#D5DEE5"
 NAV_ACTIVE = "#E8EAED"
 EASY = "#5B9BD5"
@@ -213,8 +215,15 @@ CHART_TITLE_FONT_WEIGHT = 600
 LAYOUT_GAP = "1.8rem"
 
 # Per-chart top margin (space above each chart title). Edit individually.
-CHART_COMPLIANCE_MARGIN_TOP = "2.25rem"      # Overview: 80:20 compliance
-CHART_MILEAGE_MARGIN_TOP = "0.1rem"         # Overview: mileage
+CHART_RACE_WEEKS_MARGIN_TOP = "3rem"        # Training: gap above first race-week strip
+CHART_COMPLIANCE_MARGIN_TOP = "0.85rem"     # Training: 80:20 compliance
+CHART_MILEAGE_MARGIN_TOP = "0.85rem"        # Training: mileage
+CHART_ELEVATION_MARGIN_TOP = "0.85rem"      # Training: elevation
+# Header offset for Training section jumps.
+RACE_STRIP_SCROLL_MARGIN_TOP = "3.75rem"
+# Compact strip width: past the last marker, not into the Training legend column.
+RACE_STRIP_END_PAD_PX = 12
+TRAINING_PLOT_MARGIN_R_PX = 168
 CHART_PACE_HR_MARGIN_TOP = "2.75rem"          # Insights: HR line
 CHART_MILEAGE_HEATMAP_MARGIN_TOP = "3.25rem"  # Insights: heatmap
 CHART_RACE_RESULTS_MARGIN_TOP = LAYOUT_GAP      # Race Results: scatter
@@ -228,8 +237,15 @@ GLOBAL_CSS = f"""
 
   .stApp {{
     --layout-gap: {LAYOUT_GAP};
+    --chart-race-weeks-margin-top: {CHART_RACE_WEEKS_MARGIN_TOP};
     --chart-compliance-margin-top: {CHART_COMPLIANCE_MARGIN_TOP};
     --chart-mileage-margin-top: {CHART_MILEAGE_MARGIN_TOP};
+    --chart-elevation-margin-top: {CHART_ELEVATION_MARGIN_TOP};
+    --race-strip-scroll-margin-top: {RACE_STRIP_SCROLL_MARGIN_TOP};
+    --training-plot-margin-l: 78px;
+    --training-plot-margin-r: {TRAINING_PLOT_MARGIN_R_PX}px;
+    --race-strip-end-pad: {RACE_STRIP_END_PAD_PX}px;
+    --race-strip-bg: {RACE_STRIP_BG};
     --chart-pace-hr-margin-top: {CHART_PACE_HR_MARGIN_TOP};
     --chart-mileage-heatmap-margin-top: {CHART_MILEAGE_HEATMAP_MARGIN_TOP};
     --chart-race-results-margin-top: {CHART_RACE_RESULTS_MARGIN_TOP};
@@ -333,6 +349,7 @@ GLOBAL_CSS = f"""
     color: {INK} !important;
   }}
   [data-testid="stSidebarNav"] {{
+    display: none;
     padding-top: 0.35rem;
   }}
   [data-testid="stSidebarNav"]::before {{
@@ -348,6 +365,24 @@ GLOBAL_CSS = f"""
   nav[data-testid="stSidebarNavItems"] {{
     gap: 0.2rem;
   }}
+  section[data-testid="stSidebar"] .sidebar-nav-heading {{
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: {MUTED};
+    padding: 0.35rem 0.85rem 0.55rem;
+  }}
+  section[data-testid="stSidebar"] [data-testid="stSidebarContent"] > div > [data-testid="stVerticalBlock"] {{
+    gap: 0.2rem !important;
+  }}
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) {{
+    display: none !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }}
   div[kind="header"] {{ gap: 0.4rem !important; }}
   [data-testid="stHeadingWithActionElements"] h1,
   [data-testid="stHeadingWithActionElements"] h2,
@@ -356,10 +391,11 @@ GLOBAL_CSS = f"""
     color: {INK} !important;
   }}
 
-  /* Sidebar page links (st.navigation → stSidebarNavLink) */
+  /* Sidebar page links (st.page_link; native st.navigation is hidden) */
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] a,
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLinkContainer"] a,
-  section[data-testid="stSidebar"] div[data-testid="stPageLink-Nav"] a {{
+  section[data-testid="stSidebar"] div[data-testid="stPageLink-Nav"] a,
+  section[data-testid="stSidebar"] [data-testid="stPageLink"] a {{
     display: block;
     border-radius: 10px !important;
     font-weight: 600 !important;
@@ -374,22 +410,30 @@ GLOBAL_CSS = f"""
   }}
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] a:hover,
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLinkContainer"] a:hover,
-  section[data-testid="stSidebar"] div[data-testid="stPageLink-Nav"] a:hover {{
+  section[data-testid="stSidebar"] div[data-testid="stPageLink-Nav"] a:hover,
+  section[data-testid="stSidebar"] [data-testid="stPageLink"] a:hover {{
     background: rgba(21, 32, 40, 0.04) !important;
     color: {INK} !important;
   }}
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] a[aria-current="page"],
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLinkContainer"] a[aria-current="page"],
-  section[data-testid="stSidebar"] div[data-testid="stPageLink-Nav"] a[aria-current="page"] {{
+  section[data-testid="stSidebar"] div[data-testid="stPageLink-Nav"] a[aria-current="page"],
+  section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]:has(.sidebar-nav-current-marker) [data-testid="stPageLink"] a,
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink"] a {{
     background: {NAV_ACTIVE} !important;
     color: {INK} !important;
     border-color: {LINE} !important;
   }}
+  section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]:has(.sidebar-nav-current-marker) [data-testid="stPageLink"] a span,
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink"] a span {{
+    color: {INK} !important;
+  }}
 
-  /* In-page section navigation (Training Overview sidebar) */
+  /* In-page section navigation (On this page block below page links) */
   section[data-testid="stSidebar"] .sidebar-section-nav {{
-    margin: -0.15rem 0 0.75rem;
-    padding: 0 0 0.35rem;
+    margin: 0.85rem 0 0.75rem;
+    padding: 0.5rem 0 0.35rem;
+    border-top: 1px solid {LINE};
   }}
   section[data-testid="stSidebar"] .sidebar-section-nav-label {{
     font-size: 0.72rem;
@@ -430,8 +474,10 @@ GLOBAL_CSS = f"""
     outline: none;
   }}
   .page-anchor,
+  #chart-race-weeks,
   #chart-compliance,
   #chart-mileage,
+  #chart-elevation,
   #chart-pace-hr,
   #chart-mileage-heatmap,
   #chart-race-results,
@@ -441,6 +487,15 @@ GLOBAL_CSS = f"""
     margin: 0;
     padding: 0;
     overflow: hidden;
+  }}
+  /* 80:20 jump keeps the in-flow strip (above this anchor) in view. */
+  #chart-compliance {{
+    scroll-margin-top: calc(var(--race-strip-scroll-margin-top) + 4.5rem);
+  }}
+  /* Mileage / elevation: strip sits between these anchors and the chart. */
+  #chart-mileage,
+  #chart-elevation {{
+    scroll-margin-top: var(--race-strip-scroll-margin-top);
   }}
   #key-indicators {{
     scroll-margin-top: 1.25rem;
@@ -556,16 +611,162 @@ GLOBAL_CSS = f"""
   [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
     margin-bottom: 0 !important;
   }}
-  /* Overview: compliance chart */
-  [data-testid="stElementContainer"]:has(#chart-compliance)
-    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+  /* Training: one in-flow race-week strip under Controls (above 80:20).
+     Charts use gold diamond markers (not dashed guides); no snap JS,
+     hide/show CSS, sticky positioning, or duplicate strips above
+     mileage/elevation. Metrics is unchanged. */
+  [data-testid="stMain"]:has(.st-key-race_week_strip)
+    [data-testid="stLayoutWrapper"]:has(.st-key-race_week_strip),
+  .st-key-race_week_strip {{
+    background: transparent !important;
+    overflow: visible !important;
+  }}
+  /* Permanent Controls → race-week strip gap. */
+  [data-testid="stElementContainer"]:has(#chart-race-weeks) {{
+    margin-top: var(--chart-race-weeks-margin-top) !important;
+  }}
+  .st-key-race_week_strip {{
+    align-self: flex-start;
+    position: relative;
+    width: 100%;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    background: transparent !important;
+    overflow: visible !important;
+  }}
+  .st-key-race_week_strip::before {{
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: calc(100% - var(--training-plot-margin-r) + var(--race-strip-end-pad));
+    max-width: 100%;
+    background: var(--race-strip-bg);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    pointer-events: none;
+    z-index: 0;
+  }}
+  .st-key-race_week_strip [data-testid="stVerticalBlockBorderWrapper"],
+  .st-key-race_week_strip [data-testid="stVerticalBlock"],
+  .st-key-race_week_strip [data-testid="stLayoutWrapper"] {{
+    position: relative;
+    background: transparent !important;
+    overflow: visible !important;
+  }}
+  /* Label lives in the 78px plot left-margin so diamonds line up with bars. */
+  .st-key-race_week_strip [data-testid="stElementContainer"]:has(.race-week-legend) {{
+    position: absolute !important;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: var(--training-plot-margin-l);
+    margin: 0 !important;
+    padding: 0 !important;
+    z-index: 3;
+    pointer-events: none;
+  }}
+  .race-week-legend {{
+    pointer-events: auto;
+    height: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.2rem;
+    padding: 0 0.2rem 0 0.15rem;
+    box-sizing: border-box;
+  }}
+  .race-week-strip-label {{
+    margin: 0 !important;
+    font-size: 0.62rem;
+    letter-spacing: 0.07em;
+    line-height: 1.2;
+    max-width: none;
+    flex-shrink: 0;
+    text-shadow: 0 0 8px {BG}, 0 1px 2px {BG};
+  }}
+  .race-week-legend .kpi-info {{
+    margin-top: 0;
+    flex-shrink: 0;
+  }}
+  .race-week-legend .kpi-tooltip {{
+    left: 0;
+    right: auto;
+    bottom: auto;
+    top: calc(100% + 0.35rem);
+    transform: none;
+    width: min(16.5rem, 72vw);
+    z-index: 60;
+  }}
+  .kpi-tooltip .race-legend-row {{
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-top: 0.2rem;
+    line-height: 1.35;
+  }}
+  .kpi-tooltip .race-legend-marker {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+  }}
+  .kpi-tooltip .race-legend-marker .band-square,
+  .kpi-tooltip .race-legend-marker .band-diamond {{
+    margin: 0;
+  }}
+
+  .band-square {{
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin-right: 0.35rem;
+    vertical-align: middle;
+    flex-shrink: 0;
+  }}
+  .band-diamond {{
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    transform: rotate(45deg);
+    margin-right: 0.45rem;
+    margin-left: 0.12rem;
+    vertical-align: middle;
+    flex-shrink: 0;
+  }}
+  .st-key-race_week_strip [data-testid="stPlotlyChart"],
+  .st-key-race_week_strip .js-plotly-plot,
+  .st-key-race_week_strip .plot-container,
+  .st-key-race_week_strip .svg-container {{
+    position: relative;
+    z-index: 1;
+    background: transparent !important;
+    height: 40px !important;
+    max-height: 40px !important;
+    min-height: 0 !important;
+  }}
+  .st-key-race_week_strip [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    min-height: 0 !important;
+    height: 40px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }}
+  /* Training charts: top gap on each chart container. */
+  .st-key-training_compliance {{
     margin-top: var(--chart-compliance-margin-top) !important;
     margin-bottom: 0 !important;
   }}
-  /* Overview: mileage chart */
-  [data-testid="stElementContainer"]:has(#chart-mileage)
-    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+  .st-key-training_mileage {{
     margin-top: var(--chart-mileage-margin-top) !important;
+    margin-bottom: 0 !important;
+  }}
+  .st-key-training_elevation {{
+    margin-top: var(--chart-elevation-margin-top) !important;
     margin-bottom: 0 !important;
   }}
   /* Insights: pace vs HR chart */

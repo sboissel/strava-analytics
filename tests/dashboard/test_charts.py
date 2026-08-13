@@ -1,0 +1,650 @@
+"""Tests for Training Plotly charts."""
+
+import unittest
+from pathlib import Path
+
+import pandas as pd
+
+from dashboard.charts import (
+    ELEVATION_BAR,
+    ELEVATION_COLORSCALE,
+    IN_PROGRESS_HATCH_COLOR,
+    IN_PROGRESS_HATCH_SHAPE,
+    MILEAGE_BAR,
+    MILEAGE_COLORSCALE,
+    RACE_CHART_DIAMOND_SIZE,
+    RACE_CHART_DIAMOND_Y_PAD_FRAC,
+    RACE_STRIP_DIAMOND_COLOR,
+    RACE_STRIP_DIAMOND_SIZE,
+    RACE_STRIP_HEIGHT,
+    RACE_STRIP_MARGIN_B,
+    RACE_STRIP_MARGIN_T,
+    RACE_STRIP_PAPER_BG,
+    RACE_STRIP_SQUARE_COLOR,
+    RACE_STRIP_SQUARE_SIZE,
+    RACE_TYPE_COLORS,
+    TRAINING_BARGAP,
+    TRAINING_EASY,
+    TRAINING_GOAL_LINE,
+    TRAINING_HARD,
+    TRAINING_MARGIN_L,
+    TRAINING_MARGIN_R,
+    TRAINING_OFFSETGROUP,
+    TRAINING_XAXIS_DOMAIN,
+    compliance_chart,
+    elevation_chart,
+    mileage_chart,
+    race_weeks_chart,
+)
+from dashboard.theme import (
+    CARD,
+    CHART_COMPLIANCE_MARGIN_TOP,
+    CHART_ELEVATION_MARGIN_TOP,
+    CHART_MILEAGE_MARGIN_TOP,
+    CHART_RACE_WEEKS_MARGIN_TOP,
+    EASY,
+    ELEVATION_PURPLE,
+    GLOBAL_CSS,
+    HARD,
+    INK,
+    MILES,
+    RACE_STRIP_BG,
+    RACE_STRIP_END_PAD_PX,
+    RACE_STRIP_SCROLL_MARGIN_TOP,
+)
+from dashboard.ui import (
+    RACE_WEEK_STRIP_KEYS,
+    race_weeks_legend_html,
+)
+from race_data import RACE_TYPE_ORDER
+
+
+def _training_period_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "period_key": ["2026-10", "2026-11"],
+            "period_label": ["Mar 2, 26", "Mar 9, 26"],
+            "period_tooltip": ["March 2, 2026", "March 9, 2026"],
+            "total_miles": [10.0, 20.0],
+            "easy_frac": [0.8, 0.7],
+            "hard_frac": [0.2, 0.3],
+            "total_elevation_ft": [200.0, 350.0],
+            "in_progress": [False, True],
+            "is_race_period": [False, True],
+            "race_names": ["", "Spring 5k"],
+            "race_type": ["", "5k"],
+            "race_hover": ["", "Spring 5k<br>5k"],
+        }
+    )
+
+
+def _race_diamond_traces(fig) -> list:
+    """Gold diamond scatter markers overlaid on Training bar charts."""
+    diamonds = []
+    for trace in fig.data:
+        if getattr(trace, "type", None) != "scatter":
+            continue
+        marker = getattr(trace, "marker", None)
+        if marker is None:
+            continue
+        symbol = getattr(marker, "symbol", None)
+        if symbol != "diamond":
+            continue
+        diamonds.append(trace)
+    return diamonds
+
+
+def _has_dashed_race_vline(fig) -> bool:
+    """True when a dashed vertical race-week guide line is present."""
+    for shape in fig.layout.shapes or ():
+        if getattr(shape, "type", None) != "line":
+            continue
+        yref = getattr(shape, "yref", None) or ""
+        xref = getattr(shape, "xref", None) or "x"
+        if yref not in {"paper", "y domain"}:
+            continue
+        if xref in {"paper", "x domain"}:
+            continue
+        line = getattr(shape, "line", None)
+        dash = getattr(line, "dash", None) if line is not None else None
+        if dash == "dash":
+            return True
+    return False
+
+
+def _has_filled_race_vrect(fig) -> bool:
+    """True when a non-transparent vertical band covers race periods."""
+    for shape in fig.layout.shapes or ():
+        if getattr(shape, "type", None) != "rect":
+            continue
+        yref = getattr(shape, "yref", None) or ""
+        xref = getattr(shape, "xref", None) or "x"
+        if yref not in {"paper", "y domain"}:
+            continue
+        if xref in {"paper", "x domain"}:
+            continue
+        fill = str(getattr(shape, "fillcolor", "") or "").replace(" ", "").lower()
+        if fill and fill not in {"rgba(0,0,0,0)", "transparent", "none"}:
+            return True
+    return False
+
+
+class TrainingChartTests(unittest.TestCase):
+    """Elevation bars, race-week strip, and shared Training axes."""
+
+    def test_elevation_chart_uses_feet(self):
+        fig = elevation_chart(_training_period_df(), "Week")
+        self.assertEqual(list(fig.data[0].y), [200.0, 350.0])
+        self.assertIn("ft", fig.data[0].hovertemplate)
+        self.assertIn("Elevation (ft)", fig.layout.yaxis.title.text)
+        self.assertIn("Weekly Elevation", fig.layout.title.text)
+
+    def test_main_charts_have_race_diamonds_at_bar_tops(self):
+        period_df = _training_period_df()
+        # Bar tops (race week) and chart-wide max used for the above-bar pad.
+        bar_tops = {
+            "compliance_chart": 1.0,  # easy_frac + hard_frac for race week
+            "mileage_chart": 20.0,
+            "elevation_chart": 350.0,
+        }
+        chart_max = {
+            "compliance_chart": 1.0,  # both weeks sum to 1.0
+            "mileage_chart": 20.0,
+            "elevation_chart": 350.0,
+        }
+        for builder in (compliance_chart, mileage_chart, elevation_chart):
+            fig = builder(period_df, "Week")
+            diamonds = _race_diamond_traces(fig)
+            self.assertEqual(
+                len(diamonds),
+                1,
+                msg=f"{builder.__name__} should draw one race diamond scatter",
+            )
+            scatter = diamonds[0]
+            pad = chart_max[builder.__name__] * RACE_CHART_DIAMOND_Y_PAD_FRAC
+            expected_y = bar_tops[builder.__name__] + pad
+            self.assertEqual(list(scatter.x), ["Mar 9, 26"])
+            self.assertEqual(list(scatter.y), [expected_y])
+            self.assertGreater(scatter.y[0], bar_tops[builder.__name__])
+            self.assertEqual(scatter.marker.symbol, "diamond")
+            self.assertEqual(scatter.marker.color, RACE_STRIP_DIAMOND_COLOR)
+            self.assertEqual(scatter.marker.size, RACE_CHART_DIAMOND_SIZE)
+            self.assertEqual(RACE_CHART_DIAMOND_SIZE, 10)
+            self.assertGreater(RACE_CHART_DIAMOND_SIZE, RACE_STRIP_DIAMOND_SIZE)
+            self.assertFalse(scatter.showlegend)
+            self.assertEqual(scatter.customdata[0], "Spring 5k<br>5k")
+            self.assertFalse(
+                _has_dashed_race_vline(fig),
+                msg=f"{builder.__name__} must not draw dashed race vlines",
+            )
+            self.assertFalse(
+                _has_filled_race_vrect(fig),
+                msg=f"{builder.__name__} must not draw filled race bands",
+            )
+            for trace in fig.data:
+                name = (getattr(trace, "name", None) or "").lower()
+                self.assertNotIn("race", name)
+        self.assertEqual(RACE_STRIP_DIAMOND_COLOR, "#E3C677")
+
+    def test_main_charts_skip_diamonds_without_race_column(self):
+        period_df = _training_period_df().drop(columns=["is_race_period"])
+        for builder in (compliance_chart, mileage_chart, elevation_chart):
+            fig = builder(period_df, "Week")
+            self.assertEqual(_race_diamond_traces(fig), [])
+            self.assertFalse(_has_dashed_race_vline(fig))
+            self.assertFalse(_has_filled_race_vrect(fig))
+
+    def test_race_weeks_strip_marks_race_periods(self):
+        fig = race_weeks_chart(_training_period_df(), "Week")
+        scatter = next(trace for trace in fig.data if trace.type == "scatter")
+        self.assertEqual(list(scatter.x), ["Mar 2, 26", "Mar 9, 26"])
+        self.assertEqual(list(scatter.y), [0.5, 0.5])
+        self.assertEqual(list(scatter.marker.symbol), ["square", "diamond"])
+        colors = list(scatter.marker.color)
+        self.assertEqual(RACE_STRIP_SQUARE_COLOR, "#9AA5AD")
+        self.assertEqual(RACE_STRIP_DIAMOND_COLOR, "#E3C677")
+        self.assertEqual(colors[0], RACE_STRIP_SQUARE_COLOR)
+        self.assertEqual(colors[1], RACE_STRIP_DIAMOND_COLOR)
+        hover = [tuple(row) for row in scatter.customdata]
+        self.assertEqual(hover[1][1], "Spring 5k<br>5k")
+        self.assertEqual(hover[0][1], "No race")
+        self.assertFalse(fig.layout.title.text)
+        sizes = list(scatter.marker.size)
+        self.assertEqual(sizes[0], RACE_STRIP_SQUARE_SIZE)
+        self.assertEqual(sizes[1], RACE_STRIP_DIAMOND_SIZE)
+        self.assertLess(RACE_STRIP_SQUARE_SIZE, RACE_STRIP_DIAMOND_SIZE)
+        self.assertLessEqual(RACE_STRIP_SQUARE_SIZE, 5)
+        self.assertEqual(fig.layout.height, RACE_STRIP_HEIGHT)
+        self.assertEqual(fig.layout.margin.t, RACE_STRIP_MARGIN_T)
+        self.assertEqual(fig.layout.margin.b, RACE_STRIP_MARGIN_B)
+        self.assertLessEqual(RACE_STRIP_HEIGHT, 40)
+        self.assertEqual(fig.layout.plot_bgcolor, RACE_STRIP_PAPER_BG)
+        self.assertEqual(fig.layout.paper_bgcolor, RACE_STRIP_PAPER_BG)
+        self.assertEqual(RACE_STRIP_PAPER_BG, "rgba(0,0,0,0)")
+        self.assertEqual(RACE_STRIP_BG, "rgba(0,0,0,0)")
+        self.assertEqual(RACE_STRIP_BG, RACE_STRIP_PAPER_BG)
+        self.assertNotEqual(RACE_STRIP_BG, CARD)
+        self.assertNotEqual(RACE_STRIP_BG, "#FFFFFF")
+
+    def test_race_weeks_strip_uses_alignment_bars(self):
+        fig = race_weeks_chart(_training_period_df(), "Week")
+        bar = next(trace for trace in fig.data if trace.type == "bar")
+        self.assertEqual(list(bar.x), ["Mar 2, 26", "Mar 9, 26"])
+        self.assertEqual(bar.offsetgroup, TRAINING_OFFSETGROUP)
+        self.assertEqual(fig.layout.bargap, TRAINING_BARGAP)
+
+    def test_race_weeks_strip_uses_single_race_color(self):
+        self.assertEqual(RACE_STRIP_DIAMOND_COLOR, "#E3C677")
+        self.assertEqual(RACE_TYPE_COLORS["Half"], "#E3C677")
+        self.assertEqual(
+            RACE_TYPE_COLORS,
+            {
+                "5k": "#3A9D8F",
+                "5M": "#4C78A8",
+                "10k": "#7A6FA8",
+                "Half": "#E3C677",
+                "Marathon": "#C85C5C",
+                "Other": "#9AA5AD",
+            },
+        )
+        period_df = _training_period_df()
+        period_df.loc[1, "race_type"] = "Marathon"
+        fig = race_weeks_chart(period_df, "Week")
+        scatter = next(trace for trace in fig.data if trace.type == "scatter")
+        self.assertEqual(scatter.marker.color[1], RACE_STRIP_DIAMOND_COLOR)
+        self.assertNotEqual(scatter.marker.color[1], RACE_TYPE_COLORS["Marathon"])
+
+    def test_race_marker_hover_shows_type_or_miles(self):
+        typed = _training_period_df()
+        strip = race_weeks_chart(typed, "Week")
+        strip_hover = [tuple(row) for row in next(
+            t for t in strip.data if t.type == "scatter"
+        ).customdata]
+        self.assertEqual(strip_hover[1][1], "Spring 5k<br>5k")
+        diamonds = _race_diamond_traces(mileage_chart(typed, "Week"))
+        self.assertEqual(diamonds[0].customdata[0], "Spring 5k<br>5k")
+
+        other = _training_period_df()
+        other.loc[1, "race_names"] = "Trail Classic"
+        other.loc[1, "race_type"] = "Other"
+        other.loc[1, "race_hover"] = ""
+        other["race_distance_miles"] = [None, 12.4]
+        strip_other = race_weeks_chart(other, "Week")
+        other_hover = [tuple(row) for row in next(
+            t for t in strip_other.data if t.type == "scatter"
+        ).customdata]
+        self.assertEqual(other_hover[1][1], "Trail Classic<br>12.4 mi")
+        self.assertNotIn("Other", other_hover[1][1])
+        other_diamonds = _race_diamond_traces(mileage_chart(other, "Week"))
+        self.assertEqual(other_diamonds[0].customdata[0], "Trail Classic<br>12.4 mi")
+
+        multi = _training_period_df()
+        multi.loc[1, "race_hover"] = "Town 5k<br>5k<br>Odd Race<br>12.4 mi"
+        multi_hover = [tuple(row) for row in next(
+            t for t in race_weeks_chart(multi, "Week").data if t.type == "scatter"
+        ).customdata]
+        self.assertEqual(multi_hover[1][1], "Town 5k<br>5k<br>Odd Race<br>12.4 mi")
+
+    def test_mileage_bars_use_magnitude_heatmap_without_colorbar(self):
+        fig = mileage_chart(_training_period_df(), "Week")
+        marker = fig.data[0].marker
+        self.assertEqual(list(marker.color), [10.0, 20.0])
+        self.assertNotEqual(list(marker.color), [MILEAGE_BAR, MILEAGE_BAR])
+        self.assertNotEqual(list(marker.color), [ELEVATION_BAR, ELEVATION_BAR])
+        scale = [(float(stop), color.lower()) for stop, color in marker.colorscale]
+        expected = [(float(stop), color.lower()) for stop, color in MILEAGE_COLORSCALE]
+        self.assertEqual(scale, expected)
+        self.assertEqual(MILEAGE_COLORSCALE[0][1], "#E8F2F0")
+        self.assertEqual(MILEAGE_COLORSCALE[-1][1], MILEAGE_BAR)
+        self.assertEqual(MILEAGE_BAR, "#509B8F")
+        self.assertEqual(MILES, "#3A4A55")
+        self.assertNotEqual(MILEAGE_COLORSCALE[-1][1], MILES)
+        self.assertNotEqual(MILEAGE_COLORSCALE[-1][1], ELEVATION_PURPLE)
+        self.assertNotEqual(MILEAGE_COLORSCALE, ELEVATION_COLORSCALE)
+        self.assertFalse(marker.showscale)
+        coloraxis = fig.layout.coloraxis
+        self.assertTrue(coloraxis is None or coloraxis.showscale in (None, False))
+        goal_lines = [
+            shape
+            for shape in fig.layout.shapes or ()
+            if getattr(shape, "type", None) == "line"
+            and getattr(shape, "y0", None) == getattr(shape, "y1", None)
+        ]
+        self.assertTrue(goal_lines)
+        self.assertEqual(goal_lines[0].line.color, TRAINING_GOAL_LINE)
+        self.assertEqual(TRAINING_GOAL_LINE, "#2E4552")
+
+    def test_compliance_chart_is_not_a_heatmap(self):
+        fig = compliance_chart(_training_period_df(), "Week")
+        easy, hard = fig.data[0], fig.data[1]
+        self.assertEqual(easy.marker.color, TRAINING_EASY)
+        self.assertEqual(hard.marker.color, TRAINING_HARD)
+        self.assertEqual(TRAINING_EASY, "#E8A66C")
+        self.assertEqual(TRAINING_HARD, "#D87659")
+        # Theme EASY/HARD still color Achievements; Training uses its own constants.
+        self.assertEqual(EASY, "#5B9BD5")
+        self.assertEqual(HARD, "#E67E22")
+        self.assertFalse(easy.marker.colorscale)
+        self.assertFalse(hard.marker.colorscale)
+        goal_lines = [
+            shape
+            for shape in fig.layout.shapes or ()
+            if getattr(shape, "type", None) == "line"
+            and getattr(shape, "y0", None) == getattr(shape, "y1", None)
+        ]
+        self.assertTrue(goal_lines)
+        self.assertEqual(goal_lines[0].line.color, TRAINING_GOAL_LINE)
+
+    def test_elevation_bars_use_purple_heatmap_without_colorbar(self):
+        fig = elevation_chart(_training_period_df(), "Week")
+        marker = fig.data[0].marker
+        self.assertEqual(list(marker.color), [200.0, 350.0])
+        self.assertNotEqual(list(marker.color), [ELEVATION_BAR, ELEVATION_BAR])
+        scale = [(float(stop), color.lower()) for stop, color in marker.colorscale]
+        expected = [(float(stop), color.lower()) for stop, color in ELEVATION_COLORSCALE]
+        self.assertEqual(scale, expected)
+        self.assertEqual(ELEVATION_COLORSCALE[0][1], "#EBE7F2")
+        self.assertEqual(ELEVATION_COLORSCALE[-1][1], ELEVATION_BAR)
+        self.assertEqual(ELEVATION_BAR, "#8575A8")
+        self.assertEqual(ELEVATION_PURPLE, "#6F5F8D")
+        self.assertNotEqual(ELEVATION_COLORSCALE[-1][1], ELEVATION_PURPLE)
+        self.assertFalse(marker.showscale)
+        coloraxis = fig.layout.coloraxis
+        self.assertTrue(coloraxis is None or coloraxis.showscale in (None, False))
+
+    def test_in_progress_period_uses_hatch_not_fade(self):
+        """Current (unfinished) period: full fill opacity + gray hatch overlay."""
+        period_df = _training_period_df()
+        expected_shapes = ["", IN_PROGRESS_HATCH_SHAPE]
+
+        def _pattern_shapes(marker) -> list[str]:
+            pattern = marker.pattern
+            self.assertIsNotNone(pattern)
+            shape = pattern.shape
+            if isinstance(shape, (list, tuple)):
+                return ["" if s is None else str(s) for s in shape]
+            return ["" if shape is None else str(shape)] * len(period_df)
+
+        def _opacity_values(marker, n: int) -> list[float]:
+            opacity = marker.opacity
+            if opacity is None:
+                return [1.0] * n
+            if isinstance(opacity, (list, tuple)):
+                return [float(v) for v in opacity]
+            return [float(opacity)] * n
+
+        def _assert_no_outline(marker) -> None:
+            line = marker.line
+            if line is None:
+                return
+            width = line.width
+            if width is None:
+                return
+            if isinstance(width, (list, tuple)):
+                self.assertTrue(all(float(w) == 0.0 for w in width))
+            else:
+                self.assertEqual(float(width), 0.0)
+
+        compliance = compliance_chart(period_df, "Week")
+        for bar in (compliance.data[0], compliance.data[1]):
+            self.assertEqual(_pattern_shapes(bar.marker), expected_shapes)
+            self.assertEqual(bar.marker.pattern.fgcolor, IN_PROGRESS_HATCH_COLOR)
+            self.assertEqual(bar.marker.pattern.fillmode, "overlay")
+            _assert_no_outline(bar.marker)
+            opacities = _opacity_values(bar.marker, len(period_df))
+            self.assertEqual(len(set(opacities)), 1, msg="no per-bar opacity fade")
+            self.assertAlmostEqual(opacities[0], 1.0)
+
+        for builder, uniform_opacity in (
+            (mileage_chart, 0.92),
+            (elevation_chart, 0.92),
+        ):
+            fig = builder(period_df, "Week")
+            bar = fig.data[0]
+            self.assertEqual(_pattern_shapes(bar.marker), expected_shapes)
+            self.assertEqual(bar.marker.pattern.fgcolor, IN_PROGRESS_HATCH_COLOR)
+            self.assertEqual(bar.marker.pattern.fillmode, "overlay")
+            _assert_no_outline(bar.marker)
+            opacities = _opacity_values(bar.marker, len(period_df))
+            self.assertEqual(len(set(opacities)), 1, msg="no per-bar opacity fade")
+            self.assertAlmostEqual(opacities[0], uniform_opacity)
+        self.assertEqual(IN_PROGRESS_HATCH_SHAPE, "/")
+        self.assertEqual(IN_PROGRESS_HATCH_COLOR, "#9AA5AD")
+        self.assertEqual(RACE_STRIP_SQUARE_COLOR, "#9AA5AD")
+        # Hatch must stay cool gray hex (not ink / near-black).
+        self.assertNotEqual(IN_PROGRESS_HATCH_COLOR.lower(), "#000")
+        self.assertNotEqual(IN_PROGRESS_HATCH_COLOR.lower(), "#000000")
+        self.assertNotEqual(IN_PROGRESS_HATCH_COLOR, INK)
+
+    def test_in_progress_bar_hover_includes_grain_note(self):
+        """Unfinished period hover appends ``{Grain} in progress``; completed do not."""
+        period_df = _training_period_df()
+        for grain, note in (("Week", "Week in progress"), ("Month", "Month in progress")):
+            note_html = f"<br>{note}"
+            for builder in (compliance_chart, mileage_chart, elevation_chart):
+                fig = builder(period_df, grain)
+                bars = [t for t in fig.data if getattr(t, "type", None) == "bar"]
+                self.assertGreaterEqual(len(bars), 1, msg=builder.__name__)
+                for bar in bars:
+                    custom = list(bar.customdata)
+                    self.assertEqual(custom[0][0], "March 2, 2026")
+                    self.assertEqual(custom[0][1], "")
+                    self.assertEqual(custom[1][0], "March 9, 2026")
+                    self.assertEqual(custom[1][1], note_html)
+                    self.assertIn("%{customdata[0]}", bar.hovertemplate)
+                    self.assertIn("%{customdata[1]}", bar.hovertemplate)
+                    self.assertIn(note, note_html)
+
+    def test_training_charts_share_xaxis_and_side_margins(self):
+        period_df = _training_period_df()
+        figs = [
+            race_weeks_chart(period_df, "Week"),
+            compliance_chart(period_df, "Week"),
+            mileage_chart(period_df, "Week"),
+            elevation_chart(period_df, "Week"),
+        ]
+        margins = {(fig.layout.margin.l, fig.layout.margin.r) for fig in figs}
+        self.assertEqual(margins, {(TRAINING_MARGIN_L, TRAINING_MARGIN_R)})
+        tickvals = {tuple(fig.layout.xaxis.tickvals) for fig in figs}
+        self.assertEqual(tickvals, {("Mar 2, 26", "Mar 9, 26")})
+        ranges = {tuple(fig.layout.xaxis.range) for fig in figs}
+        self.assertEqual(ranges, {(-0.5, 1.5)})
+        domains = {tuple(fig.layout.xaxis.domain) for fig in figs}
+        self.assertEqual(domains, {tuple(TRAINING_XAXIS_DOMAIN)})
+        bargaps = {fig.layout.bargap for fig in figs}
+        self.assertEqual(bargaps, {TRAINING_BARGAP})
+        for fig in figs:
+            self.assertFalse(fig.layout.xaxis.automargin)
+            self.assertFalse(fig.layout.yaxis.automargin)
+            self.assertFalse(fig.layout.margin.autoexpand)
+        mileage_bars = [
+            trace for trace in figs[2].data if trace.type == "bar" and trace.x[0] is not None
+        ]
+        self.assertEqual(len(mileage_bars), 1)
+        self.assertEqual(mileage_bars[0].offsetgroup, TRAINING_OFFSETGROUP)
+
+    def test_race_weeks_strip_backgrounds_are_transparent(self):
+        fig = race_weeks_chart(_training_period_df(), "Week")
+        self.assertEqual(fig.layout.paper_bgcolor, "rgba(0,0,0,0)")
+        self.assertEqual(fig.layout.plot_bgcolor, "rgba(0,0,0,0)")
+        shapes = list(fig.layout.shapes or ())
+        self.assertGreaterEqual(len(shapes), 2)
+        gutter = next(shape for shape in shapes if shape.xref == "paper")
+        self.assertEqual(gutter.xsizemode, "pixel")
+        self.assertEqual(gutter.xanchor, 0)
+        self.assertEqual(gutter.x0, 0)
+        self.assertEqual(gutter.x1, TRAINING_MARGIN_L)
+        self.assertEqual(gutter.fillcolor, RACE_STRIP_BG)
+        self.assertEqual(gutter.fillcolor, "rgba(0,0,0,0)")
+        timeline = next(shape for shape in shapes if shape.xref == "x")
+        self.assertEqual(timeline.x0, -0.5)
+        self.assertEqual(timeline.x1, 1.5)
+        self.assertEqual(timeline.fillcolor, RACE_STRIP_BG)
+        self.assertEqual(timeline.fillcolor, "rgba(0,0,0,0)")
+        self.assertEqual(tuple(fig.layout.xaxis.range), (-0.5, 1.5))
+        self.assertEqual(fig.layout.margin.l, TRAINING_MARGIN_L)
+        self.assertEqual(fig.layout.margin.r, TRAINING_MARGIN_R)
+        self.assertFalse(
+            any(
+                shape.xref == "paper" and shape.x0 == 0 and shape.x1 == 1
+                for shape in shapes
+            )
+        )
+        self.assertFalse(
+            any(
+                str(shape.fillcolor).lower() in {"#ffffff", "#fff", "white"}
+                for shape in shapes
+            )
+        )
+
+
+class TrainingChartThemeTests(unittest.TestCase):
+    """Training page spacing, legend, and single top race-week strip."""
+
+    def test_chart_stack_has_modest_extra_gap(self):
+        self.assertEqual(CHART_RACE_WEEKS_MARGIN_TOP, "3rem")
+        self.assertEqual(CHART_COMPLIANCE_MARGIN_TOP, "0.85rem")
+        self.assertEqual(CHART_MILEAGE_MARGIN_TOP, "0.85rem")
+        self.assertEqual(CHART_ELEVATION_MARGIN_TOP, "0.85rem")
+        self.assertNotEqual(CHART_COMPLIANCE_MARGIN_TOP, "0.1rem")
+
+    def test_race_week_strip_is_single_in_flow_copy(self):
+        self.assertEqual(RACE_STRIP_SCROLL_MARGIN_TOP, "3.75rem")
+        self.assertEqual(RACE_STRIP_END_PAD_PX, 12)
+        self.assertEqual(RACE_STRIP_BG, "rgba(0,0,0,0)")
+        self.assertNotEqual(RACE_STRIP_BG, CARD)
+        self.assertNotEqual(RACE_STRIP_BG, "#FFFFFF")
+        self.assertEqual(RACE_WEEK_STRIP_KEYS, ("race_week_strip",))
+        self.assertIn(".st-key-race_week_strip", GLOBAL_CSS)
+        self.assertNotIn("race_week_strip_mileage", GLOBAL_CSS)
+        self.assertNotIn("race_week_strip_elevation", GLOBAL_CSS)
+        self.assertNotIn("position: fixed", GLOBAL_CSS)
+        self.assertNotIn("race-week-strip-fixed", GLOBAL_CSS)
+        self.assertNotIn("race-week-strip-spacer", GLOBAL_CSS)
+        self.assertNotIn("--race-strip-pin-gap:", GLOBAL_CSS)
+        self.assertNotIn("--race-strip-snap-scan:", GLOBAL_CSS)
+        self.assertNotIn("race-week-strip-snap", GLOBAL_CSS)
+        self.assertNotIn("race-week-strip-inactive", GLOBAL_CSS)
+        self.assertNotIn("race-week-strip-active", GLOBAL_CSS)
+        self.assertIn("stLayoutWrapper", GLOBAL_CSS)
+        self.assertIn("--race-strip-scroll-margin-top:", GLOBAL_CSS)
+        self.assertIn(RACE_STRIP_SCROLL_MARGIN_TOP, GLOBAL_CSS)
+        self.assertIn(RACE_STRIP_BG, GLOBAL_CSS)
+        self.assertIn("overflow: visible !important", GLOBAL_CSS)
+        self.assertIn("[data-testid=\"stMain\"]:has(.st-key-race_week_strip)", GLOBAL_CSS)
+        self.assertIn("#chart-race-weeks", GLOBAL_CSS)
+        self.assertNotIn("position: sticky !important", GLOBAL_CSS)
+        self.assertNotIn("RACE_STRIP_SNAP_SCAN_PX", GLOBAL_CSS)
+        import dashboard.theme as theme_mod
+        import dashboard.ui as ui_mod
+
+        self.assertFalse(hasattr(theme_mod, "RACE_STRIP_SNAP_SCAN_PX"))
+        self.assertFalse(hasattr(theme_mod, "RACE_STRIP_SNAP_HYST_PX"))
+        self.assertFalse(hasattr(ui_mod, "pick_race_week_strip_index"))
+        self.assertFalse(hasattr(ui_mod, "race_weeks_snap_html"))
+
+    def test_training_page_renders_one_top_strip(self):
+        """One strip under Controls above 80:20; diamonds on charts."""
+        page = (
+            Path(__file__).resolve().parents[2]
+            / "dashboard"
+            / "pages"
+            / "training.py"
+        ).read_text()
+        self.assertIn('key="race_week_strip"', page)
+        self.assertEqual(page.count('key="race_week_strip"'), 1)
+        self.assertNotIn("race_week_strip_mileage", page)
+        self.assertNotIn("race_week_strip_elevation", page)
+        self.assertIn('key="training_race_weeks"', page)
+        self.assertIn('key="training_compliance"', page)
+        self.assertIn('key="training_mileage"', page)
+        self.assertIn('key="training_elevation"', page)
+        self.assertIn('id="chart-compliance"', page)
+        self.assertIn('id="chart-mileage"', page)
+        self.assertIn('id="chart-elevation"', page)
+        self.assertNotIn("race_weeks_snap_html", page)
+        self.assertNotIn("unsafe_allow_javascript", page)
+        self.assertLess(page.find("race_week_strip"), page.find("chart-compliance"))
+        self.assertLess(page.find("chart-compliance"), page.find("chart-mileage"))
+        self.assertLess(page.find("chart-mileage"), page.find("chart-elevation"))
+        self.assertLess(page.find("training_compliance"), page.find("training_mileage"))
+        self.assertLess(page.find("training_mileage"), page.find("training_elevation"))
+        metrics = (
+            Path(__file__).resolve().parents[2]
+            / "dashboard"
+            / "pages"
+            / "metrics.py"
+        ).read_text()
+        self.assertNotIn("race_weeks_snap_html", metrics)
+        self.assertNotIn("race_week_strip", metrics)
+
+    def test_race_week_strip_compact_box_css(self):
+        self.assertIn(".st-key-race_week_strip::before", GLOBAL_CSS)
+        self.assertIn(
+            "calc(100% - var(--training-plot-margin-r) + var(--race-strip-end-pad))",
+            GLOBAL_CSS,
+        )
+        self.assertIn("--training-plot-margin-r:", GLOBAL_CSS)
+        self.assertIn("--race-strip-end-pad:", GLOBAL_CSS)
+        self.assertIn("var(--race-strip-bg)", GLOBAL_CSS)
+        self.assertIn("--race-strip-bg: rgba(0,0,0,0)", GLOBAL_CSS)
+        self.assertIn("text-shadow: 0 0 8px", GLOBAL_CSS)
+        self.assertNotIn("0 8px 16px rgba(21, 32, 40, 0.08)", GLOBAL_CSS)
+        self.assertIn(CHART_RACE_WEEKS_MARGIN_TOP, GLOBAL_CSS)
+        self.assertNotIn(".st-key-race_week_strip_mileage", GLOBAL_CSS)
+        self.assertNotIn(".st-key-race_week_strip_elevation", GLOBAL_CSS)
+        self.assertIn(".st-key-training_compliance", GLOBAL_CSS)
+        self.assertIn(".st-key-training_mileage", GLOBAL_CSS)
+        self.assertIn(".st-key-training_elevation", GLOBAL_CSS)
+        self.assertIn("height: 40px !important", GLOBAL_CSS)
+        self.assertIn("max-height: 40px !important", GLOBAL_CSS)
+
+    def test_race_events_title_is_constant(self):
+        from charts import RACE_EVENTS_TITLE
+
+        self.assertEqual(RACE_EVENTS_TITLE, "Races")
+
+    def test_race_weeks_legend_explains_markers(self):
+        html = race_weeks_legend_html()
+        self.assertIn("race-week-legend", html)
+        self.assertIn("Races", html)
+        self.assertNotIn("Race events", html)
+        self.assertNotIn("Race weeks", html)
+        self.assertIn('aria-label="About races"', html)
+        self.assertIn("<strong>Races</strong>", html)
+        self.assertIn("kpi-info", html)
+        self.assertIn("kpi-tooltip", html)
+        # Tooltip is nested under .kpi-info (info-button-only), not the label.
+        info_idx = html.index("kpi-info")
+        tooltip_idx = html.index("kpi-tooltip")
+        self.assertLess(info_idx, tooltip_idx)
+        self.assertIn("Training period (no race)", html)
+        self.assertIn("Race in this period", html)
+        self.assertEqual(html.count("race-legend-row"), 2)
+        self.assertIn("race-legend-marker", html)
+        self.assertIn(RACE_STRIP_SQUARE_COLOR, html)
+        self.assertIn(RACE_STRIP_DIAMOND_COLOR, html)
+        self.assertNotIn("Race types", html)
+        self.assertNotIn(RACE_TYPE_COLORS["5k"], html)
+        self.assertNotIn(RACE_TYPE_COLORS["Marathon"], html)
+        self.assertNotIn("Race Days", html)
+        self.assertNotIn("Race Weeks", html)
+        self.assertNotIn("Race Months", html)
+        self.assertNotIn("Race Years", html)
+        # Legend popup opens on ⓘ only (global .kpi-info rules), not label hover.
+        self.assertNotIn(".race-week-legend:hover .kpi-tooltip", GLOBAL_CSS)
+        self.assertNotIn(".race-week-legend:focus-within .kpi-tooltip", GLOBAL_CSS)
+        self.assertIn(".kpi-info:hover .kpi-tooltip", GLOBAL_CSS)
+        # Label + ⓘ sit on one horizontal line in the left margin.
+        self.assertIn("flex-direction: row", GLOBAL_CSS)
+        legend_css_idx = GLOBAL_CSS.index(".race-week-legend {")
+        row_idx = GLOBAL_CSS.index("flex-direction: row", legend_css_idx)
+        self.assertLess(row_idx - legend_css_idx, 200)
+        # Tooltip legend rows: marker column + label, center-aligned.
+        self.assertIn(".kpi-tooltip .race-legend-row {", GLOBAL_CSS)
+        self.assertIn("align-items: center", GLOBAL_CSS)
+        self.assertIn(".kpi-tooltip .race-legend-marker {", GLOBAL_CSS)
+
+
+if __name__ == "__main__":
+    unittest.main()

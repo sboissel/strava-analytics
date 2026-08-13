@@ -157,7 +157,7 @@ class KeyIndicatorsHtmlTests(unittest.TestCase):
 
 
 class MetricsInspectAnchorHtmlTests(unittest.TestCase):
-    """Inspect scroll anchor for Metrics section nav (label lives on expander)."""
+    """Inspect scroll anchor (label lives on expander; not a left-nav jump)."""
 
     def test_anchor_only(self):
         from dashboard.ui import metrics_inspect_anchor_html
@@ -238,6 +238,82 @@ class MetricsInspectAnchorHtmlTests(unittest.TestCase):
         # Collapsed Inspect details must not add padding below the KI card.
         self.assertIn("details:not([open]) [data-testid=\"stExpanderDetails\"]", GLOBAL_CSS)
         self.assertIn("details[open] [data-testid=\"stExpanderDetails\"]", GLOBAL_CSS)
+
+
+class MetricsSectionNavTests(unittest.TestCase):
+    """Metrics left-nav jumps omit Inspect and sit below the page list."""
+
+    def test_metrics_sections_omit_inspect(self):
+        from dashboard.ui import METRICS_SECTIONS, section_nav_html
+
+        labels = [label for _, label in METRICS_SECTIONS]
+        self.assertEqual(labels, ["Achievements", "Key Indicators", "Shoes"])
+        self.assertNotIn("Inspect", labels)
+        html = section_nav_html(METRICS_SECTIONS, aria_label="Metrics sections")
+        self.assertIn("Achievements", html)
+        self.assertIn("Key Indicators", html)
+        self.assertIn("#shoe-mileage", html)
+        self.assertNotIn("Inspect", html)
+        self.assertNotIn("kpi-detail", html)
+        self.assertIn("On this page", html)
+
+    def test_on_this_page_follows_page_links(self):
+        from dashboard.ui import METRICS_SECTIONS, NAV_PAGES, sidebar_nav_entries
+
+        page_titles = [title for _, title, _ in NAV_PAGES]
+        entries = sidebar_nav_entries("metrics", METRICS_SECTIONS)
+        labels = [label for _, _, label in entries]
+        self.assertEqual(
+            labels,
+            [*page_titles, "Achievements", "Key Indicators", "Shoes"],
+        )
+        self.assertEqual(page_titles, [
+            "Metrics",
+            "Training",
+            "Training Insights",
+            "Race Results",
+        ])
+        self.assertNotIn("Inspect", labels)
+
+    def test_training_sections_follow_page_links(self):
+        from dashboard.ui import NAV_PAGES, sidebar_nav_entries
+
+        sections = [
+            ("chart-race-weeks", "Races"),
+            ("chart-compliance", "Compliance"),
+            ("chart-mileage", "Mileage"),
+            ("chart-elevation", "Elevation"),
+        ]
+        entries = sidebar_nav_entries("training", sections)
+        kinds = [(kind, label) for kind, _, label in entries]
+        page_count = len(NAV_PAGES)
+        self.assertEqual(kinds[:page_count], [
+            ("page", "Metrics"),
+            ("page", "Training"),
+            ("page", "Training Insights"),
+            ("page", "Race Results"),
+        ])
+        self.assertEqual(
+            kinds[page_count:],
+            [
+                ("section", "Races"),
+                ("section", "Compliance"),
+                ("section", "Mileage"),
+                ("section", "Elevation"),
+            ],
+        )
+
+    def test_on_this_page_has_hairline_divider(self):
+        from dashboard.theme import GLOBAL_CSS, LINE
+        from dashboard.ui import METRICS_SECTIONS, section_nav_html
+
+        html = section_nav_html(METRICS_SECTIONS, aria_label="Metrics sections")
+        self.assertIn('class="sidebar-section-nav"', html)
+        self.assertNotIn("<hr", html)
+        self.assertIn(".sidebar-section-nav {", GLOBAL_CSS)
+        self.assertIn("margin: 0.85rem 0 0.75rem", GLOBAL_CSS)
+        self.assertIn("padding: 0.5rem 0 0.35rem", GLOBAL_CSS)
+        self.assertIn(f"border-top: 1px solid {LINE}", GLOBAL_CSS)
 
 
 class KpiComparisonBadgeTests(unittest.TestCase):
@@ -684,6 +760,167 @@ class AchievementsHtmlTests(unittest.TestCase):
         self.assertEqual(html.count("achievement-badge--tip"), 2)
         self.assertIn("<strong>All-time</strong>", html)
         self.assertNotIn("This year", html)
+
+
+class PeriodMetricsTests(unittest.TestCase):
+    """Period aggregation for Training charts."""
+
+    def _runs(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    [
+                        "2026-03-03T08:00:00Z",
+                        "2026-03-10T08:00:00Z",
+                        "2026-03-12T08:00:00Z",
+                    ],
+                    utc=True,
+                ),
+                "distance_miles": [4.0, 5.0, 3.0],
+                "%_easy": [80.0, 80.0, 80.0],
+                "elevation_gain_ft": [200.0, 100.0, 50.0],
+            }
+        )
+
+    def test_sums_elevation_feet_by_week(self):
+        from dashboard.data import aggregate_period_metrics
+
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        result = aggregate_period_metrics(self._runs(), "Week", as_of=as_of)
+        week_11 = result.loc[result["period_key"] == "2026-11"]
+        week_10 = result.loc[result["period_key"] == "2026-10"]
+        self.assertEqual(len(week_11), 1)
+        self.assertAlmostEqual(float(week_11["total_elevation_ft"].iloc[0]), 150.0)
+        self.assertAlmostEqual(float(week_10["total_elevation_ft"].iloc[0]), 200.0)
+
+    def test_missing_elevation_column_is_zero(self):
+        from dashboard.data import aggregate_period_metrics
+
+        runs = self._runs().drop(columns=["elevation_gain_ft"])
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        result = aggregate_period_metrics(runs, "Week", as_of=as_of)
+        self.assertTrue((result["total_elevation_ft"] == 0.0).all())
+
+    def test_empty_runs_include_elevation_column(self):
+        from dashboard.data import aggregate_period_metrics
+
+        result = aggregate_period_metrics(
+            pd.DataFrame(), "Week", as_of=pd.Timestamp("2026-03-16T12:00:00Z")
+        )
+        self.assertIn("total_elevation_ft", result.columns)
+        self.assertTrue((result["total_elevation_ft"] == 0.0).all())
+
+
+class AnnotateRacePeriodsTests(unittest.TestCase):
+    """Race periods match Race Results rows (race=true) on the period axis."""
+
+    def _periods(self) -> pd.DataFrame:
+        from dashboard.data import aggregate_period_metrics
+
+        runs = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-03-10T08:00:00Z"], utc=True),
+                "distance_miles": [5.0],
+                "%_easy": [80.0],
+                "elevation_gain_ft": [40.0],
+            }
+        )
+        return aggregate_period_metrics(
+            runs, "Week", as_of=pd.Timestamp("2026-03-16T12:00:00Z")
+        )
+
+    def test_marks_iso_week_containing_race(self):
+        from dashboard.data import annotate_race_periods
+
+        races = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-03-11T09:00:00Z"], utc=True),
+                "name": ["Spring 5k"],
+            }
+        )
+        result = annotate_race_periods(self._periods(), races, "Week")
+        week_11 = result.loc[result["period_key"] == "2026-11"].iloc[0]
+        week_10 = result.loc[result["period_key"] == "2026-10"].iloc[0]
+        self.assertTrue(bool(week_11["is_race_period"]))
+        self.assertEqual(week_11["race_names"], "Spring 5k")
+        self.assertEqual(week_11["race_type"], "Other")
+        self.assertEqual(week_11["race_hover"], "Spring 5k")
+        self.assertFalse(bool(week_10["is_race_period"]))
+        self.assertEqual(week_10["race_names"], "")
+        self.assertEqual(week_10["race_type"], "")
+        self.assertEqual(week_10["race_hover"], "")
+
+    def test_day_grain_marks_only_race_day(self):
+        from dashboard.data import aggregate_period_metrics, annotate_race_periods
+
+        runs = pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    ["2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z"], utc=True
+                ),
+                "distance_miles": [5.0, 3.0],
+                "%_easy": [80.0, 80.0],
+                "elevation_gain_ft": [10.0, 20.0],
+            }
+        )
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        periods = aggregate_period_metrics(runs, "Day", as_of=as_of)
+        races = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-03-11T09:00:00Z"], utc=True),
+                "name": ["Town 5k"],
+            }
+        )
+        result = annotate_race_periods(periods, races, "Day")
+        race_day = result.loc[result["period_key"] == "2026-03-11"].iloc[0]
+        other_day = result.loc[result["period_key"] == "2026-03-10"].iloc[0]
+        self.assertTrue(bool(race_day["is_race_period"]))
+        self.assertFalse(bool(other_day["is_race_period"]))
+
+    def test_empty_races_marks_none(self):
+        from dashboard.data import annotate_race_periods
+
+        result = annotate_race_periods(self._periods(), pd.DataFrame(), "Week")
+        self.assertFalse(result["is_race_period"].any())
+        self.assertTrue((result["race_names"] == "").all())
+        self.assertTrue((result["race_type"] == "").all())
+        self.assertTrue((result["race_hover"] == "").all())
+
+    def test_primary_type_is_longest_distance(self):
+        from dashboard.data import annotate_race_periods
+
+        races = pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    ["2026-03-11T09:00:00Z", "2026-03-12T09:00:00Z"], utc=True
+                ),
+                "name": ["Town 5k", "City Half"],
+                "race_type": ["5k", "Half"],
+                "distance_miles": [3.1, 13.1],
+            }
+        )
+        result = annotate_race_periods(self._periods(), races, "Week")
+        week_11 = result.loc[result["period_key"] == "2026-11"].iloc[0]
+        self.assertTrue(bool(week_11["is_race_period"]))
+        self.assertEqual(week_11["race_names"], "Town 5k · City Half")
+        self.assertEqual(week_11["race_type"], "Half")
+        self.assertEqual(week_11["race_hover"], "Town 5k<br>5k<br>City Half<br>Half")
+
+    def test_other_race_hover_uses_miles(self):
+        from dashboard.data import annotate_race_periods
+
+        races = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-03-11T09:00:00Z"], utc=True),
+                "name": ["Trail Classic"],
+                "race_type": ["Other"],
+                "distance_miles": [12.4],
+            }
+        )
+        result = annotate_race_periods(self._periods(), races, "Week")
+        week_11 = result.loc[result["period_key"] == "2026-11"].iloc[0]
+        self.assertEqual(week_11["race_type"], "Other")
+        self.assertEqual(week_11["race_hover"], "Trail Classic<br>12.4 mi")
 
 
 if __name__ == "__main__":
