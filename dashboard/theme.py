@@ -24,6 +24,14 @@ TRAFFIC_RED = "#cc3232"  # red
 
 # Weekly on-target center (middle of the 18–22 green band).
 WEEKLY_MILES_GOAL = 20.0
+# Target tick sits at this fraction of every KPI gauge arc.
+GAUGE_TARGET_PROGRESS = 0.8
+# Gauge scale max so WEEKLY_MILES_GOAL lands at GAUGE_TARGET_PROGRESS (20 / 0.8).
+MILES_GAUGE_MAX = WEEKLY_MILES_GOAL / GAUGE_TARGET_PROGRESS
+SHOE_MILEAGE_GOAL = 400.0
+LONGEST_RUN_GOAL = 10.0
+# Gauge scale max so LONGEST_RUN_GOAL lands at GAUGE_TARGET_PROGRESS (10 / 0.8).
+LONGEST_RUN_GAUGE_MAX = LONGEST_RUN_GOAL / GAUGE_TARGET_PROGRESS
 EASY_TARGET_FRAC = 0.8
 EH_BAND_THRESHOLDS = (85, 75, 65, 55)
 
@@ -54,6 +62,46 @@ def eh_color(easy_pct: float | None) -> str:
     if easy_pct >= EH_BAND_THRESHOLDS[2]:
         return TRAFFIC_YELLOW
     if easy_pct >= EH_BAND_THRESHOLDS[3]:
+        return TRAFFIC_ORANGE
+    return TRAFFIC_RED
+
+
+def shoe_wear_color(mileage: float, goal: float = SHOE_MILEAGE_GOAL) -> str:
+    """Return a traffic-light color for shoe wear toward the mileage goal.
+
+    Low mileage stays green; color warms as the shoe approaches retirement.
+    """
+    if goal <= 0:
+        return INK
+    used = float(mileage) / float(goal)
+    if used < 0.50:
+        return TRAFFIC_GREEN
+    if used < 0.70:
+        return TRAFFIC_LIME
+    if used < 0.85:
+        return TRAFFIC_YELLOW
+    if used < 1.0:
+        return TRAFFIC_ORANGE
+    return TRAFFIC_RED
+
+
+def longest_run_color(miles: float | None, goal: float = LONGEST_RUN_GOAL) -> str:
+    """Return a traffic-light color for longest-run progress toward the goal.
+
+    Higher mileage is better; green once the goal is met or exceeded.
+    """
+    if miles is None:
+        return INK
+    if goal <= 0:
+        return INK
+    frac = float(miles) / float(goal)
+    if frac >= 1.0:
+        return TRAFFIC_GREEN
+    if frac >= 0.8:
+        return TRAFFIC_LIME
+    if frac >= 0.6:
+        return TRAFFIC_YELLOW
+    if frac >= 0.4:
         return TRAFFIC_ORANGE
     return TRAFFIC_RED
 
@@ -171,6 +219,8 @@ CHART_PACE_HR_MARGIN_TOP = "2.75rem"          # Insights: HR line
 CHART_MILEAGE_HEATMAP_MARGIN_TOP = "3.25rem"  # Insights: heatmap
 CHART_RACE_RESULTS_MARGIN_TOP = LAYOUT_GAP      # Race Results: scatter
 CHART_RACE_TABLE_MARGIN_TOP = "0.75rem"         # Race Results: table
+# Subtle athletic purple for Total Elevation achievement badge.
+ELEVATION_PURPLE = "#6F5F8D"
 
 GLOBAL_CSS = f"""
 <style>
@@ -394,6 +444,104 @@ GLOBAL_CSS = f"""
   }}
   #key-indicators {{
     scroll-margin-top: 1.25rem;
+  }}
+  /* Standalone KI panel (non-Metrics). Nested Metrics KI uses .ki-panel column. */
+  [data-testid="stElementContainer"]:has(#key-indicators) {{
+    margin-top: var(--layout-gap) !important;
+    margin-bottom: 0 !important;
+  }}
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stElementContainer"]:has(#key-indicators),
+  [data-testid="column"]:has(.ki-panel) [data-testid="stElementContainer"]:has(#key-indicators) {{
+    margin-top: 0 !important;
+  }}
+  /* Metrics: KI gauges + Inspect share one painted column (same idea as controls-panel).
+     Achievements is HTML markdown: Streamlit's stMarkdownContainer uses
+     margin-bottom: -1rem (spacing.lg) to cancel its default 1rem flex gap.
+     Page gap is 0, so that pull-up still shrinks Achievements → KI. KI is
+     st.columns + expander, which does not get that offset — without it,
+     KI → Shoes is a full --layout-gap larger. Match the markdown pull-up. */
+  [data-testid="stHorizontalBlock"]:has(.ki-panel) {{
+    margin-top: var(--layout-gap) !important;
+    margin-bottom: -1rem !important;
+    width: 100% !important;
+    gap: 0 !important;
+    padding-bottom: 0 !important;
+  }}
+  [data-testid="stElementContainer"]:has(.ki-panel):has([data-testid="stHorizontalBlock"]) {{
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }}
+  [data-testid="stColumn"]:has(.ki-panel),
+  [data-testid="column"]:has(.ki-panel) {{
+    background: rgba(255, 255, 255, 0.82) !important;
+    border: 1px solid rgba(21, 32, 40, 0.06) !important;
+    border-radius: 20px !important;
+    padding: 1.25rem 1.2rem 0.85rem !important;
+    box-shadow: 0 10px 30px rgba(21, 32, 40, 0.04) !important;
+    backdrop-filter: blur(10px);
+    overflow: visible !important;
+    width: 100% !important;
+    flex: 1 1 100% !important;
+  }}
+  .ki-panel {{
+    display: none;
+  }}
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stVerticalBlock"],
+  [data-testid="column"]:has(.ki-panel) [data-testid="stVerticalBlock"] {{
+    gap: 0 !important;
+  }}
+  /* Inspect expander body needs normal stacking: detail copy then table.
+     The flush gap:0 above is for KI chrome; restore spacing inside details. */
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpanderDetails"] [data-testid="stVerticalBlock"],
+  [data-testid="column"]:has(.ki-panel) [data-testid="stExpanderDetails"] [data-testid="stVerticalBlock"],
+  .st-key-metrics_inspect_ki [data-testid="stExpanderDetails"] [data-testid="stVerticalBlock"] {{
+    gap: 0.35rem !important;
+  }}
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stElementContainer"],
+  [data-testid="column"]:has(.ki-panel) [data-testid="stElementContainer"] {{
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }}
+  /* Nested columns inside KI (inspect select) stay flush — no nested cards. */
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stColumn"],
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="column"],
+  [data-testid="column"]:has(.ki-panel) [data-testid="stColumn"],
+  [data-testid="column"]:has(.ki-panel) [data-testid="column"] {{
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    backdrop-filter: none;
+  }}
+  #achievements {{
+    scroll-margin-top: 1.25rem;
+    overflow: visible;
+  }}
+  [data-testid="stElementContainer"]:has(#achievements) {{
+    margin-top: var(--layout-gap) !important;
+    margin-bottom: 0 !important;
+    overflow: visible !important;
+  }}
+  [data-testid="stElementContainer"]:has(#achievements)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(#achievements)
+    [data-testid="stMarkdown"] {{
+    overflow: visible !important;
+  }}
+  /* Metrics: achievements sit under the page summary (no controls row). */
+  [data-testid="stElementContainer"]:has(.panel-summary)
+    + [data-testid="stElementContainer"]:has(#achievements) {{
+    margin-top: 0 !important;
+  }}
+  #shoe-mileage {{
+    scroll-margin-top: 1.25rem;
+  }}
+  [data-testid="stElementContainer"]:has(#shoe-mileage) {{
+    margin-top: var(--layout-gap) !important;
+    margin-bottom: 0 !important;
   }}
   /* Main page stack: spacing is explicit via --layout-gap (not Streamlit gap). */
   .block-container > div[data-testid="stVerticalBlock"] {{
@@ -747,6 +895,11 @@ GLOBAL_CSS = f"""
     color: {MUTED};
     margin-bottom: 0.55rem;
   }}
+  .shoe-panel-label {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+  }}
 
   .meta-line {{
     color: {MUTED};
@@ -760,8 +913,13 @@ GLOBAL_CSS = f"""
 
   .kpi-grid {{
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.75rem;
+  }}
+  @media (max-width: 900px) {{
+    .kpi-grid {{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }}
   }}
   .kpi-card {{
     background: {CARD};
@@ -869,10 +1027,425 @@ GLOBAL_CSS = f"""
   }}
   .kpi-value {{
     font-family: {FONT_BODY};
-    font-size: 2rem;
+    font-size: 1.55rem;
     font-weight: 700;
     line-height: 1;
     color: var(--accent, {INK});
+    margin-top: 0.15rem;
+  }}
+  .kpi-gauge {{
+    width: 7.25rem;
+    margin: 0 auto 0.15rem;
+  }}
+  .kpi-gauge svg {{
+    width: 100%;
+    height: auto;
+    display: block;
+  }}
+  .gauge-target-tick {{
+    stroke: rgba(21, 32, 40, 0.28);
+    stroke-width: 5;
+    stroke-linecap: round;
+  }}
+  .kpi-sub {{
+    font-size: 0.72rem;
+    color: {MUTED};
+    margin-top: 0.28rem;
+  }}
+  .kpi-delta {{
+    margin-top: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: {INK};
+  }}
+  .kpi-delta-period {{
+    font-weight: 400;
+  }}
+  .kpi-delta--up,
+  .kpi-delta--down,
+  .kpi-delta--flat {{
+    color: {INK};
+  }}
+  #kpi-detail,
+  .metrics-inspect-anchor {{
+    scroll-margin-top: 1.25rem;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }}
+  /* Inspect expander: single label on the gray bar — summary matches .panel-label. */
+  [data-testid="stColumn"]:has(.ki-panel)
+    [data-testid="stElementContainer"]:has(.metrics-inspect-anchor)
+    + [data-testid="stElementContainer"]:has([data-testid="stExpander"]),
+  [data-testid="column"]:has(.ki-panel)
+    [data-testid="stElementContainer"]:has(.metrics-inspect-anchor)
+    + [data-testid="stElementContainer"]:has([data-testid="stExpander"]),
+  .st-key-metrics_inspect_ki {{
+    margin-top: 0.55rem !important;
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }}
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"],
+  [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"],
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] {{
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }}
+  /* Open Inspect only: compact expander details default paddingTop is 0.5rem.
+     Do not leave that (or 0.35rem) in layout when collapsed — it sat below
+     the KI card and widened KI → Shoes vs Achievements → KI. */
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] details[open] [data-testid="stExpanderDetails"],
+  [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] details[open] [data-testid="stExpanderDetails"],
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] details[open] [data-testid="stExpanderDetails"] {{
+    padding: 0.35rem 0 0 !important;
+    border-top: none !important;
+  }}
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] details:not([open]) [data-testid="stExpanderDetails"],
+  [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] details:not([open]) [data-testid="stExpanderDetails"],
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] details:not([open]) [data-testid="stExpanderDetails"] {{
+    display: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }}
+  /* Compact expander trailing icon is a Material ligature (chevron_right).
+     Restyling all summary spans as .panel-label turned that into visible
+     "CHEVRON_RIGHT" text overlapping Inspect a KI further — hide the icon instead.
+     +/− via summary::before is the expand/collapse cue. */
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] summary [data-testid="stIconMaterial"],
+  [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] summary [data-testid="stIconMaterial"],
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] summary [data-testid="stIconMaterial"] {{
+    display: none !important;
+  }}
+  /* + when collapsed / − when open — scoped to Metrics Inspect only. */
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] summary::before,
+  [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] summary::before,
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] summary::before {{
+    content: '+';
+    display: inline-block;
+    margin-right: 0.35em;
+    font-family: {FONT_BODY};
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: none;
+    color: {MUTED};
+    line-height: 1.2;
+  }}
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"][open] summary::before,
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] details[open] summary::before,
+  [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"][open] summary::before,
+  [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] details[open] summary::before,
+  .st-key-metrics_inspect_ki [data-testid="stExpander"][open] summary::before,
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] details[open] summary::before,
+  .st-key-metrics_inspect_ki[open] summary::before {{
+    content: '−';
+  }}
+  /* Match .panel-label on expander summary label only (not icon spans). */
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"],
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"] p,
+  [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] summary p,
+  [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"],
+  [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"] p,
+  [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] summary p,
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"],
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"] p,
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] summary p {{
+    font-family: {FONT_BODY} !important;
+    font-size: 0.72rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    color: {MUTED} !important;
+    line-height: 1.2 !important;
+    margin: 0 !important;
+  }}
+  /* Compact inspect select: short width + smaller text/height. */
+  .metrics-inspect-select {{
+    display: none;
+  }}
+  [data-testid="stElementContainer"]:has(.metrics-inspect-select)
+    + [data-testid="stElementContainer"] [data-testid="stSelectbox"],
+  [data-testid="stElementContainer"]:has(.metrics-inspect-select)
+    + [data-testid="stElementContainer"] div[data-baseweb="select"] > div {{
+    max-width: 16rem !important;
+    width: 100% !important;
+  }}
+  [data-testid="stElementContainer"]:has(.metrics-inspect-select)
+    + [data-testid="stElementContainer"] div[data-baseweb="select"] > div {{
+    min-height: 2rem !important;
+    border-radius: 10px !important;
+  }}
+  [data-testid="stElementContainer"]:has(.metrics-inspect-select)
+    + [data-testid="stElementContainer"] div[data-baseweb="select"] span {{
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+  }}
+  /* Detail copy must keep document flow above the dataframe. KI-panel rules
+     zero every stElementContainer margin/gap; without reserved space the
+     white dataframe paints over the comparison line. */
+  .kpi-detail-panel {{
+    margin-top: 0.65rem;
+    padding-bottom: 0.15rem;
+    overflow: visible;
+    position: relative;
+    z-index: 1;
+  }}
+  .kpi-detail-after {{
+    height: 1.25rem;
+    line-height: 0;
+    margin: 0;
+    padding: 0;
+  }}
+  .kpi-detail-meta {{
+    font-size: 0.78rem;
+    color: {MUTED};
+    margin: 0 0 0.35rem;
+  }}
+  .kpi-detail-insight {{
+    font-size: 0.92rem;
+    color: {INK};
+    margin: 0 0 0.25rem;
+  }}
+  .kpi-detail-comparison {{
+    font-size: 0.84rem;
+    color: {MUTED};
+    margin: 0;
+    line-height: 1.35;
+  }}
+  /* Restore spacing after detail markdown → table (overrides ki-panel zeros). */
+  [data-testid="stColumn"]:has(.ki-panel)
+    [data-testid="stElementContainer"]:has(.kpi-detail-panel)
+    + [data-testid="stElementContainer"]:has([data-testid="stDataFrame"]),
+  [data-testid="column"]:has(.ki-panel)
+    [data-testid="stElementContainer"]:has(.kpi-detail-panel)
+    + [data-testid="stElementContainer"]:has([data-testid="stDataFrame"]),
+  .st-key-metrics_inspect_ki
+    [data-testid="stElementContainer"]:has(.kpi-detail-panel)
+    + [data-testid="stElementContainer"]:has([data-testid="stDataFrame"]),
+  [data-testid="stColumn"]:has(.ki-panel)
+    [data-testid="stElementContainer"]:has(.kpi-detail-panel)
+    + [data-testid="stElementContainer"]:has(.race-results-empty),
+  [data-testid="column"]:has(.ki-panel)
+    [data-testid="stElementContainer"]:has(.kpi-detail-panel)
+    + [data-testid="stElementContainer"]:has(.race-results-empty),
+  .st-key-metrics_inspect_ki
+    [data-testid="stElementContainer"]:has(.kpi-detail-panel)
+    + [data-testid="stElementContainer"]:has(.race-results-empty) {{
+    margin-top: 0.25rem !important;
+  }}
+
+  .achievement-grid {{
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.55rem 0.4rem;
+    justify-items: center;
+    width: 100%;
+    overflow: visible;
+  }}
+  @media (max-width: 900px) {{
+    .achievement-grid {{
+      grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    }}
+  }}
+  .achievement-badge {{
+    --achievement-accent: {EASY};
+    --achievement-ring: rgba(91, 155, 213, 0.22);
+    --achievement-fill: rgba(91, 155, 213, 0.10);
+    --achievement-border: rgba(91, 155, 213, 0.38);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    max-width: 9.5rem;
+    text-align: center;
+    position: relative;
+    overflow: visible;
+  }}
+  .achievement-badge--tip {{
+    cursor: help;
+  }}
+  .achievement-badge:hover,
+  .achievement-badge:focus-within {{
+    z-index: 40;
+    outline: none;
+  }}
+  .achievement-badge .kpi-tooltip {{
+    z-index: 50;
+  }}
+  .achievement-badge:hover .kpi-tooltip,
+  .achievement-badge:focus-within .kpi-tooltip {{
+    visibility: visible;
+    opacity: 1;
+  }}
+  .achievement-badge--miles {{
+    --achievement-accent: {EASY};
+    --achievement-ring: rgba(91, 155, 213, 0.22);
+    --achievement-fill: rgba(91, 155, 213, 0.10);
+    --achievement-border: rgba(91, 155, 213, 0.38);
+  }}
+  .achievement-badge--elevation {{
+    --achievement-accent: {ELEVATION_PURPLE};
+    --achievement-ring: rgba(111, 95, 141, 0.22);
+    --achievement-fill: rgba(111, 95, 141, 0.10);
+    --achievement-border: rgba(111, 95, 141, 0.38);
+  }}
+  .achievement-badge--week {{
+    --achievement-accent: {TRAFFIC_LIME};
+    --achievement-ring: rgba(153, 193, 64, 0.26);
+    --achievement-fill: rgba(153, 193, 64, 0.11);
+    --achievement-border: rgba(153, 193, 64, 0.42);
+  }}
+  .achievement-badge--longest {{
+    --achievement-accent: {HARD};
+    --achievement-ring: rgba(230, 126, 34, 0.22);
+    --achievement-fill: rgba(230, 126, 34, 0.10);
+    --achievement-border: rgba(230, 126, 34, 0.40);
+  }}
+  .achievement-badge--peak {{
+    --achievement-accent: {TRAFFIC_YELLOW};
+    --achievement-ring: rgba(231, 180, 22, 0.24);
+    --achievement-fill: rgba(231, 180, 22, 0.10);
+    --achievement-border: rgba(231, 180, 22, 0.42);
+  }}
+  .achievement-medal {{
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.32rem;
+    width: 9.25rem;
+    height: 9.25rem;
+    border-radius: 50%;
+    background:
+      radial-gradient(
+        circle at 32% 28%,
+        #ffffff 0%,
+        {SURFACE} 40%,
+        var(--achievement-fill) 100%
+      );
+    border: 2px solid var(--achievement-border);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.85),
+      inset 0 -1px 0 rgba(21, 32, 40, 0.05),
+      0 0 0 4px var(--achievement-ring),
+      0 8px 18px rgba(21, 32, 40, 0.06);
+  }}
+  .achievement-medal::before {{
+    content: "";
+    position: absolute;
+    inset: 9px;
+    border-radius: 50%;
+    border: 1px solid var(--achievement-ring);
+    pointer-events: none;
+  }}
+  .achievement-icon {{
+    position: relative;
+    z-index: 1;
+    font-size: 1.5rem;
+    line-height: 1;
+    margin-top: -0.15rem;
+  }}
+  .achievement-value {{
+    position: relative;
+    z-index: 1;
+    font-family: {FONT_BODY};
+    font-size: clamp(1.05rem, 1.7vw, 1.32rem);
+    font-weight: 700;
+    line-height: 1.15;
+    color: {INK};
+    max-width: 7.5rem;
+    word-break: break-word;
+    text-align: center;
+  }}
+  .achievement-caption {{
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+    min-height: 2.4rem;
+  }}
+  .achievement-label {{
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: {INK};
+    letter-spacing: 0.01em;
+    line-height: 1.25;
+  }}
+  .achievement-sub {{
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: {MUTED};
+  }}
+
+  .shoe-kpi-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    gap: 0.75rem;
+  }}
+  .shoe-kpi-card {{
+    background: {CARD};
+    border: 1px solid transparent;
+    border-radius: 16px;
+    padding: 1rem 0.75rem 0.85rem;
+    text-align: center;
+    position: relative;
+    overflow: visible;
+  }}
+  .shoe-kpi-card::before {{
+    content: "";
+    position: absolute;
+    inset: 0 5% auto 5%;
+    height: 3px;
+    background: var(--accent, {MILES});
+  }}
+  .shoe-kpi-card.is-retired {{
+    opacity: 0.72;
+  }}
+  .shoe-kpi-name {{
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: {MUTED};
+    margin-bottom: 0.35rem;
+    min-height: 2.1em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }}
+  .shoe-gauge {{
+    width: 7.25rem;
+    margin: 0 auto 0.15rem;
+  }}
+  .shoe-gauge svg {{
+    width: 100%;
+    height: auto;
+    display: block;
+  }}
+  .shoe-kpi-value {{
+    font-family: {FONT_BODY};
+    font-size: 1.55rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--accent, {INK});
+    margin-top: 0.15rem;
+  }}
+  .shoe-kpi-sub {{
+    font-size: 0.72rem;
+    color: {MUTED};
+    margin-top: 0.28rem;
+  }}
+  .shoe-kpi-type {{
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: {MUTED};
+    margin-top: 0.35rem;
   }}
 
   /* Selectbox polish */

@@ -18,7 +18,7 @@ The main script in [`src/strava_analytics/pipeline.py`](src/strava_analytics/pip
 - [data/strava_hike_analysis.csv](data/strava_hike_analysis.csv): hike exports
 - [data/strava_run_pace_analysis.csv](data/strava_run_pace_analysis.csv): per-run pace-bin summaries keyed by activity ID
 - [data/activities_last_week.csv](data/activities_last_week.csv): a rolling 7-day summary of recent activity data
-- [data/strava_gear.csv](data/strava_gear.csv): shoe mileage (Strava gear distance plus pre-tracking baselines); active shoes are refreshed each run, retired rows are kept but not updated
+- [data/strava_gear.csv](data/strava_gear.csv): shoe mileage and use type (Strava gear distance plus pre-tracking baselines); active shoes are refreshed each run, retired rows are kept but not updated
 
 ## Requirements
 
@@ -78,7 +78,7 @@ The `sync` job runs only for scheduled pipelines; the `test` job still runs on n
 
 **Live app:** [https://strava-analytics-sboissel.streamlit.app/](https://strava-analytics-sboissel.streamlit.app/)
 
-A Streamlit app under [`dashboard/`](dashboard) provides three pages: **Training Overview** (KPIs, 80:20 compliance, mileage), **Training Insights** (pace-bin HR trends and mileage heatmaps), and **Race Results** (finish times, PRs, and race history).
+A Streamlit app under [`dashboard/`](dashboard) provides four pages: **Metrics** (KPIs and shoe mileage), **Training Overview** (80:20 compliance, mileage), **Training Insights** (pace-bin HR trends and mileage heatmaps), and **Race Results** (finish times, PRs, and race history).
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt

@@ -11,31 +11,23 @@ from data import (
     PERIOD_CONFIG,
     PeriodGrain,
     aggregate_period_metrics,
-    key_indicators,
     latest_activity_label,
     load_runs,
 )
-from theme import miles_color
-from ui import (
-    eh_color,
-    eh_kpi_tooltip,
-    kpi_label_html,
-    miles_kpi_tooltip,
-    render_sidebar_section_nav,
-)
+from ui import render_sidebar_section_nav
 
 st.markdown(
     """
     <div class="panel-title">Training Overview</div>
-    <div class="panel-summary">Key indicators, 80:20 compliance, and mileage trends.</div>
+    <div class="panel-summary">80:20 compliance and mileage trends.</div>
     """,
     unsafe_allow_html=True,
 )
 
 runs = load_runs()
-left, right = st.columns([1.05, 2.35], gap="medium")
+controls_col, _ = st.columns([1.05, 2.35], gap="medium")
 
-with left:
+with controls_col:
     st.markdown(
         '<div class="controls-panel controls-title">Controls</div>',
         unsafe_allow_html=True,
@@ -68,38 +60,6 @@ with left:
     )
 
 render_sidebar_section_nav(grain)
-
-indicators = key_indicators(runs)
-eh_week, eh_week_pct = indicators["eh_last_week"]
-eh_month, eh_month_pct = indicators["eh_last_month"]
-miles_week = indicators["miles_last_week"]
-week_color = eh_color(eh_week_pct)
-month_color = eh_color(eh_month_pct)
-miles_accent = miles_color(miles_week, grain="Week")
-
-with right:
-    st.markdown(
-        f"""
-        <div class="panel" id="key-indicators">
-          <div class="panel-label">Key Indicators</div>
-          <div class="kpi-grid">
-            <div class="kpi-card" style="--accent:{week_color}">
-              {kpi_label_html("E:H Last Week", eh_kpi_tooltip("week"))}
-              <div class="kpi-value">{eh_week}</div>
-            </div>
-            <div class="kpi-card" style="--accent:{month_color}">
-              {kpi_label_html("E:H Last 30 Days", eh_kpi_tooltip("month"))}
-              <div class="kpi-value">{eh_month}</div>
-            </div>
-            <div class="kpi-card" style="--accent:{miles_accent}">
-              {kpi_label_html("Miles Last Week", miles_kpi_tooltip())}
-              <div class="kpi-value">{miles_week:.2f}</div>
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 as_of = runs["date"].max() if not runs.empty else None
 period_metrics = aggregate_period_metrics(runs, grain, as_of=as_of)

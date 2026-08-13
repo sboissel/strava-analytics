@@ -15,8 +15,8 @@ class UpdateGearMileageCsvTests(unittest.TestCase):
 
     def _tracked(self):
         return [
-            {"gear_id": "g1", "name": "Shoe A", "baseline_miles": 10.0},
-            {"gear_id": "g2", "name": "Shoe B", "baseline_miles": 20.0},
+            {"gear_id": "g1", "name": "Shoe A", "type": "Road", "baseline_miles": 10.0},
+            {"gear_id": "g2", "name": "Shoe B", "type": "Trail", "baseline_miles": 20.0},
         ]
 
     def test_writes_strava_distance_plus_baseline(self):
@@ -32,18 +32,19 @@ class UpdateGearMileageCsvTests(unittest.TestCase):
             )
             df = pd.read_csv(path)
 
-        self.assertEqual(list(df.columns), ["gear_id", "name", "mileage", "status"])
+        self.assertEqual(list(df.columns), ["gear_id", "name", "type", "mileage", "status"])
         self.assertEqual(df.loc[df["gear_id"] == "g1", "mileage"].iloc[0], 12.0)
         self.assertEqual(df.loc[df["gear_id"] == "g2", "mileage"].iloc[0], 25.0)
+        self.assertEqual(df.loc[df["gear_id"] == "g1", "type"].iloc[0], "Road")
         self.assertTrue((df["status"] == "active").all())
 
     def test_skips_api_for_already_retired_rows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
             (data_dir / "strava_gear.csv").write_text(
-                "gear_id,name,mileage,status\n"
-                "g1,Shoe A,99.0,retired\n"
-                "g2,Shoe B,20.0,active\n"
+                "gear_id,name,type,mileage,status\n"
+                "g1,Shoe A,Road,99.0,retired\n"
+                "g2,Shoe B,Trail,20.0,active\n"
             )
             calls = []
 
@@ -65,8 +66,8 @@ class UpdateGearMileageCsvTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
             (data_dir / "strava_gear.csv").write_text(
-                "gear_id,name,mileage,status\n"
-                "g_old,Old Shoe,300.0,retired\n"
+                "gear_id,name,type,mileage,status\n"
+                "g_old,Old Shoe,Road,300.0,retired\n"
             )
 
             def get_gear(gear_id: str):
@@ -87,6 +88,11 @@ class UpdateGearMileageCsvTests(unittest.TestCase):
             gear_ids,
             ["g33031373", "g33031356", "g33031350", "g33031360"],
         )
+        types = {item["gear_id"]: item["type"] for item in TRACKED_GEAR}
+        self.assertEqual(types["g33031373"], "Speed")
+        self.assertEqual(types["g33031356"], "Road")
+        self.assertEqual(types["g33031350"], "Trail")
+        self.assertEqual(types["g33031360"], "Race")
 
 
 if __name__ == "__main__":

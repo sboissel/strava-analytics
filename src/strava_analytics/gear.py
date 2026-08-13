@@ -10,14 +10,34 @@ import pandas as pd
 from strava_analytics.activities import MILE_METERS
 
 GEAR_CSV_FILENAME = "strava_gear.csv"
-GEAR_CSV_COLUMNS = ["gear_id", "name", "mileage", "status"]
+GEAR_CSV_COLUMNS = ["gear_id", "name", "type", "mileage", "status"]
 
 # Baseline miles worn before tracking these shoes on Strava.
 TRACKED_GEAR: List[Dict[str, Any]] = [
-    {"gear_id": "g33031373", "name": "Hoka Mach 7", "baseline_miles": 12.0},
-    {"gear_id": "g33031356", "name": "Nike Pegasus 42", "baseline_miles": 63.0},
-    {"gear_id": "g33031350", "name": "Nike Pegasus Trail 5", "baseline_miles": 189.0},
-    {"gear_id": "g33031360", "name": "Nike ZoomX", "baseline_miles": 50.0},
+    {
+        "gear_id": "g33031373",
+        "name": "Hoka Mach 7",
+        "type": "Speed",
+        "baseline_miles": 12.0,
+    },
+    {
+        "gear_id": "g33031356",
+        "name": "Nike Pegasus 42",
+        "type": "Road",
+        "baseline_miles": 63.0,
+    },
+    {
+        "gear_id": "g33031350",
+        "name": "Nike Pegasus Trail 5",
+        "type": "Trail",
+        "baseline_miles": 189.0,
+    },
+    {
+        "gear_id": "g33031360",
+        "name": "Nike ZoomX",
+        "type": "Race",
+        "baseline_miles": 50.0,
+    },
 ]
 
 
@@ -37,6 +57,7 @@ def _load_existing_gear(path: Path) -> Dict[str, Dict[str, Any]]:
         rows[gear_id] = {
             "gear_id": gear_id,
             "name": str(row.get("name", "")).strip(),
+            "type": str(row.get("type", "")).strip(),
             "mileage": float(row.get("mileage") or 0),
             "status": str(row.get("status", "active")).strip().lower(),
         }
@@ -46,12 +67,16 @@ def _load_existing_gear(path: Path) -> Dict[str, Dict[str, Any]]:
 def _tracked_row(
     tracked: Mapping[str, Any],
     gear_payload: Mapping[str, Any],
+    *,
+    prior: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     strava_miles = float(gear_payload.get("distance") or 0) / MILE_METERS
     baseline = float(tracked["baseline_miles"])
+    shoe_type = str(tracked.get("type") or (prior or {}).get("type") or "").strip()
     return {
         "gear_id": tracked["gear_id"],
         "name": tracked["name"],
+        "type": shoe_type,
         "mileage": round(strava_miles + baseline, 2),
         "status": "retired" if gear_payload.get("retired") else "active",
     }
@@ -95,7 +120,7 @@ def update_gear_mileage_csv(
             continue
 
         payload = get_gear(gear_id)
-        updated[gear_id] = _tracked_row(item, payload)
+        updated[gear_id] = _tracked_row(item, payload, prior=prior)
 
     # Preserve any retired (or other) rows no longer in the tracked list.
     for gear_id, row in existing.items():
