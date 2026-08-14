@@ -191,6 +191,40 @@ class MetricsInspectAnchorHtmlTests(unittest.TestCase):
         self.assertIn("text-transform: uppercase !important", GLOBAL_CSS)
         self.assertIn(MUTED, GLOBAL_CSS)
         self.assertIn(FONT_BODY, GLOBAL_CSS)
+        # Training mileage heatmap reuses the same expander chrome as Inspect.
+        self.assertIn(".st-key-training_mileage_heatmap", GLOBAL_CSS)
+        self.assertIn(
+            ".st-key-training_mileage_heatmap [data-testid=\"stExpander\"] summary::before",
+            GLOBAL_CSS,
+        )
+        # Heatmap expander chrome is transparent so .stApp shows through (base BG);
+        # not white secondaryBg / SURFACE; Metrics Inspect untouched.
+        from dashboard.theme import BG, SURFACE
+
+        self.assertEqual(BG, "#E8EEF2")
+        self.assertIn(
+            ".st-key-training_mileage_heatmap [data-testid=\"stExpander\"] details",
+            GLOBAL_CSS,
+        )
+        heatmap_css_idx = GLOBAL_CSS.index(
+            "Every visible layer of the mileage heatmap expander"
+        )
+        heatmap_block = GLOBAL_CSS[heatmap_css_idx : heatmap_css_idx + 2200]
+        self.assertIn("background: transparent !important", heatmap_block)
+        self.assertIn("background-color: transparent !important", heatmap_block)
+        self.assertIn("--secondary-background-color:", GLOBAL_CSS)
+        self.assertIn(f"--secondary-background-color: {BG}", GLOBAL_CSS)
+        self.assertIn('[data-testid="stExpander"] summary', heatmap_block)
+        self.assertIn('[data-testid="stExpanderDetails"]', heatmap_block)
+        self.assertIn('[data-testid="stVerticalBlock"]', heatmap_block)
+        self.assertIn('[data-testid="stPlotlyChart"]', heatmap_block)
+        self.assertIn(".js-plotly-plot", heatmap_block)
+        self.assertIn("iframe", heatmap_block)
+        self.assertNotIn(f"background: {SURFACE}", heatmap_block)
+        # Scoped rule must not share a selector list with Metrics Inspect.
+        rule_body_start = heatmap_block.index("{")
+        self.assertNotIn("metrics_inspect_ki", heatmap_block[:rule_body_start])
+        self.assertIn("metrics_inspect_ki", GLOBAL_CSS)
 
     def test_theme_keeps_kpi_detail_above_dataframe(self):
         """Inspect detail must reserve space so the table cannot cover copy."""
@@ -314,6 +348,48 @@ class MetricsSectionNavTests(unittest.TestCase):
         self.assertIn("margin: 0.85rem 0 0.75rem", GLOBAL_CSS)
         self.assertIn("padding: 0.5rem 0 0.35rem", GLOBAL_CSS)
         self.assertIn(f"border-top: 1px solid {LINE}", GLOBAL_CSS)
+
+    def test_page_link_labels_force_readable_colors(self):
+        """Inactive st.page_link labels must get muted color on nested text nodes."""
+        from dashboard.theme import GLOBAL_CSS, INK, MUTED
+
+        self.assertIn("stPageLink-NavLink", GLOBAL_CSS)
+        # Inactive labels: force MUTED on NavLink + nested span (not only <a>).
+        self.assertIn('[data-testid="stPageLink-NavLink"] span', GLOBAL_CSS)
+        inactive_span = GLOBAL_CSS.split('[data-testid="stPageLink-NavLink"] span')[1][
+            :400
+        ]
+        self.assertIn(f"color: {MUTED} !important", inactive_span)
+        self.assertIn("opacity: 1 !important", inactive_span)
+        # Current page still highlighted in ink via the marker selectors.
+        self.assertIn("sidebar-nav-current-marker", GLOBAL_CSS)
+        self.assertIn(
+            f":has(.sidebar-nav-current-marker) [data-testid=\"stPageLink-NavLink\"]",
+            GLOBAL_CSS,
+        )
+        self.assertIn(f"color: {INK} !important", GLOBAL_CSS)
+
+    def test_selectbox_styles_force_light_readable_chrome(self):
+        """Streamlit 1.61 selects use theme.secondaryBg — keep light on our page."""
+        from dashboard.theme import CARD, GLOBAL_CSS, INK, SURFACE
+
+        # New React Aria select (not BaseWeb-only polish).
+        self.assertIn('[data-testid="stSelectbox"]', GLOBAL_CSS)
+        self.assertIn('[data-testid="stSelectboxVirtualDropdown"]', GLOBAL_CSS)
+        self.assertIn("div:has(> input)", GLOBAL_CSS)
+        polish = GLOBAL_CSS.split("Selectbox polish")[1][:1200]
+        self.assertIn(f"background: {CARD} !important", polish)
+        self.assertIn(f"background-color: {CARD} !important", polish)
+        self.assertIn(f"color: {INK} !important", polish)
+        # Controls panel still uses a light surface fill.
+        self.assertIn(f"background: {SURFACE} !important", GLOBAL_CSS)
+        # Expander panel-label CSS must stay scoped to summary — not all selects.
+        self.assertNotIn("span:not(:has(svg))", GLOBAL_CSS)
+        summary_block = GLOBAL_CSS.split(
+            "Match .panel-label on expander summary label only"
+        )[1][:900]
+        self.assertIn('[data-testid="stExpander"] summary', summary_block)
+        self.assertNotIn("stSelectbox", summary_block)
 
 
 class KpiComparisonBadgeTests(unittest.TestCase):

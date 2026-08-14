@@ -3,6 +3,7 @@
 import unittest
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from dashboard.charts import (
@@ -34,6 +35,7 @@ from dashboard.charts import (
     compliance_chart,
     elevation_chart,
     mileage_chart,
+    mileage_heatmap_chart,
     race_weeks_chart,
 )
 from dashboard.theme import (
@@ -48,9 +50,11 @@ from dashboard.theme import (
     HARD,
     INK,
     MILES,
+    MUTED,
     RACE_STRIP_BG,
     RACE_STRIP_END_PAD_PX,
     RACE_STRIP_SCROLL_MARGIN_TOP,
+    SURFACE,
 )
 from dashboard.ui import (
     RACE_WEEK_STRIP_KEYS,
@@ -285,25 +289,14 @@ class TrainingChartTests(unittest.TestCase):
         ).customdata]
         self.assertEqual(multi_hover[1][1], "Town 5k<br>5k<br>Odd Race<br>12.4 mi")
 
-    def test_mileage_bars_use_magnitude_heatmap_without_colorbar(self):
+    def test_mileage_bars_use_solid_fill_by_default(self):
         fig = mileage_chart(_training_period_df(), "Week")
         marker = fig.data[0].marker
-        self.assertEqual(list(marker.color), [10.0, 20.0])
-        self.assertNotEqual(list(marker.color), [MILEAGE_BAR, MILEAGE_BAR])
-        self.assertNotEqual(list(marker.color), [ELEVATION_BAR, ELEVATION_BAR])
-        scale = [(float(stop), color.lower()) for stop, color in marker.colorscale]
-        expected = [(float(stop), color.lower()) for stop, color in MILEAGE_COLORSCALE]
-        self.assertEqual(scale, expected)
-        self.assertEqual(MILEAGE_COLORSCALE[0][1], "#E8F2F0")
-        self.assertEqual(MILEAGE_COLORSCALE[-1][1], MILEAGE_BAR)
+        self.assertEqual(marker.color, MILEAGE_BAR)
+        self.assertFalse(marker.colorscale)
         self.assertEqual(MILEAGE_BAR, "#509B8F")
         self.assertEqual(MILES, "#3A4A55")
-        self.assertNotEqual(MILEAGE_COLORSCALE[-1][1], MILES)
-        self.assertNotEqual(MILEAGE_COLORSCALE[-1][1], ELEVATION_PURPLE)
-        self.assertNotEqual(MILEAGE_COLORSCALE, ELEVATION_COLORSCALE)
-        self.assertFalse(marker.showscale)
-        coloraxis = fig.layout.coloraxis
-        self.assertTrue(coloraxis is None or coloraxis.showscale in (None, False))
+        self.assertNotEqual(MILEAGE_BAR, MILES)
         goal_lines = [
             shape
             for shape in fig.layout.shapes or ()
@@ -313,6 +306,84 @@ class TrainingChartTests(unittest.TestCase):
         self.assertTrue(goal_lines)
         self.assertEqual(goal_lines[0].line.color, TRAINING_GOAL_LINE)
         self.assertEqual(TRAINING_GOAL_LINE, "#2E4552")
+
+    def test_mileage_heatmap_uses_mileage_bar_palette(self):
+        """Insights/Training calendar heatmap shares MILEAGE_COLORSCALE."""
+        matrix = np.array([[5.0, 10.0], [15.0, 20.0]])
+        fig = mileage_heatmap_chart(
+            matrix,
+            ["Week 1", "Week 2"],
+            ["Jan", "Feb"],
+            title="Weekly Mileage by Month",
+            grain="Week",
+        )
+        heat = fig.data[0]
+        self.assertEqual(heat.type, "heatmap")
+        scale = [(float(stop), color.lower()) for stop, color in heat.colorscale]
+        expected = [(float(stop), color.lower()) for stop, color in MILEAGE_COLORSCALE]
+        self.assertEqual(scale, expected)
+        self.assertEqual(MILEAGE_COLORSCALE[0][1], "#E8F2F0")
+        self.assertEqual(MILEAGE_COLORSCALE[-1][1], MILEAGE_BAR)
+        self.assertEqual(MILEAGE_BAR, "#509B8F")
+        self.assertNotEqual(MILEAGE_COLORSCALE[-1][1], MILES)
+        self.assertNotEqual(MILEAGE_COLORSCALE[-1][1], ELEVATION_PURPLE)
+        self.assertNotEqual(MILEAGE_COLORSCALE, ELEVATION_COLORSCALE)
+        self.assertTrue(heat.showscale)
+
+    def test_mileage_heatmap_empty_cells_have_no_grid_lines(self):
+        """NaN cells stay transparent; no grid avoids black strokes on page wash."""
+        from dashboard.theme import BG
+
+        matrix = np.array([[5.0, np.nan], [np.nan, 12.0]])
+        fig = mileage_heatmap_chart(
+            matrix,
+            ["Week 1", "Week 2"],
+            ["Jan", "Feb"],
+            title="Weekly Mileage by Month",
+            grain="Week",
+        )
+        heat = fig.data[0]
+        z = np.asarray(heat.z, dtype=float)
+        self.assertTrue(np.isnan(z[0, 1]))
+        self.assertTrue(np.isnan(z[1, 0]))
+        self.assertFalse(heat.hoverongaps)
+        self.assertFalse(heat.connectgaps)
+        self.assertEqual(heat.xgap, 1)
+        self.assertEqual(heat.ygap, 1)
+        # Transparent so .stApp (base BG) shows through — not solid BG/SURFACE card.
+        self.assertEqual(fig.layout.plot_bgcolor, "rgba(0,0,0,0)")
+        self.assertEqual(fig.layout.paper_bgcolor, "rgba(0,0,0,0)")
+        self.assertEqual(BG, "#E8EEF2")
+        self.assertNotEqual(fig.layout.plot_bgcolor, BG)
+        self.assertNotEqual(fig.layout.plot_bgcolor, SURFACE)
+        self.assertFalse(fig.layout.xaxis.showgrid)
+        self.assertFalse(fig.layout.yaxis.showgrid)
+        self.assertFalse(fig.layout.xaxis.zeroline)
+        self.assertFalse(fig.layout.yaxis.zeroline)
+        self.assertFalse(fig.layout.xaxis.showline)
+        self.assertFalse(fig.layout.yaxis.showline)
+
+    def test_mileage_heatmap_zero_miles_paints_not_gap(self):
+        """z=0 stays 0 (pale colorscale); NaN stays a no-hover gap."""
+        from dashboard.theme import BG
+
+        matrix = np.array([[0.0, np.nan], [8.0, 0.0]])
+        fig = mileage_heatmap_chart(
+            matrix,
+            ["Week 1", "Week 2"],
+            ["Jan", "Feb"],
+            title="Weekly Mileage by Month",
+            grain="Week",
+        )
+        heat = fig.data[0]
+        z = np.asarray(heat.z, dtype=float)
+        self.assertEqual(float(z[0, 0]), 0.0)
+        self.assertTrue(np.isnan(z[0, 1]))
+        self.assertEqual(float(z[1, 1]), 0.0)
+        self.assertEqual(heat.zmin, 0.0)
+        self.assertFalse(heat.hoverongaps)
+        # Pale teal at 0 must differ from page BG so zero cells read as painted.
+        self.assertNotEqual(MILEAGE_COLORSCALE[0][1].lower(), BG.lower())
 
     def test_compliance_chart_is_not_a_heatmap(self):
         fig = compliance_chart(_training_period_df(), "Week")
@@ -503,9 +574,9 @@ class TrainingChartThemeTests(unittest.TestCase):
 
     def test_chart_stack_has_modest_extra_gap(self):
         self.assertEqual(CHART_RACE_WEEKS_MARGIN_TOP, "3rem")
-        self.assertEqual(CHART_COMPLIANCE_MARGIN_TOP, "0.85rem")
-        self.assertEqual(CHART_MILEAGE_MARGIN_TOP, "0.85rem")
-        self.assertEqual(CHART_ELEVATION_MARGIN_TOP, "0.85rem")
+        self.assertEqual(CHART_COMPLIANCE_MARGIN_TOP, "1.4rem")
+        self.assertEqual(CHART_MILEAGE_MARGIN_TOP, "1.85rem")
+        self.assertEqual(CHART_ELEVATION_MARGIN_TOP, "1.85rem")
         self.assertNotEqual(CHART_COMPLIANCE_MARGIN_TOP, "0.1rem")
 
     def test_race_week_strip_is_single_in_flow_copy(self):
@@ -558,6 +629,13 @@ class TrainingChartThemeTests(unittest.TestCase):
         self.assertIn('key="training_race_weeks"', page)
         self.assertIn('key="training_compliance"', page)
         self.assertIn('key="training_mileage"', page)
+        self.assertIn('key="training_mileage_heatmap"', page)
+        self.assertIn('key="training_mileage_heatmap_chart"', page)
+        self.assertIn('"Mileage heatmap"', page)
+        self.assertIn("expanded=False", page)
+        self.assertIn("mileage_heatmap_matrix", page)
+        self.assertIn("mileage_heatmap_chart", page)
+        self.assertNotIn("color_by_magnitude", page)
         self.assertIn('key="training_elevation"', page)
         self.assertIn('id="chart-compliance"', page)
         self.assertIn('id="chart-mileage"', page)
@@ -568,7 +646,12 @@ class TrainingChartThemeTests(unittest.TestCase):
         self.assertLess(page.find("chart-compliance"), page.find("chart-mileage"))
         self.assertLess(page.find("chart-mileage"), page.find("chart-elevation"))
         self.assertLess(page.find("training_compliance"), page.find("training_mileage"))
-        self.assertLess(page.find("training_mileage"), page.find("training_elevation"))
+        self.assertLess(page.find("training_mileage"), page.find("training_mileage_heatmap"))
+        self.assertLess(page.find("training_mileage_heatmap"), page.find("training_elevation"))
+        self.assertLess(
+            page.find("mileage_heatmap_chart"),
+            page.find("training_elevation"),
+        )
         metrics = (
             Path(__file__).resolve().parents[2]
             / "dashboard"
@@ -595,6 +678,7 @@ class TrainingChartThemeTests(unittest.TestCase):
         self.assertNotIn(".st-key-race_week_strip_elevation", GLOBAL_CSS)
         self.assertIn(".st-key-training_compliance", GLOBAL_CSS)
         self.assertIn(".st-key-training_mileage", GLOBAL_CSS)
+        self.assertIn(".st-key-training_mileage_heatmap", GLOBAL_CSS)
         self.assertIn(".st-key-training_elevation", GLOBAL_CSS)
         self.assertIn("height: 40px !important", GLOBAL_CSS)
         self.assertIn("max-height: 40px !important", GLOBAL_CSS)
@@ -643,6 +727,17 @@ class TrainingChartThemeTests(unittest.TestCase):
         # Tooltip legend rows: marker column + label, center-aligned.
         self.assertIn(".kpi-tooltip .race-legend-row {", GLOBAL_CSS)
         self.assertIn("align-items: center", GLOBAL_CSS)
+        # Body text ink (not muted); headers may stay muted uppercase.
+        self.assertIn(
+            f".kpi-tooltip {{\n    visibility: hidden;\n    opacity: 0;",
+            GLOBAL_CSS,
+        )
+        tip_idx = GLOBAL_CSS.index(".kpi-tooltip {\n    visibility: hidden;")
+        tip_block = GLOBAL_CSS[tip_idx : tip_idx + 500]
+        self.assertIn(f"color: {INK} !important", tip_block)
+        self.assertNotIn(f"color: {MUTED}", tip_block.split("}", 1)[0])
+        strong_block = GLOBAL_CSS.split(".kpi-tooltip strong {", 1)[1].split("}", 1)[0]
+        self.assertIn(f"color: {MUTED} !important", strong_block)
         self.assertIn(".kpi-tooltip .race-legend-marker {", GLOBAL_CSS)
 
 

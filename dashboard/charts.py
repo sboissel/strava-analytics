@@ -24,9 +24,6 @@ from theme import (
     INK,
     MUTED,
     RACE_STRIP_BG,
-    SURFACE,
-    TRAFFIC_GREEN,
-    TRAFFIC_ORANGE,
     TRAINING_PLOT_MARGIN_R_PX,
     miles_goal,
 )
@@ -292,7 +289,11 @@ def _training_yaxis(**kwargs) -> dict:
 
 
 def _heatmap_axis(labels: list[str], *, tickangle: int = 0, side: str | None = None) -> dict:
-    """Heatmap axis with an explicit tick for every label (no auto-thinning)."""
+    """Heatmap axis with an explicit tick for every label (no auto-thinning).
+
+    Grid/zero lines stay off: NaN mileage cells are transparent in Plotly, so
+    axis lines would otherwise stroke through empty cells as black lines.
+    """
     tickfont_size = 9 if len(labels) > 14 else 10 if len(labels) > 10 else 11
     axis = dict(
         title="",
@@ -305,6 +306,9 @@ def _heatmap_axis(labels: list[str], *, tickangle: int = 0, side: str | None = N
         tickangle=tickangle,
         tickfont=dict(size=tickfont_size, color=MUTED),
         showticklabels=True,
+        showgrid=False,
+        zeroline=False,
+        showline=False,
     )
     if side is not None:
         axis["side"] = side
@@ -554,13 +558,12 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
 
 
 def mileage_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
-    """Build a total mileage bar chart colored by magnitude.
+    """Build a total mileage bar chart with a solid ``MILEAGE_BAR`` fill.
 
-    Bars use a sequential heatmap (pale tint → ``MILEAGE_BAR``) so
-    low-mileage periods read light and high-mileage periods use the
-    Training ochre series color. No colorbar: ``showscale=False``
-    keeps the plot box aligned with the race-week strip, 80:20, and
-    elevation charts.
+    The calendar mileage heatmap (Training Insights / Training expander)
+    uses ``mileage_heatmap_chart`` with ``MILEAGE_COLORSCALE``. Keeping
+    the main bars solid preserves alignment with the race-week strip,
+    80:20, and elevation charts.
 
     Parameters
     ----------
@@ -572,7 +575,7 @@ def mileage_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
     Returns
     -------
     plotly.graph_objects.Figure
-        Bar chart with a scaled mileage goal line and magnitude colors.
+        Bar chart with a scaled mileage goal line.
     """
     title = mileage_title(grain)
     fig = go.Figure()
@@ -598,11 +601,7 @@ def mileage_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
             offsetgroup=TRAINING_OFFSETGROUP,
             alignmentgroup=TRAINING_OFFSETGROUP,
             marker=dict(
-                color=mile_values,
-                colorscale=MILEAGE_COLORSCALE,
-                cmin=0,
-                cmax=max(float(totals.max()), 1.0),
-                showscale=False,
+                color=MILEAGE_BAR,
                 pattern=_in_progress_bar_pattern(period_df),
                 cornerradius=5,
                 opacity=0.92,
@@ -1003,18 +1002,6 @@ def pace_hr_line_chart(period_df: pd.DataFrame, grain: str, pace_label: str) -> 
     return fig
 
 
-def _heatmap_colorscale(zmax: float, target: float) -> list[list[str | float]]:
-    """Three-color scale: zero → goal (green) → high (orange)."""
-    if zmax <= 0:
-        zmax = max(target * 1.5, 1.0)
-    target_frac = min(max(target / zmax, 0.08), 0.92)
-    return [
-        [0.0, SURFACE],
-        [target_frac, TRAFFIC_GREEN],
-        [1.0, TRAFFIC_ORANGE],
-    ]
-
-
 def mileage_heatmap_chart(
     matrix,
     y_labels: list[str],
@@ -1024,7 +1011,12 @@ def mileage_heatmap_chart(
     grain: str,
     tooltip_matrix=None,
 ) -> go.Figure:
-    """Build a mileage heatmap with a goal-centered three-color scale.
+    """Build a calendar mileage heatmap using ``MILEAGE_COLORSCALE``.
+
+    Shared by Training Insights and the Training mileage expander. Cell
+    colors run pale teal → ``MILEAGE_BAR`` so the matrix matches the
+    Training mileage bar series (not elevation purple or traffic-light
+    goal bands).
 
     Parameters
     ----------
@@ -1037,14 +1029,14 @@ def mileage_heatmap_chart(
     title : str
         Chart title text.
     grain : str
-        Period grain used to scale the mileage goal for the color scale.
+        Period grain used to scale the mileage goal for ``zmax``.
     tooltip_matrix : array-like, optional
         Per-cell tooltip text aligned with ``matrix``.
 
     Returns
     -------
     plotly.graph_objects.Figure
-        Heatmap figure with goal-centered color scale.
+        Calendar/matrix heatmap with the Training mileage palette.
     """
     fig = go.Figure()
     if matrix.size == 0 or not x_labels:
@@ -1057,14 +1049,19 @@ def mileage_heatmap_chart(
     z_max = float(z_finite.max()) if z_finite.size else goal
     z_max = max(z_max, goal * 1.15, 1.0)
 
+    # Keep absent slots as NaN (transparent → plot_bgcolor). Keep z=0 as 0 so
+    # zero-mile weeks paint the pale end of MILEAGE_COLORSCALE (not the page BG).
     heatmap_kwargs: dict = dict(
         z=z,
         x=x_labels,
         y=y_labels,
-        colorscale=_heatmap_colorscale(z_max, goal),
+        colorscale=MILEAGE_COLORSCALE,
         zmin=0.0,
         zmax=z_max,
         hoverongaps=False,
+        connectgaps=False,
+        xgap=1,
+        ygap=1,
         showscale=True,
         colorbar=dict(
             title=dict(text="Miles", side="right"),
@@ -1087,6 +1084,11 @@ def mileage_heatmap_chart(
         yaxis["showticklabels"] = False
     heatmap_margin = _heatmap_margin(x_tickangle=x_tickangle)
     row_height = 28
+    layout_kwargs = {
+        k: v
+        for k, v in CHART_LAYOUT.items()
+        if k not in ("margin", "height", "plot_bgcolor", "paper_bgcolor")
+    }
     fig.update_layout(
         title=_title(title),
         xaxis=_heatmap_axis(x_labels, tickangle=x_tickangle, side="top"),
@@ -1099,8 +1101,13 @@ def mileage_heatmap_chart(
             + heatmap_margin["b"]
             + 24,
         ),
+        # Transparent paper/plot so the Training expander (and Insights page)
+        # show .stApp through — solid BG looked cooler/darker on the page wash.
+        # NaN/gap cells stay see-through (not SURFACE/white/black strokes).
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         hoverlabel=_hoverlabel(),
-        **{k: v for k, v in CHART_LAYOUT.items() if k not in ("margin", "height")},
+        **layout_kwargs,
     )
     return fig
 

@@ -11,6 +11,7 @@ from charts import (
     compliance_chart,
     elevation_chart,
     mileage_chart,
+    mileage_heatmap_chart,
     race_weeks_chart,
 )
 from data import (
@@ -21,6 +22,7 @@ from data import (
     latest_activity_label,
     load_runs,
 )
+from insights_data import mileage_heatmap_matrix
 from race_data import load_race_results
 from ui import race_weeks_legend_html, render_sidebar_section_nav
 
@@ -102,6 +104,29 @@ st.plotly_chart(
     config=PLOTLY_CONFIG,
     key="training_mileage",
 )
+# Insights-style calendar heatmap under the solid mileage bars.
+with st.expander(
+    "Mileage heatmap",
+    expanded=False,
+    type="compact",
+    key="training_mileage_heatmap",
+):
+    matrix, y_labels, x_labels, heatmap_title_text, tooltip_matrix = (
+        mileage_heatmap_matrix(runs, grain, as_of=as_of)
+    )
+    st.plotly_chart(
+        mileage_heatmap_chart(
+            matrix,
+            y_labels,
+            x_labels,
+            title=heatmap_title_text,
+            grain=grain,
+            tooltip_matrix=tooltip_matrix,
+        ),
+        use_container_width=True,
+        config=PLOTLY_CONFIG,
+        key="training_mileage_heatmap_chart",
+    )
 st.markdown('<div id="chart-elevation" class="page-anchor"></div>', unsafe_allow_html=True)
 st.plotly_chart(
     elevation_chart(period_metrics, grain),

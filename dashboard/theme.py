@@ -216,9 +216,9 @@ LAYOUT_GAP = "1.8rem"
 
 # Per-chart top margin (space above each chart title). Edit individually.
 CHART_RACE_WEEKS_MARGIN_TOP = "3rem"        # Training: gap above first race-week strip
-CHART_COMPLIANCE_MARGIN_TOP = "0.85rem"     # Training: 80:20 compliance
-CHART_MILEAGE_MARGIN_TOP = "0.85rem"        # Training: mileage
-CHART_ELEVATION_MARGIN_TOP = "0.85rem"      # Training: elevation
+CHART_COMPLIANCE_MARGIN_TOP = "1.4rem"      # Training: 80:20 compliance (races strip → chart)
+CHART_MILEAGE_MARGIN_TOP = "1.85rem"        # Training: mileage
+CHART_ELEVATION_MARGIN_TOP = "1.85rem"      # Training: elevation
 # Header offset for Training section jumps.
 RACE_STRIP_SCROLL_MARGIN_TOP = "3.75rem"
 # Compact strip width: past the last marker, not into the Training legend column.
@@ -391,12 +391,18 @@ GLOBAL_CSS = f"""
     color: {INK} !important;
   }}
 
-  /* Sidebar page links (st.page_link; native st.navigation is hidden) */
+  /* Sidebar page links (st.page_link; native st.navigation is hidden).
+     Streamlit 1.61 uses <a data-testid="stPageLink-NavLink"> with the label in a
+     nested span/markdown/p. Color must be set on those descendants — styling only
+     the <a> left inactive labels on Streamlit's default (often unreadable here),
+     while the current-page span override made only the active title visible. */
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] a,
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLinkContainer"] a,
   section[data-testid="stSidebar"] div[data-testid="stPageLink-Nav"] a,
-  section[data-testid="stSidebar"] [data-testid="stPageLink"] a {{
-    display: block;
+  section[data-testid="stSidebar"] [data-testid="stPageLink"] a,
+  section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"] {{
+    display: flex !important;
+    align-items: center !important;
     border-radius: 10px !important;
     font-weight: 600 !important;
     font-size: 0.92rem !important;
@@ -406,26 +412,60 @@ GLOBAL_CSS = f"""
     border: 1px solid transparent !important;
     background: transparent !important;
     text-decoration: none !important;
+    opacity: 1 !important;
+    visibility: visible !important;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }}
+  section[data-testid="stSidebar"] [data-testid="stPageLink"] a span,
+  section[data-testid="stSidebar"] [data-testid="stPageLink"] a p,
+  section[data-testid="stSidebar"] [data-testid="stPageLink"] a [data-testid="stMarkdownContainer"],
+  section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"] span,
+  section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"] p,
+  section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"] [data-testid="stMarkdownContainer"] {{
+    color: {MUTED} !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    overflow: visible !important;
   }}
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] a:hover,
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLinkContainer"] a:hover,
   section[data-testid="stSidebar"] div[data-testid="stPageLink-Nav"] a:hover,
-  section[data-testid="stSidebar"] [data-testid="stPageLink"] a:hover {{
+  section[data-testid="stSidebar"] [data-testid="stPageLink"] a:hover,
+  section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"]:hover {{
     background: rgba(21, 32, 40, 0.04) !important;
+    color: {INK} !important;
+  }}
+  section[data-testid="stSidebar"] [data-testid="stPageLink"] a:hover span,
+  section[data-testid="stSidebar"] [data-testid="stPageLink"] a:hover p,
+  section[data-testid="stSidebar"] [data-testid="stPageLink"] a:hover [data-testid="stMarkdownContainer"],
+  section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"]:hover span,
+  section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"]:hover p,
+  section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"]:hover [data-testid="stMarkdownContainer"] {{
     color: {INK} !important;
   }}
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] a[aria-current="page"],
   section[data-testid="stSidebar"] [data-testid="stSidebarNavLinkContainer"] a[aria-current="page"],
   section[data-testid="stSidebar"] div[data-testid="stPageLink-Nav"] a[aria-current="page"],
   section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]:has(.sidebar-nav-current-marker) [data-testid="stPageLink"] a,
-  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink"] a {{
+  section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]:has(.sidebar-nav-current-marker) [data-testid="stPageLink-NavLink"],
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink"] a,
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink-NavLink"] {{
     background: {NAV_ACTIVE} !important;
     color: {INK} !important;
     border-color: {LINE} !important;
   }}
   section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]:has(.sidebar-nav-current-marker) [data-testid="stPageLink"] a span,
-  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink"] a span {{
+  section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]:has(.sidebar-nav-current-marker) [data-testid="stPageLink"] a p,
+  section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]:has(.sidebar-nav-current-marker) [data-testid="stPageLink"] a [data-testid="stMarkdownContainer"],
+  section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]:has(.sidebar-nav-current-marker) [data-testid="stPageLink-NavLink"] span,
+  section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]:has(.sidebar-nav-current-marker) [data-testid="stPageLink-NavLink"] p,
+  section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]:has(.sidebar-nav-current-marker) [data-testid="stPageLink-NavLink"] [data-testid="stMarkdownContainer"],
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink"] a span,
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink"] a p,
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink"] a [data-testid="stMarkdownContainer"],
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink-NavLink"] span,
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink-NavLink"] p,
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) + [data-testid="stElementContainer"] [data-testid="stPageLink-NavLink"] [data-testid="stMarkdownContainer"] {{
     color: {INK} !important;
   }}
 
@@ -707,6 +747,7 @@ GLOBAL_CSS = f"""
     gap: 0.45rem;
     margin-top: 0.2rem;
     line-height: 1.35;
+    color: {INK} !important;
   }}
   .kpi-tooltip .race-legend-marker {{
     display: inline-flex;
@@ -764,6 +805,41 @@ GLOBAL_CSS = f"""
   .st-key-training_mileage {{
     margin-top: var(--chart-mileage-margin-top) !important;
     margin-bottom: 0 !important;
+  }}
+  /* Mileage heatmap expander: sit under the solid bar chart like Metrics Inspect. */
+  .st-key-training_mileage_heatmap {{
+    margin-top: 0.55rem !important;
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+    /* Streamlit expander chrome reads theme.secondaryBg; pin to page BG hex and
+       clear fills so the .stApp gradient (base {BG}) shows through — a solid
+       {BG} card looked cooler/darker against the lighter mid-page wash. */
+    --secondary-background-color: {BG};
+  }}
+  /* Every visible layer of the mileage heatmap expander = page surface.
+     Transparent (not solid BG/SURFACE/CARD/secondaryBg) so .stApp shows through.
+     Scoped to this key only — Metrics Inspect stays on the KI panel surface. */
+  .st-key-training_mileage_heatmap,
+  .st-key-training_mileage_heatmap [data-testid="stExpander"],
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] details,
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] summary,
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] details[open]
+    [data-testid="stExpanderDetails"],
+  .st-key-training_mileage_heatmap [data-testid="stExpanderDetails"],
+  .st-key-training_mileage_heatmap [data-testid="stVerticalBlockBorderWrapper"],
+  .st-key-training_mileage_heatmap [data-testid="stVerticalBlock"],
+  .st-key-training_mileage_heatmap [data-testid="stLayoutWrapper"],
+  .st-key-training_mileage_heatmap [data-testid="stElementContainer"],
+  .st-key-training_mileage_heatmap [data-testid="stPlotlyChart"],
+  .st-key-training_mileage_heatmap .stPlotlyChart,
+  .st-key-training_mileage_heatmap .js-plotly-plot,
+  .st-key-training_mileage_heatmap .plot-container,
+  .st-key-training_mileage_heatmap .svg-container,
+  .st-key-training_mileage_heatmap .main-svg,
+  .st-key-training_mileage_heatmap iframe {{
+    background: transparent !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
   }}
   .st-key-training_elevation {{
     margin-top: var(--chart-elevation-margin-top) !important;
@@ -883,33 +959,47 @@ GLOBAL_CSS = f"""
   [data-testid="column"]:has(.controls-panel) [data-testid="stSelectbox"] {{
     margin-bottom: 0 !important;
   }}
+  /* Streamlit 1.61+ select control (React Aria) — not BaseWeb. */
+  [data-testid="stColumn"]:has(.controls-panel) [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="column"]:has(.controls-panel) [data-testid="stSelectbox"] div:has(> input),
   [data-testid="stColumn"]:has(.controls-panel) div[data-baseweb="select"] > div,
   [data-testid="column"]:has(.controls-panel) div[data-baseweb="select"] > div {{
     background: {SURFACE} !important;
+    background-color: {SURFACE} !important;
     border: 1px solid {LINE} !important;
     border-radius: 10px !important;
     min-height: 38px !important;
     box-shadow: none !important;
+    color: {INK} !important;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }}
+  [data-testid="stColumn"]:has(.controls-panel) [data-testid="stSelectbox"] div:has(> input):focus-within,
+  [data-testid="column"]:has(.controls-panel) [data-testid="stSelectbox"] div:has(> input):focus-within,
   [data-testid="stColumn"]:has(.controls-panel) div[data-baseweb="select"] > div:focus-within,
   [data-testid="column"]:has(.controls-panel) div[data-baseweb="select"] > div:focus-within {{
     border-color: rgba(91, 155, 213, 0.45) !important;
     box-shadow: 0 0 0 3px rgba(91, 155, 213, 0.1) !important;
   }}
+  [data-testid="stColumn"]:has(.controls-panel) [data-testid="stSelectbox"] input,
+  [data-testid="column"]:has(.controls-panel) [data-testid="stSelectbox"] input,
   [data-testid="stColumn"]:has(.controls-panel) div[data-baseweb="select"] span,
   [data-testid="column"]:has(.controls-panel) div[data-baseweb="select"] span {{
     font-size: 0.9rem !important;
     font-weight: 500 !important;
     color: {INK} !important;
+    -webkit-text-fill-color: {INK} !important;
   }}
   /* Compact controls panels (Insights + Race Results): narrow selectboxes. */
   [data-testid="stColumn"]:has(.controls-panel--compact) [data-testid="stSelectbox"],
   [data-testid="column"]:has(.controls-panel--compact) [data-testid="stSelectbox"],
+  [data-testid="stColumn"]:has(.controls-panel--compact) [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="column"]:has(.controls-panel--compact) [data-testid="stSelectbox"] div:has(> input),
   [data-testid="stColumn"]:has(.controls-panel--compact) div[data-baseweb="select"] > div,
   [data-testid="column"]:has(.controls-panel--compact) div[data-baseweb="select"] > div,
   [data-testid="stElementContainer"]:has(.controls-select-narrow)
     + [data-testid="stElementContainer"] [data-testid="stSelectbox"],
+  [data-testid="stElementContainer"]:has(.controls-select-narrow)
+    + [data-testid="stElementContainer"] [data-testid="stSelectbox"] div:has(> input),
   [data-testid="stElementContainer"]:has(.controls-select-narrow)
     + [data-testid="stElementContainer"] div[data-baseweb="select"] > div {{
     max-width: 75% !important;
@@ -1173,6 +1263,9 @@ GLOBAL_CSS = f"""
   .kpi-info:focus-visible {{
     box-shadow: 0 0 0 2px rgba(21, 32, 40, 0.14);
   }}
+  /* Body text must stay INK. Parent .kpi-label/.kpi-info (and any broad
+     muted span rules) are MUTED — without !important, tooltip copy inherits
+     that grey and becomes hard to read. Section headers stay muted uppercase. */
   .kpi-tooltip {{
     visibility: hidden;
     opacity: 0;
@@ -1185,7 +1278,7 @@ GLOBAL_CSS = f"""
     border-radius: 10px;
     border: 1px solid {LINE};
     background: {CARD};
-    color: {INK};
+    color: {INK} !important;
     font-family: {FONT_BODY};
     font-size: 0.72rem;
     font-weight: 400;
@@ -1199,13 +1292,17 @@ GLOBAL_CSS = f"""
     pointer-events: none;
     transition: opacity 0.15s ease, visibility 0.15s ease;
   }}
+  .kpi-info .kpi-tooltip,
+  .achievement-badge .kpi-tooltip {{
+    color: {INK} !important;
+  }}
   .kpi-tooltip strong {{
     display: block;
     font-size: 0.68rem;
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: {MUTED};
+    color: {MUTED} !important;
     margin-bottom: 0.2rem;
   }}
   .kpi-tooltip strong:last-of-type {{
@@ -1289,22 +1386,25 @@ GLOBAL_CSS = f"""
   }}
   [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"],
   [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"],
-  .st-key-metrics_inspect_ki [data-testid="stExpander"] {{
+  .st-key-metrics_inspect_ki [data-testid="stExpander"],
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] {{
     margin-bottom: 0 !important;
     padding-bottom: 0 !important;
   }}
-  /* Open Inspect only: compact expander details default paddingTop is 0.5rem.
+  /* Open Inspect / mileage heatmap: compact expander details default paddingTop is 0.5rem.
      Do not leave that (or 0.35rem) in layout when collapsed — it sat below
      the KI card and widened KI → Shoes vs Achievements → KI. */
   [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] details[open] [data-testid="stExpanderDetails"],
   [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] details[open] [data-testid="stExpanderDetails"],
-  .st-key-metrics_inspect_ki [data-testid="stExpander"] details[open] [data-testid="stExpanderDetails"] {{
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] details[open] [data-testid="stExpanderDetails"],
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] details[open] [data-testid="stExpanderDetails"] {{
     padding: 0.35rem 0 0 !important;
     border-top: none !important;
   }}
   [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] details:not([open]) [data-testid="stExpanderDetails"],
   [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] details:not([open]) [data-testid="stExpanderDetails"],
-  .st-key-metrics_inspect_ki [data-testid="stExpander"] details:not([open]) [data-testid="stExpanderDetails"] {{
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] details:not([open]) [data-testid="stExpanderDetails"],
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] details:not([open]) [data-testid="stExpanderDetails"] {{
     display: none !important;
     padding: 0 !important;
     margin: 0 !important;
@@ -1317,13 +1417,15 @@ GLOBAL_CSS = f"""
      +/− via summary::before is the expand/collapse cue. */
   [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] summary [data-testid="stIconMaterial"],
   [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] summary [data-testid="stIconMaterial"],
-  .st-key-metrics_inspect_ki [data-testid="stExpander"] summary [data-testid="stIconMaterial"] {{
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] summary [data-testid="stIconMaterial"],
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] summary [data-testid="stIconMaterial"] {{
     display: none !important;
   }}
-  /* + when collapsed / − when open — scoped to Metrics Inspect only. */
+  /* + when collapsed / − when open — Metrics Inspect + Training mileage heatmap. */
   [data-testid="stColumn"]:has(.ki-panel) [data-testid="stExpander"] summary::before,
   [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] summary::before,
-  .st-key-metrics_inspect_ki [data-testid="stExpander"] summary::before {{
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] summary::before,
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] summary::before {{
     content: '+';
     display: inline-block;
     margin-right: 0.35em;
@@ -1341,7 +1443,8 @@ GLOBAL_CSS = f"""
   [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] details[open] summary::before,
   .st-key-metrics_inspect_ki [data-testid="stExpander"][open] summary::before,
   .st-key-metrics_inspect_ki [data-testid="stExpander"] details[open] summary::before,
-  .st-key-metrics_inspect_ki[open] summary::before {{
+  .st-key-training_mileage_heatmap [data-testid="stExpander"][open] summary::before,
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] details[open] summary::before {{
     content: '−';
   }}
   /* Match .panel-label on expander summary label only (not icon spans). */
@@ -1353,7 +1456,10 @@ GLOBAL_CSS = f"""
   [data-testid="column"]:has(.ki-panel) [data-testid="stExpander"] summary p,
   .st-key-metrics_inspect_ki [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"],
   .st-key-metrics_inspect_ki [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"] p,
-  .st-key-metrics_inspect_ki [data-testid="stExpander"] summary p {{
+  .st-key-metrics_inspect_ki [data-testid="stExpander"] summary p,
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"],
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"] p,
+  .st-key-training_mileage_heatmap [data-testid="stExpander"] summary p {{
     font-family: {FONT_BODY} !important;
     font-size: 0.72rem !important;
     font-weight: 600 !important;
@@ -1363,22 +1469,29 @@ GLOBAL_CSS = f"""
     line-height: 1.2 !important;
     margin: 0 !important;
   }}
-  /* Compact inspect select: short width + smaller text/height. */
+  /* Compact inspect select: short width + smaller text/height.
+     Scoped via .metrics-inspect-select marker — do not style global selects. */
   .metrics-inspect-select {{
     display: none;
   }}
   [data-testid="stElementContainer"]:has(.metrics-inspect-select)
     + [data-testid="stElementContainer"] [data-testid="stSelectbox"],
   [data-testid="stElementContainer"]:has(.metrics-inspect-select)
+    + [data-testid="stElementContainer"] [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="stElementContainer"]:has(.metrics-inspect-select)
     + [data-testid="stElementContainer"] div[data-baseweb="select"] > div {{
     max-width: 16rem !important;
     width: 100% !important;
   }}
   [data-testid="stElementContainer"]:has(.metrics-inspect-select)
+    + [data-testid="stElementContainer"] [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="stElementContainer"]:has(.metrics-inspect-select)
     + [data-testid="stElementContainer"] div[data-baseweb="select"] > div {{
     min-height: 2rem !important;
     border-radius: 10px !important;
   }}
+  [data-testid="stElementContainer"]:has(.metrics-inspect-select)
+    + [data-testid="stElementContainer"] [data-testid="stSelectbox"] input,
   [data-testid="stElementContainer"]:has(.metrics-inspect-select)
     + [data-testid="stElementContainer"] div[data-baseweb="select"] span {{
     font-size: 0.82rem !important;
@@ -1649,11 +1762,35 @@ GLOBAL_CSS = f"""
     margin-top: 0.35rem;
   }}
 
-  /* Selectbox polish */
+  /* Selectbox polish — Streamlit 1.61+ dropped BaseWeb select.
+     Controls use theme.secondaryBg; under a dark OS/theme that reads as a
+     black pill on our light page CSS. Force light chrome + readable ink on
+     the control and the virtual dropdown popover. Keep BaseWeb fallback. */
+  [data-testid="stSelectbox"] div:has(> input),
   div[data-baseweb="select"] > div {{
     background: {CARD} !important;
+    background-color: {CARD} !important;
     border-color: {LINE} !important;
     border-radius: 12px !important;
+    color: {INK} !important;
+  }}
+  [data-testid="stSelectbox"] input {{
+    color: {INK} !important;
+    -webkit-text-fill-color: {INK} !important;
+    background: transparent !important;
+  }}
+  [data-testid="stSelectboxVirtualDropdown"] {{
+    background: {CARD} !important;
+    background-color: {CARD} !important;
+    color: {INK} !important;
+    border: 1px solid {LINE} !important;
+    border-radius: 12px !important;
+  }}
+  /* Ink on options only — leave option background alone so hover/focus still tint. */
+  [data-testid="stSelectboxVirtualDropdown"] [data-option-value],
+  [data-testid="stSelectboxVirtualDropdown"] [role="option"],
+  [data-testid="stSelectboxVirtualDropdown"] li {{
+    color: {INK} !important;
   }}
   label[data-testid="stWidgetLabel"] p {{
     font-size: 0.78rem !important;

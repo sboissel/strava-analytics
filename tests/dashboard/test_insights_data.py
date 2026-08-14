@@ -147,22 +147,61 @@ class MileageHeatmapTests(unittest.TestCase):
         self.assertEqual(len(y_labels), HEATMAP_MONTH_YEARS)
 
     def test_week_grain_week_by_month_grid(self):
-        """Week grain uses W1–W5 rows and month columns for the last 24 months."""
+        """Week grain uses Week 1–5 rows and month columns for the last 24 months."""
         runs = self._runs(
             ["2026-03-02T08:00:00Z", "2026-03-09T08:00:00Z"],
             [4.0, 6.0],
         )
         as_of = pd.Timestamp("2026-03-16T12:00:00Z")
-        matrix, y_labels, x_labels, title, _tooltips = mileage_heatmap_matrix(
+        matrix, y_labels, x_labels, title, tooltips = mileage_heatmap_matrix(
             runs, "Week", as_of=as_of
         )
-        self.assertEqual(y_labels, ["W1", "W2", "W3", "W4", "W5"])
+        self.assertEqual(y_labels, ["Week 1", "Week 2", "Week 3", "Week 4", "Week 5"])
         self.assertEqual(len(x_labels), 24)
-        self.assertIn("Mar, 26", x_labels)
-        mar_idx = x_labels.index("Mar, 26")
+        self.assertIn("Mar '26", x_labels)
+        mar_idx = x_labels.index("Mar '26")
         self.assertAlmostEqual(float(matrix[0, mar_idx]), 4.0)
         self.assertAlmostEqual(float(matrix[1, mar_idx]), 6.0)
+        # March 2026 has Mondays on the 2nd, 9th, 16th, 23rd, and 30th — Weeks
+        # 3–5 exist but have no runs, so they are 0.0 (not NaN gaps).
+        self.assertAlmostEqual(float(matrix[2, mar_idx]), 0.0)
+        self.assertAlmostEqual(float(matrix[3, mar_idx]), 0.0)
+        self.assertAlmostEqual(float(matrix[4, mar_idx]), 0.0)
         self.assertIn("2 Years", title)
+        self.assertEqual(tooltips[0, mar_idx], "March 2, 2026 - March 8, 2026")
+        self.assertEqual(tooltips[1, mar_idx], "March 9, 2026 - March 15, 2026")
+
+    def test_week_grain_absent_week_slot_is_nan_zero_miles_is_zero(self):
+        """No Week 5 Monday → NaN; existing week with no runs → 0.0."""
+        # Feb 2026 Mondays: 2, 9, 16, 23 (no Week 5). One run in Week 1 only.
+        runs = self._runs(["2026-02-03T08:00:00Z"], [5.0])
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        matrix, _y, x_labels, _title, tooltips = mileage_heatmap_matrix(
+            runs, "Week", as_of=as_of
+        )
+        feb_idx = x_labels.index("Feb '26")
+        self.assertAlmostEqual(float(matrix[0, feb_idx]), 5.0)
+        self.assertAlmostEqual(float(matrix[1, feb_idx]), 0.0)
+        self.assertAlmostEqual(float(matrix[2, feb_idx]), 0.0)
+        self.assertAlmostEqual(float(matrix[3, feb_idx]), 0.0)
+        self.assertTrue(np.isnan(matrix[4, feb_idx]))
+        self.assertEqual(tooltips[4, feb_idx], "")
+        self.assertEqual(tooltips[1, feb_idx], "February 9, 2026 - February 15, 2026")
+
+    def test_week_grain_tooltips_are_iso_week_ranges(self):
+        """Week hover labels are Mon–Sun full-date ranges for the cell's slot."""
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        matrix, _y, x_labels, _title, tooltips = mileage_heatmap_matrix(
+            self._runs([], []), "Week", as_of=as_of
+        )
+        jan_idx = x_labels.index("Jan '26")
+        # First Monday in January 2026 is the 5th (ISO week Mon–Sun).
+        self.assertEqual(tooltips[0, jan_idx], "January 5, 2026 - January 11, 2026")
+        self.assertAlmostEqual(float(matrix[0, jan_idx]), 0.0)
+        # Week 5 of Dec 2025 starts Mon Dec 29 (spans into early January).
+        dec_idx = x_labels.index("Dec '25")
+        self.assertEqual(tooltips[4, dec_idx], "December 29, 2025 - January 4, 2026")
+        self.assertAlmostEqual(float(matrix[4, dec_idx]), 0.0)
 
     def test_day_grain_month_by_day_grid(self):
         """Day grain uses month rows and day-of-month columns for the last 12 months."""

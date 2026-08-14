@@ -3,3 +3,11 @@
 toolbarMode = "minimal"
 showSidebarNavigation = true
 runOnSave = true
+
+# Force light widget chrome. Streamlit 1.61 selectboxes use theme.secondaryBg;
+# a dark OS/theme makes them black against this app's light GLOBAL_CSS page.
+[theme]
+base = "light"
+backgroundColor = "#E8EEF2"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#152028"

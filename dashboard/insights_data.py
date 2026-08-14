@@ -17,6 +17,7 @@ from data import (
     DATA_DIR,
     PERIOD_CONFIG,
     PeriodGrain,
+    format_full_date,
     format_full_month,
     normalize_utc,
     reference_end,
@@ -54,7 +55,7 @@ def heatmap_showing_label(grain: PeriodGrain) -> str:
         Description of the heatmap layout window, or an empty string when unknown.
     """
     return HEATMAP_SHOWING.get(grain, "")
-WEEK_COLUMNS = ["W1", "W2", "W3", "W4", "W5"]
+WEEK_COLUMNS = ["Week 1", "Week 2", "Week 3", "Week 4", "Week 5"]
 DAY_COLUMNS = [str(day) for day in range(1, 32)]
 
 
@@ -82,7 +83,12 @@ def _day_tooltip_label(month_key: str, day: int) -> str:
     return f"{month_name} {day}, {year_str}"
 
 
-def _month_row_labels(start: pd.Timestamp, count: int) -> tuple[list[str], list[str]]:
+def _month_row_labels(
+    start: pd.Timestamp,
+    count: int,
+    *,
+    label_fmt: str = "%b, %y",
+) -> tuple[list[str], list[str]]:
     """Return display labels and YYYY-MM keys for `count` months ending at `start`'s month."""
     month_starts = pd.date_range(
         start=start.replace(day=1),
@@ -90,7 +96,7 @@ def _month_row_labels(start: pd.Timestamp, count: int) -> tuple[list[str], list[
         freq="MS",
         tz=start.tz,
     )
-    y_labels = [d.strftime("%b, %y") for d in month_starts]
+    y_labels = [d.strftime(label_fmt) for d in month_starts]
     month_keys = [d.strftime("%Y-%m") for d in month_starts]
     return y_labels, month_keys
 
@@ -98,6 +104,27 @@ def _month_row_labels(start: pd.Timestamp, count: int) -> tuple[list[str], list[
 def _week_of_month(monday: pd.Timestamp) -> int:
     """Monday-based week slot within a calendar month (1-5)."""
     return min(((monday.day - 1) // 7) + 1, 5)
+
+
+def _monday_for_week_slot(month_key: str, week_idx: int) -> pd.Timestamp | None:
+    """Return the ISO-week Monday for a week-of-month slot in ``YYYY-MM``."""
+    month_start = pd.Timestamp(f"{month_key}-01", tz="UTC")
+    for day in range(1, month_start.days_in_month + 1):
+        candidate = month_start.replace(day=day)
+        if int(candidate.dayofweek) != 0:
+            continue
+        if _week_of_month(candidate) - 1 == week_idx:
+            return candidate
+    return None
+
+
+def _week_tooltip_label(month_key: str, week_idx: int) -> str:
+    """Mon–Sun date range for a week-of-month heatmap cell."""
+    monday = _monday_for_week_slot(month_key, week_idx)
+    if monday is None:
+        return f"{_month_tooltip_label(month_key)} · {WEEK_COLUMNS[week_idx]}"
+    sunday = monday + pd.Timedelta(days=6)
+    return f"{format_full_date(monday)} - {format_full_date(sunday)}"
 
 
 def _load_pace_runs_uncached(data_dir: Path) -> pd.DataFrame:
@@ -287,13 +314,20 @@ def _week_month_matrix(
     end = _normalize_as_of(runs, as_of)
     month_end = end.replace(day=1) + pd.offsets.MonthBegin(1)
     month_start = end.replace(day=1) - pd.DateOffset(months=HEATMAP_WEEK_MONTHS - 1)
-    x_labels, month_keys = _month_row_labels(month_start, HEATMAP_WEEK_MONTHS)
+    x_labels, month_keys = _month_row_labels(
+        month_start, HEATMAP_WEEK_MONTHS, label_fmt="%b '%y"
+    )
     y_labels = WEEK_COLUMNS
+    # NaN = no such week slot in that month (e.g. no Week 5). Existing
+    # Mon–Sun weeks start at 0.0 so zero-mile weeks paint on the colorscale.
     matrix = np.full((len(WEEK_COLUMNS), len(month_keys)), np.nan)
     tooltips = np.full((len(WEEK_COLUMNS), len(month_keys)), "", dtype=object)
-    for w_idx, week_label in enumerate(WEEK_COLUMNS):
+    for w_idx, _week_label in enumerate(WEEK_COLUMNS):
         for x_idx, month_key in enumerate(month_keys):
-            tooltips[w_idx, x_idx] = f"{_month_tooltip_label(month_key)} · {week_label}"
+            if _monday_for_week_slot(month_key, w_idx) is None:
+                continue
+            matrix[w_idx, x_idx] = 0.0
+            tooltips[w_idx, x_idx] = _week_tooltip_label(month_key, w_idx)
 
     window_runs = _filter_runs_in_window(runs, month_start, month_end)
     if window_runs.empty:
