@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
 from dashboard.data import load_gear
 from dashboard.theme import (
     SHOE_MILEAGE_GOAL,
@@ -13,34 +15,56 @@ from dashboard.theme import (
     shoe_wear_color,
 )
 from dashboard.ui import shoe_kpi_cards_html
+from strava_analytics.gear import TRACKED_GEAR
 
 
 class LoadGearTests(unittest.TestCase):
-    """strava_gear.csv loading."""
+    """Shoe mileage from activity gear_id sums plus TRACKED_GEAR baselines."""
 
-    def test_loads_mileage_and_status(self):
+    def test_sums_activity_miles_with_baseline(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
-            (data_dir / "strava_gear.csv").write_text(
-                "gear_id,name,type,mileage,status\n"
-                "g1,Hoka Mach 7,Speed,12.0,active\n"
-                "g2,Old Shoe,Road,401.0,retired\n"
-            )
+            gear_id = TRACKED_GEAR[0]["gear_id"]
+            pd.DataFrame(
+                [
+                    {
+                        "activity_id": "1",
+                        "name": "Run",
+                        "type": "Run",
+                        "gear_id": gear_id,
+                        "date": "2024-01-01T00:00:00Z",
+                        "distance_miles": "5.0",
+                    },
+                    {
+                        "activity_id": "2",
+                        "name": "Run 2",
+                        "type": "Run",
+                        "gear_id": gear_id,
+                        "date": "2024-01-02T00:00:00Z",
+                        "distance_miles": "3.0",
+                    },
+                ]
+            ).to_csv(data_dir / "strava_run_analysis.csv", index=False)
+
             gear = load_gear(data_dir)
 
-        self.assertEqual(len(gear), 2)
-        self.assertEqual(gear.loc[0, "name"], "Hoka Mach 7")
-        self.assertEqual(gear.loc[0, "type"], "Speed")
-        self.assertEqual(gear.loc[0, "mileage"], 12.0)
-        self.assertEqual(gear.loc[1, "status"], "retired")
+        row = gear.loc[gear["gear_id"] == gear_id].iloc[0]
+        self.assertEqual(row["name"], TRACKED_GEAR[0]["name"])
+        self.assertEqual(row["type"], TRACKED_GEAR[0]["type"])
+        self.assertEqual(row["mileage"], TRACKED_GEAR[0]["baseline_miles"] + 8.0)
+        self.assertEqual(row["status"], "active")
+        self.assertEqual(len(gear), len(TRACKED_GEAR))
 
-    def test_missing_file_returns_empty_frame(self):
+    def test_missing_activity_csvs_returns_baselines(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             gear = load_gear(Path(tmpdir))
-        self.assertTrue(gear.empty)
+        self.assertEqual(len(gear), len(TRACKED_GEAR))
         self.assertEqual(
             list(gear.columns), ["gear_id", "name", "type", "mileage", "status"]
         )
+        for item in TRACKED_GEAR:
+            mileage = gear.loc[gear["gear_id"] == item["gear_id"], "mileage"].iloc[0]
+            self.assertEqual(mileage, item["baseline_miles"])
 
 
 class ShoeWearColorTests(unittest.TestCase):
@@ -61,14 +85,25 @@ class ShoeKpiCardsHtmlTests(unittest.TestCase):
     """Overview shoe gauge markup."""
 
     def test_renders_shoe_names_and_goal(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            data_dir = Path(tmpdir)
-            (data_dir / "strava_gear.csv").write_text(
-                "gear_id,name,type,mileage,status\n"
-                "g1,Nike ZoomX,Race,50.0,active\n"
-                "g2,Nike Pegasus Trail 5,Trail,189.0,active\n"
-            )
-            html = shoe_kpi_cards_html(load_gear(data_dir))
+        gear = pd.DataFrame(
+            [
+                {
+                    "gear_id": "g1",
+                    "name": "Nike ZoomX",
+                    "type": "Race",
+                    "mileage": 50.0,
+                    "status": "active",
+                },
+                {
+                    "gear_id": "g2",
+                    "name": "Nike Pegasus Trail 5",
+                    "type": "Trail",
+                    "mileage": 189.0,
+                    "status": "active",
+                },
+            ]
+        )
+        html = shoe_kpi_cards_html(gear)
 
         self.assertIn("Nike ZoomX", html)
         self.assertIn("Race", html)

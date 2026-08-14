@@ -15,6 +15,8 @@ except ImportError:
     import _bootstrap  # noqa: F401
 
 from strava_analytics.activities import last_full_week_bounds
+from strava_analytics.csv_io import activity_analysis_paths
+from strava_analytics.gear import gear_mileage_from_activities
 from theme import LONGEST_RUN_GOAL, WEEKLY_MILES_GOAL
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -78,33 +80,33 @@ def load_runs(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     return _load_runs_cached(mtime, str(data_dir))
 
 
+def _activity_distances_for_gear(data_dir: Path) -> pd.DataFrame:
+    """Load ``gear_id`` / ``distance_miles`` from per-type analysis CSVs."""
+    frames: list[pd.DataFrame] = []
+    for path in activity_analysis_paths(data_dir):
+        if not path.exists():
+            continue
+        df = pd.read_csv(path, dtype=str, keep_default_na=False)
+        if "gear_id" not in df.columns or "distance_miles" not in df.columns:
+            continue
+        frames.append(df[["gear_id", "distance_miles"]])
+    if not frames:
+        return pd.DataFrame(columns=["gear_id", "distance_miles"])
+    return pd.concat(frames, ignore_index=True)
+
+
+def _analysis_csv_mtime(data_dir: Path) -> float:
+    mtimes = [
+        path.stat().st_mtime
+        for path in activity_analysis_paths(data_dir)
+        if path.exists()
+    ]
+    return max(mtimes) if mtimes else 0.0
+
+
 def _load_gear_uncached(data_dir: Path) -> pd.DataFrame:
-    """Load shoe/gear mileage rows from ``strava_gear.csv``."""
-    columns = ["gear_id", "name", "type", "mileage", "status"]
-    path = data_dir / "strava_gear.csv"
-    if not path.exists():
-        return pd.DataFrame(columns=columns)
-
-    df = pd.read_csv(path, dtype=str, keep_default_na=False)
-    if df.empty:
-        return pd.DataFrame(columns=columns)
-
-    out = pd.DataFrame(
-        {
-            "gear_id": df.get("gear_id", pd.Series(dtype=str)).astype(str).str.strip(),
-            "name": df.get("name", pd.Series(dtype=str)).astype(str).str.strip(),
-            "type": df.get("type", pd.Series(dtype=str)).astype(str).str.strip(),
-            "mileage": pd.to_numeric(df.get("mileage"), errors="coerce"),
-            "status": df.get("status", pd.Series(dtype=str))
-            .astype(str)
-            .str.strip()
-            .str.lower(),
-        }
-    )
-    out = out.loc[out["gear_id"] != ""].copy()
-    out["mileage"] = out["mileage"].fillna(0.0)
-    out["status"] = out["status"].replace({"": "active"})
-    return out.reset_index(drop=True)
+    """Compute shoe mileage from activity ``gear_id`` sums plus baselines."""
+    return gear_mileage_from_activities(_activity_distances_for_gear(data_dir))
 
 
 @st.cache_data(show_spinner=False)
@@ -113,22 +115,23 @@ def _load_gear_cached(csv_mtime: float, data_dir_str: str) -> pd.DataFrame:
 
 
 def load_gear(data_dir: Path = DATA_DIR) -> pd.DataFrame:
-    """Load shoe mileage rows from ``strava_gear.csv``.
+    """Load shoe mileage for tracked gear from activity analysis CSVs.
+
+    Mileage is each shoe's ``TRACKED_GEAR`` baseline plus the sum of
+    ``distance_miles`` for activities with a matching ``gear_id``.
 
     Parameters
     ----------
     data_dir : pathlib.Path, optional
-        Directory containing ``strava_gear.csv``. Defaults to the repository
-        ``data`` folder.
+        Directory containing ``strava_*_analysis.csv`` files. Defaults to the
+        repository ``data`` folder.
 
     Returns
     -------
     pandas.DataFrame
         Columns ``gear_id``, ``name``, ``type``, ``mileage``, and ``status``.
     """
-    path = data_dir / "strava_gear.csv"
-    mtime = path.stat().st_mtime if path.exists() else 0.0
-    return _load_gear_cached(mtime, str(data_dir))
+    return _load_gear_cached(_analysis_csv_mtime(data_dir), str(data_dir))
 
 
 def latest_activity_label(df: pd.DataFrame) -> str:

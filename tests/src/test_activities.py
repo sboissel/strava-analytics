@@ -7,12 +7,13 @@ import numpy as np
 import pandas as pd
 
 from strava_analytics.activities import (
-    HR_EASY_THRESHOLD,
     _activity_base_row,
     _enrich_run_from_streams,
-    compute_hr_easy_stats,
+    compute_hr_zone_stats,
     compute_run_pace_summary_from_streams,
+    extract_gear_id,
     format_time,
+    hr_zone_pct_columns,
     last_full_week_bounds,
     pace_bin_for_seconds,
     process_activities,
@@ -30,65 +31,117 @@ from strava_analytics.csv_io import (
     update_run_pace_analysis_csv,
 )
 
+SAMPLE_HR_ZONES = [
+    {
+        "score": 24.0,
+        "distribution_buckets": [
+            {"min": 0, "max": 115, "time": 167.0},
+            {"min": 116, "max": 143, "time": 2400.0},
+            {"min": 144, "max": 158, "time": 0.0},
+            {"min": 159, "max": 172, "time": 0.0},
+            {"min": 173, "max": -1, "time": 0.0},
+        ],
+        "type": "heartrate",
+    },
+    {
+        "type": "pace",
+        "distribution_buckets": [
+            {"min": 0, "max": 300, "time": 100.0},
+            {"min": 301, "max": -1, "time": 200.0},
+        ],
+    },
+]
 
-class HeartRateAnalysisTests(unittest.TestCase):
-    """Test compute_hr_easy_stats."""
 
-    def test_compute_hr_easy_stats_returns_none_for_empty_streams(self):
-        """Ensure empty HR or time streams return no easy/hard stats."""
-        self.assertEqual(compute_hr_easy_stats([], [0, 600]), (None, None, None))
-        self.assertEqual(compute_hr_easy_stats([120, 160], []), (None, None, None))
+class HeartRateZoneAnalysisTests(unittest.TestCase):
+    """Test compute_hr_zone_stats."""
 
-    def test_compute_hr_easy_stats_returns_expected_durations(self):
-        """Validate that easy and hard duration calculations are based on the HR threshold correctly."""
-        easy_hr = HR_EASY_THRESHOLD - 22
-        hard_hr = HR_EASY_THRESHOLD + 18
-        pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(
-            hr_stream=[easy_hr, hard_hr, easy_hr],
-            time_stream=[0, 600, 1200],
+    def test_compute_hr_zone_stats_returns_none_without_heartrate_zones(self):
+        """Ensure missing heartrate zones leave easy/hard and zone %s empty."""
+        empty = compute_hr_zone_stats([])
+        self.assertIsNone(empty["%_easy"])
+        self.assertIsNone(empty["mt_min_easy"])
+        self.assertIsNone(empty["mt_min_hard"])
+        for column in hr_zone_pct_columns():
+            self.assertIsNone(empty[column])
+
+        pace_only = compute_hr_zone_stats(
+            [{"type": "pace", "distribution_buckets": [{"min": 0, "max": -1, "time": 60.0}]}]
         )
+        self.assertIsNone(pace_only["%_easy"])
 
-        self.assertEqual(pct_easy, 50.0)
-        self.assertEqual(mt_min_easy, 10.0)
-        self.assertEqual(mt_min_hard, 10.0)
+    def test_compute_hr_zone_stats_sample_payload(self):
+        """Validate easy/hard and zone %s against the Strava sample heartrate zones."""
+        stats = compute_hr_zone_stats(SAMPLE_HR_ZONES)
+        total = 167.0 + 2400.0
 
-    def test_compute_hr_easy_stats_treats_threshold_hr_as_hard(self):
-        """Ensure HR equal to the threshold is hard (easy is strictly below)."""
-        easy_hr = HR_EASY_THRESHOLD - 1
-        pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(
-            hr_stream=[easy_hr, HR_EASY_THRESHOLD, easy_hr],
-            time_stream=[0, 600, 1200],
+        self.assertEqual(stats["%_easy"], round(total / total * 100, 1))
+        self.assertEqual(stats["mt_min_easy"], round(total / 60, 1))
+        self.assertEqual(stats["mt_min_hard"], 0.0)
+        self.assertEqual(stats["hr_zone_1_pct"], round(167.0 / total * 100, 1))
+        self.assertEqual(stats["hr_zone_2_pct"], round(2400.0 / total * 100, 1))
+        self.assertEqual(stats["hr_zone_3_pct"], 0.0)
+        self.assertEqual(stats["hr_zone_4_pct"], 0.0)
+        self.assertEqual(stats["hr_zone_5_pct"], 0.0)
+
+    def test_compute_hr_zone_stats_returns_none_when_all_bucket_times_zero(self):
+        """Ensure all-zero heartrate bucket times are treated as missing HR."""
+        stats = compute_hr_zone_stats(
+            [
+                {
+                    "type": "heartrate",
+                    "distribution_buckets": [
+                        {"min": 0, "max": 115, "time": 0.0},
+                        {"min": 116, "max": 143, "time": 0.0},
+                    ],
+                }
+            ]
         )
+        self.assertIsNone(stats["%_easy"])
+        self.assertIsNone(stats["hr_zone_1_pct"])
 
-        self.assertEqual(pct_easy, 50.0)
-        self.assertEqual(mt_min_easy, 10.0)
-        self.assertEqual(mt_min_hard, 10.0)
-
-    def test_compute_hr_easy_stats_trims_mismatched_stream_lengths(self):
-        """Ensure mismatched HR/time lengths are trimmed to the shared prefix before scoring."""
-        easy_hr = HR_EASY_THRESHOLD - 22
-        hard_hr = HR_EASY_THRESHOLD + 18
-        pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(
-            hr_stream=[easy_hr, hard_hr, easy_hr, hard_hr],
-            time_stream=[0, 600, 1200],
+    def test_compute_hr_zone_stats_handles_fewer_and_more_buckets(self):
+        """Ensure first two buckets are easy, the rest hard, and zone columns pad to five."""
+        three_buckets = compute_hr_zone_stats(
+            [
+                {
+                    "type": "heartrate",
+                    "distribution_buckets": [
+                        {"min": 0, "max": 100, "time": 30.0},
+                        {"min": 101, "max": 140, "time": 70.0},
+                        {"min": 141, "max": -1, "time": 100.0},
+                    ],
+                }
+            ]
         )
+        self.assertEqual(three_buckets["%_easy"], 50.0)
+        self.assertEqual(three_buckets["mt_min_easy"], round(100.0 / 60, 1))
+        self.assertEqual(three_buckets["mt_min_hard"], round(100.0 / 60, 1))
+        self.assertEqual(three_buckets["hr_zone_1_pct"], 15.0)
+        self.assertEqual(three_buckets["hr_zone_2_pct"], 35.0)
+        self.assertEqual(three_buckets["hr_zone_3_pct"], 50.0)
+        self.assertIsNone(three_buckets["hr_zone_4_pct"])
+        self.assertIsNone(three_buckets["hr_zone_5_pct"])
 
-        self.assertEqual(pct_easy, 50.0)
-        self.assertEqual(mt_min_easy, 10.0)
-        self.assertEqual(mt_min_hard, 10.0)
-
-    def test_compute_hr_easy_stats_ignores_non_finite_samples(self):
-        """Ensure NaN/inf HR or time samples are dropped while finite pairs are scored."""
-        easy_hr = HR_EASY_THRESHOLD - 22
-        hard_hr = HR_EASY_THRESHOLD + 18
-        pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(
-            hr_stream=[easy_hr, np.nan, hard_hr],
-            time_stream=[0, 300, 600],
+        six_buckets = compute_hr_zone_stats(
+            [
+                {
+                    "type": "heartrate",
+                    "distribution_buckets": [
+                        {"min": 0, "max": 100, "time": 10.0},
+                        {"min": 101, "max": 120, "time": 10.0},
+                        {"min": 121, "max": 140, "time": 10.0},
+                        {"min": 141, "max": 160, "time": 10.0},
+                        {"min": 161, "max": 180, "time": 10.0},
+                        {"min": 181, "max": -1, "time": 50.0},
+                    ],
+                }
+            ]
         )
-
-        self.assertEqual(pct_easy, 0.0)
-        self.assertEqual(mt_min_easy, 0.0)
-        self.assertEqual(mt_min_hard, 10.0)
+        self.assertEqual(six_buckets["%_easy"], 20.0)
+        self.assertEqual(six_buckets["mt_min_hard"], round(80.0 / 60, 1))
+        self.assertEqual(six_buckets["hr_zone_5_pct"], 10.0)
+        self.assertNotIn("hr_zone_6_pct", six_buckets)
 
 
 class PaceFormattingTests(unittest.TestCase):
@@ -223,6 +276,7 @@ class ActivityRowHelperTests(unittest.TestCase):
                 "activity_id": 123,
                 "name": "Morning Run",
                 "type": "Run",
+                "gear_id": "",
                 "date": "2024-01-01T00:00:00Z",
                 "distance_miles": 1.0,
                 "moving_time_min": "00:10:00",
@@ -236,8 +290,33 @@ class ActivityRowHelperTests(unittest.TestCase):
             },
         )
 
+    def test_activity_base_row_prefers_summary_gear_id(self):
+        """Ensure summary ``gear_id`` is stored without needing nested gear."""
+        row = _activity_base_row(
+            {
+                "id": 123,
+                "name": "Morning Run",
+                "type": "Run",
+                "gear_id": "g33031373",
+                "start_date": "2024-01-01T00:00:00Z",
+                "distance": 1609.34,
+                "moving_time": 600,
+                "elapsed_time": 660,
+                "total_elevation_gain": 30.48,
+                "average_speed": 2.68,
+                "max_speed": 3.0,
+            }
+        )
+        self.assertEqual(row["gear_id"], "g33031373")
+
+    def test_extract_gear_id_falls_back_to_nested_gear(self):
+        """Ensure detail payloads with nested ``gear.id`` still resolve."""
+        self.assertEqual(extract_gear_id({"gear": {"id": "g99"}}), "g99")
+        self.assertEqual(extract_gear_id({"gear_id": "g1", "gear": {"id": "g2"}}), "g1")
+        self.assertEqual(extract_gear_id({}), "")
+
     def test_enrich_run_from_streams_adds_hr_stats_and_pace_summary(self):
-        """Ensure run rows gain HR fields and return a pace summary from streams."""
+        """Ensure run rows gain HR fields/zones and return a pace summary from streams."""
         row = {"activity_id": 123}
         get_streams = Mock(
             return_value={
@@ -246,15 +325,38 @@ class ActivityRowHelperTests(unittest.TestCase):
                 "time": {"data": [0.0, 600.0]},
             }
         )
+        get_activity_zones = Mock(return_value=SAMPLE_HR_ZONES)
 
-        pace_summary = _enrich_run_from_streams(row, 123, get_streams)
+        pace_summary = _enrich_run_from_streams(row, 123, get_streams, get_activity_zones)
 
         self.assertEqual(row["avg_hr"], 140.0)
         self.assertEqual(row["max_hr"], 160)
-        self.assertIn("%_easy", row)
+        self.assertEqual(row["%_easy"], 100.0)
+        self.assertEqual(row["mt_min_easy"], round(2567.0 / 60, 1))
+        self.assertEqual(row["mt_min_hard"], 0.0)
+        self.assertIn("hr_zone_1_pct", row)
         self.assertEqual(pace_summary["activity_id"], 123)
         self.assertEqual(pace_summary["seconds_1000_1030"], 600)
         get_streams.assert_called_once_with(123, ["heartrate", "distance", "time"])
+        get_activity_zones.assert_called_once_with(123)
+
+    def test_enrich_run_from_streams_skips_easy_hard_without_hr_zones(self):
+        """Ensure missing heartrate zones leave easy/hard empty while stream HR still loads."""
+        row = {"activity_id": 123}
+        get_streams = Mock(
+            return_value={
+                "heartrate": {"data": [120.0, 160.0]},
+                "distance": {"data": [0.0, 1609.34]},
+                "time": {"data": [0.0, 600.0]},
+            }
+        )
+        get_activity_zones = Mock(return_value=[])
+
+        _enrich_run_from_streams(row, 123, get_streams, get_activity_zones)
+
+        self.assertEqual(row["avg_hr"], 140.0)
+        self.assertNotIn("%_easy", row)
+        self.assertNotIn("hr_zone_1_pct", row)
 
 
 class ActivityProcessingTests(unittest.TestCase):
@@ -334,16 +436,24 @@ class ActivityProcessingTests(unittest.TestCase):
             return streams_without_hr
 
         get_streams = Mock(side_effect=get_streams_side_effect)
+        get_activity_zones = Mock(
+            side_effect=lambda activity_id: SAMPLE_HR_ZONES if activity_id == 123 else []
+        )
 
         with patch("strava_analytics.activities.time.sleep", return_value=None):
             result, pace_summaries = process_activities(
-                activities, get_streams, last_activity_id="100"
+                activities,
+                get_streams,
+                last_activity_id="100",
+                get_activity_zones=get_activity_zones,
             )
 
         self.assertNotIn(50, result["activity_id"].tolist())
         self.assertIn("%_easy", result.columns)
         self.assertEqual(result.loc[result["activity_id"] == 123, "avg_hr"].iloc[0], 140.0)
+        self.assertEqual(result.loc[result["activity_id"] == 123, "%_easy"].iloc[0], 100.0)
         self.assertTrue(pd.isna(result.loc[result["activity_id"] == 200, "avg_hr"].iloc[0]))
+        self.assertTrue(pd.isna(result.loc[result["activity_id"] == 200, "%_easy"].iloc[0]))
         self.assertEqual(result.loc[result["activity_id"] == 456, "type"].iloc[0], "Ride")
         self.assertEqual(len(pace_summaries), 1)
         self.assertEqual(pace_summaries[0]["activity_id"], 123)
@@ -354,6 +464,7 @@ class ActivityProcessingTests(unittest.TestCase):
                 ((200, ["heartrate", "distance", "time"]),),
             ],
         )
+        self.assertEqual(get_activity_zones.call_args_list, [((123,),), ((200,),)])
 
     def test_process_activities_sets_race_distance_for_races(self):
         """Ensure race runs get a race_distance bucket based on distance."""
@@ -386,9 +497,15 @@ class ActivityProcessingTests(unittest.TestCase):
             },
         ]
         get_streams = Mock(return_value={"heartrate": {"data": []}, "distance": {"data": []}, "time": {"data": []}})
+        get_activity_zones = Mock(return_value=[])
 
         with patch("strava_analytics.activities.time.sleep", return_value=None):
-            result, _ = process_activities(activities, get_streams, last_activity_id="0")
+            result, _ = process_activities(
+                activities,
+                get_streams,
+                last_activity_id="0",
+                get_activity_zones=get_activity_zones,
+            )
 
         self.assertEqual(result.loc[result["activity_id"] == 301, "race_distance"].iloc[0], "5k")
         self.assertEqual(result.loc[result["activity_id"] == 302, "race_distance"].iloc[0], "Other")
@@ -498,6 +615,8 @@ class CsvProcessingTests(unittest.TestCase):
         self.assertEqual(sorted(run_df["activity_id"].astype(str).tolist()), ["123", "999"])
         self.assertEqual(ride_df["activity_id"].astype(str).tolist(), ["456"])
         self.assertIn("avg_hr", run_df.columns)
+        self.assertIn("hr_zone_1_pct", run_df.columns)
+        self.assertIn("hr_zone_5_pct", run_df.columns)
         self.assertNotIn("avg_hr", ride_df.columns)
 
     def test_update_activity_analysis_csvs_keeps_new_row_for_duplicate_activity_id(self):
