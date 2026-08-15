@@ -196,41 +196,48 @@ class StravaClientTests(unittest.TestCase):
 
         self.assertEqual(payload, {"distance": {"data": [1, 2]}})
 
-    def test_get_gear_returns_payload_on_success(self):
-        """Ensure successful gear requests return the parsed JSON payload."""
+    def test_get_activity_zones_returns_payload_on_success(self):
+        """Ensure successful activity-zones requests return the parsed JSON list."""
         client = make_client()
         client.access_token = "token"
+        zones = [{"type": "heartrate", "distribution_buckets": []}]
 
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "id": "g33031373",
-            "distance": 1609.34,
-            "retired": False,
-        }
+        mock_response.json.return_value = zones
 
         with patch("strava_analytics.client.requests.get", return_value=mock_response) as get_mock:
-            payload = client.get_gear("g33031373")
+            payload = client.get_activity_zones(123)
 
-        self.assertEqual(payload["distance"], 1609.34)
-        self.assertFalse(payload["retired"])
+        self.assertEqual(payload, zones)
         get_mock.assert_called_once()
-        self.assertIn("/gear/g33031373", get_mock.call_args.args[0])
+        self.assertIn("/activities/123/zones", get_mock.call_args.args[0])
 
-    def test_get_gear_raises_for_failed_request(self):
-        """Ensure failed gear requests raise a descriptive runtime error."""
+    def test_get_activity_zones_raises_for_failed_request(self):
+        """Ensure failed activity-zones requests raise a descriptive runtime error."""
         client = make_client()
         client.access_token = "token"
 
         mock_response = Mock()
         mock_response.status_code = 404
-        mock_response.text = "gear not found"
+        mock_response.text = "activity not found"
 
         with patch("strava_analytics.client.requests.get", return_value=mock_response):
-            with self.assertRaisesRegex(RuntimeError, r"404 gear not found"):
-                client.get_gear("gmissing")
+            with self.assertRaisesRegex(RuntimeError, r"404 activity not found"):
+                client.get_activity_zones(123)
 
+    def test_get_activity_zones_raises_when_payload_is_not_a_list(self):
+        """Ensure a non-list zones payload raises a runtime error."""
+        client = make_client()
+        client.access_token = "token"
 
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"type": "heartrate"}
+
+        with patch("strava_analytics.client.requests.get", return_value=mock_response):
+            with self.assertRaisesRegex(RuntimeError, r"not a list"):
+                client.get_activity_zones(123)
 
 
 if __name__ == "__main__":

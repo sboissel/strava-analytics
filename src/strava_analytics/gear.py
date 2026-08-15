@@ -1,112 +1,98 @@
-"""Shoe/gear mileage tracking from the Strava gear API."""
+"""Shoe mileage from activity ``gear_id`` values plus tracked baselines."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import pandas as pd
 
-from strava_analytics.activities import MILE_METERS
-
-GEAR_CSV_FILENAME = "strava_gear.csv"
-GEAR_CSV_COLUMNS = ["gear_id", "name", "mileage", "status"]
+GEAR_COLUMNS = ["gear_id", "name", "type", "mileage", "status"]
 
 # Baseline miles worn before tracking these shoes on Strava.
 TRACKED_GEAR: List[Dict[str, Any]] = [
-    {"gear_id": "g33031373", "name": "Hoka Mach 7", "baseline_miles": 12.0},
-    {"gear_id": "g33031356", "name": "Nike Pegasus 42", "baseline_miles": 63.0},
-    {"gear_id": "g33031350", "name": "Nike Pegasus Trail 5", "baseline_miles": 189.0},
-    {"gear_id": "g33031360", "name": "Nike ZoomX", "baseline_miles": 50.0},
+    {
+        "gear_id": "g33031373",
+        "name": "Hoka Mach 7",
+        "type": "Speed",
+        "baseline_miles": 12.0,
+    },
+    {
+        "gear_id": "g33031356",
+        "name": "Nike Pegasus 42",
+        "type": "Road",
+        "baseline_miles": 63.0,
+    },
+    {
+        "gear_id": "g33031350",
+        "name": "Nike Pegasus Trail 5",
+        "type": "Trail",
+        "baseline_miles": 189.0,
+    },
+    {
+        "gear_id": "g33031360",
+        "name": "Nike ZoomX",
+        "type": "Race",
+        "baseline_miles": 50.0,
+    },
 ]
 
 
-def _load_existing_gear(path: Path) -> Dict[str, Dict[str, Any]]:
-    if not path.exists():
-        return {}
-
-    df = pd.read_csv(path, dtype=str, keep_default_na=False)
-    if df.empty or "gear_id" not in df.columns:
-        return {}
-
-    rows: Dict[str, Dict[str, Any]] = {}
-    for _, row in df.iterrows():
-        gear_id = str(row.get("gear_id", "")).strip()
-        if not gear_id:
-            continue
-        rows[gear_id] = {
-            "gear_id": gear_id,
-            "name": str(row.get("name", "")).strip(),
-            "mileage": float(row.get("mileage") or 0),
-            "status": str(row.get("status", "active")).strip().lower(),
-        }
-    return rows
-
-
-def _tracked_row(
-    tracked: Mapping[str, Any],
-    gear_payload: Mapping[str, Any],
-) -> Dict[str, Any]:
-    strava_miles = float(gear_payload.get("distance") or 0) / MILE_METERS
-    baseline = float(tracked["baseline_miles"])
-    return {
-        "gear_id": tracked["gear_id"],
-        "name": tracked["name"],
-        "mileage": round(strava_miles + baseline, 2),
-        "status": "retired" if gear_payload.get("retired") else "active",
-    }
-
-
-def update_gear_mileage_csv(
-    get_gear: Callable[[str], Mapping[str, Any]],
-    data_dir: Path,
+def gear_mileage_from_activities(
+    activities: pd.DataFrame,
     tracked_gear: Optional[Sequence[Mapping[str, Any]]] = None,
-) -> Path:
-    """Fetch active gear distances from Strava and write ``strava_gear.csv``.
+) -> pd.DataFrame:
+    """Compute shoe mileage as baseline plus summed activity distances.
 
-    Mileage is Strava ``distance`` (meters → miles) plus each shoe's baseline
-    miles from before Strava tracking. Rows already marked ``retired`` in the
-    CSV are kept as-is and not refreshed.
+    For each entry in ``tracked_gear`` (defaults to ``TRACKED_GEAR``), mileage is
+    ``baseline_miles`` (or ``0`` when missing) plus the sum of
+    ``distance_miles`` for activities whose ``gear_id`` matches. Shoes with no
+    matching activities still appear with their baseline. Status is always
+    ``active`` (retired state is no longer read from the Strava gear API).
 
     Parameters
     ----------
-    get_gear :
-        Callable that returns a Strava gear payload for a gear ID.
-    data_dir :
-        Directory containing ``strava_gear.csv``.
+    activities :
+        Activity rows with at least ``gear_id`` and ``distance_miles``.
     tracked_gear :
-        Optional override of the tracked shoe list. Defaults to ``TRACKED_GEAR``.
+        Optional override of the tracked shoe list.
 
     Returns
     -------
-    pathlib.Path
-        Path to the written CSV.
+    pandas.DataFrame
+        Columns ``gear_id``, ``name``, ``type``, ``mileage``, and ``status``.
     """
     tracked = list(tracked_gear or TRACKED_GEAR)
-    path = data_dir / GEAR_CSV_FILENAME
-    existing = _load_existing_gear(path)
+    miles_by_gear: Dict[str, float] = {}
 
-    updated: Dict[str, Dict[str, Any]] = {}
+    if (
+        not activities.empty
+        and "gear_id" in activities.columns
+        and "distance_miles" in activities.columns
+    ):
+        tmp = activities[["gear_id", "distance_miles"]].copy()
+        tmp["gear_id"] = tmp["gear_id"].astype(str).str.strip()
+        tmp["distance_miles"] = pd.to_numeric(tmp["distance_miles"], errors="coerce").fillna(
+            0.0
+        )
+        tmp = tmp.loc[tmp["gear_id"] != ""]
+        if not tmp.empty:
+            miles_by_gear = (
+                tmp.groupby("gear_id", sort=False)["distance_miles"].sum().astype(float).to_dict()
+            )
+
+    rows: List[Dict[str, Any]] = []
     for item in tracked:
         gear_id = str(item["gear_id"])
-        prior = existing.get(gear_id)
-        if prior is not None and prior["status"] == "retired":
-            updated[gear_id] = prior
-            continue
+        baseline = float(item.get("baseline_miles") or 0.0)
+        activity_miles = float(miles_by_gear.get(gear_id, 0.0))
+        rows.append(
+            {
+                "gear_id": gear_id,
+                "name": item["name"],
+                "type": str(item.get("type") or "").strip(),
+                "mileage": round(baseline + activity_miles, 2),
+                "status": "active",
+            }
+        )
 
-        payload = get_gear(gear_id)
-        updated[gear_id] = _tracked_row(item, payload)
-
-    # Preserve any retired (or other) rows no longer in the tracked list.
-    for gear_id, row in existing.items():
-        if gear_id not in updated:
-            updated[gear_id] = row
-
-    ordered_ids = [str(item["gear_id"]) for item in tracked]
-    extra_ids = sorted(gear_id for gear_id in updated if gear_id not in ordered_ids)
-    rows = [updated[gear_id] for gear_id in ordered_ids + extra_ids]
-
-    out = pd.DataFrame(rows, columns=GEAR_CSV_COLUMNS)
-    data_dir.mkdir(parents=True, exist_ok=True)
-    out.to_csv(path, index=False)
-    return path
+    return pd.DataFrame(rows, columns=GEAR_COLUMNS)

@@ -1,7 +1,7 @@
 """Activity enrichment: pace, heart-rate, race labels, and week windows."""
 
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 MILE_METERS = 1609.34
 FEET_METERS = 0.3048
-HR_EASY_THRESHOLD = 142
+HR_ZONE_COUNT = 5
 
 PACE_BIN_LABELS = [
     "under_700",
@@ -27,67 +27,81 @@ PACE_BIN_LABELS = [
 
 
 # ========================
-# RUNNING HR THRESHOLD STATS
+# RUNNING HR ZONE STATS
 # ========================
-def compute_hr_easy_stats(
-    hr_stream: Sequence[float],
-    time_stream: Sequence[float],
-    threshold: float = HR_EASY_THRESHOLD,
-) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """Summarize easy versus hard running time from HR and time streams.
+def hr_zone_sec_columns(zone_count: int = HR_ZONE_COUNT) -> List[str]:
+    """Return canonical per-HR-zone time-in-seconds column names."""
+    return [f"hr_zone_{idx}_sec" for idx in range(1, zone_count + 1)]
+
+
+def _empty_hr_zone_stats(zone_count: int = HR_ZONE_COUNT) -> Dict[str, Optional[float]]:
+    """Return null easy/hard and per-zone time-in-seconds fields."""
+    stats: Dict[str, Optional[float]] = {
+        "%_easy": None,
+        "mt_min_easy": None,
+        "mt_min_hard": None,
+    }
+    for column in hr_zone_sec_columns(zone_count):
+        stats[column] = None
+    return stats
+
+
+def compute_hr_zone_stats(
+    zones: Sequence[Dict[str, Any]],
+    zone_count: int = HR_ZONE_COUNT,
+) -> Dict[str, Optional[float]]:
+    """Summarize easy/hard time and per-zone seconds from Strava zones.
 
     Parameters
     ----------
-    hr_stream : sequence of float
-        Heart-rate values for the activity.
-    time_stream : sequence of float
-        Time values aligned to the heart-rate stream.
-    threshold : float, optional
-        Heart rates strictly below this value are treated as easy; values at or
-        above it are hard.
+    zones : sequence of dict
+        Activity zone objects from ``GET /activities/{id}/zones``. Only the
+        ``type == "heartrate"`` object is used; pace/power zones are ignored.
+    zone_count : int, optional
+        Number of ``hr_zone_N_sec`` columns to emit (padded with ``None`` when
+        fewer buckets are present). Defaults to 5.
 
     Returns
     -------
-    tuple
-        A tuple of percentage easy time, easy minutes, and hard minutes.
+    dict
+        ``%_easy``, ``mt_min_easy``, ``mt_min_hard``, and ``hr_zone_1_sec`` …
+        ``hr_zone_{zone_count}_sec``. Values are ``None`` when heartrate zones
+        are missing or total bucket time is zero.
 
-    The helper estimates the share of elapsed time spent below the easy HR
-    threshold and returns the equivalent minutes for easy and hard segments.
+    Easy time is the sum of the first two heartrate distribution buckets;
+    moderate/hard is the sum of the remaining buckets. Easy/hard percentages
+    use the sum of all bucket ``time`` values (seconds) as the denominator.
+    Per-zone columns store those bucket ``time`` values as-is.
     """
-    hr_array = np.array(hr_stream, dtype=float)
-    time_array = np.array(time_stream, dtype=float)
+    empty = _empty_hr_zone_stats(zone_count)
+    hr_section = next((section for section in zones if section.get("type") == "heartrate"), None)
+    if hr_section is None:
+        return empty
 
-    if len(hr_array) == 0 or len(time_array) == 0:
-        return None, None, None
+    buckets = hr_section.get("distribution_buckets") or []
+    if not buckets:
+        return empty
 
-    if len(hr_array) != len(time_array):
-        # Trim to the shared length so the arrays stay aligned.
-        min_len = min(len(hr_array), len(time_array))
-        hr_array = hr_array[:min_len]
-        time_array = time_array[:min_len]
-
-    # Keep only samples where both HR and time are finite (drop NaN/inf gaps).
-    valid_mask = np.isfinite(hr_array) & np.isfinite(time_array)
-    if not np.any(valid_mask):
-        return None, None, None
-
-    # Convert the time stream into elapsed durations between consecutive samples.
-    durations = np.diff(np.r_[0, time_array[valid_mask]])
-    hr_valid = hr_array[valid_mask]
-
-    total_duration_s = np.sum(durations)
+    times = [float(bucket.get("time") or 0.0) for bucket in buckets]
+    total_duration_s = float(sum(times))
     if total_duration_s <= 0:
-        return None, None, None
+        return empty
 
-    easy_mask = hr_valid < threshold
-    easy_duration_s = np.sum(durations[easy_mask])
-    hard_duration_s = np.sum(durations[~easy_mask])
+    easy_duration_s = float(sum(times[:2]))
+    hard_duration_s = float(sum(times[2:]))
 
-    pct_easy = round((easy_duration_s / total_duration_s) * 100, 1)
-    mt_min_easy = round(easy_duration_s / 60, 1)
-    mt_min_hard = round(hard_duration_s / 60, 1)
-
-    return pct_easy, mt_min_easy, mt_min_hard
+    stats: Dict[str, Optional[float]] = {
+        "%_easy": round((easy_duration_s / total_duration_s) * 100, 1),
+        "mt_min_easy": round(easy_duration_s / 60, 1),
+        "mt_min_hard": round(hard_duration_s / 60, 1),
+    }
+    for idx in range(zone_count):
+        column = f"hr_zone_{idx + 1}_sec"
+        if idx < len(times):
+            stats[column] = times[idx]
+        else:
+            stats[column] = None
+    return stats
 
 
 # ========================
@@ -278,6 +292,24 @@ def compute_run_pace_summary_from_streams(
     return summary
 
 
+def extract_gear_id(act: Mapping[str, Any]) -> str:
+    """Return the Strava gear id from a summary or detail activity payload.
+
+    Prefers the summary ``gear_id`` field (avoids N+1 detail fetches). Falls
+    back to nested ``gear.id`` when present (detail responses).
+    """
+    gear_id = act.get("gear_id")
+    if gear_id is not None and str(gear_id).strip():
+        return str(gear_id).strip()
+
+    gear = act.get("gear")
+    if isinstance(gear, Mapping):
+        nested = gear.get("id")
+        if nested is not None and str(nested).strip():
+            return str(nested).strip()
+    return ""
+
+
 def _activity_base_row(act: Dict[str, Any]) -> Dict[str, Any]:
     """Build the shared activity row fields from a raw Strava activity payload."""
     avg_pace_sec = speed_to_pace_seconds(act["average_speed"])
@@ -286,6 +318,7 @@ def _activity_base_row(act: Dict[str, Any]) -> Dict[str, Any]:
         "activity_id": act["id"],
         "name": act["name"],
         "type": act["type"],
+        "gear_id": extract_gear_id(act),
         "date": act["start_date"],
         "distance_miles": round(act["distance"] / MILE_METERS, 2),
         "moving_time_min": format_time(act["moving_time"], include_hours=True),
@@ -303,21 +336,22 @@ def _enrich_run_from_streams(
     row: Dict[str, Any],
     activity_id: Any,
     get_streams: Callable[[Union[int, str], Sequence[str]], Dict[str, Any]],
+    get_activity_zones: Callable[[Union[int, str]], Sequence[Dict[str, Any]]],
 ) -> Optional[Dict[str, Any]]:
-    """Enrich a run row with HR stats and return an optional pace summary."""
+    """Enrich a run row with HR stats/zones and return an optional pace summary."""
     streams = get_streams(activity_id, ["heartrate", "distance", "time"])
     hr_stream = streams.get("heartrate", {}).get("data", [])
     distance_stream = streams.get("distance", {}).get("data", [])
     time_stream = streams.get("time", {}).get("data", [])
 
-    if hr_stream and time_stream:
-        pct_easy, mt_min_easy, mt_min_hard = compute_hr_easy_stats(hr_stream, time_stream)
-        if pct_easy is not None:
-            row["%_easy"] = pct_easy
-            row["mt_min_easy"] = mt_min_easy
-            row["mt_min_hard"] = mt_min_hard
+    if hr_stream:
         row["avg_hr"] = round(float(np.mean(hr_stream)), 1)
         row["max_hr"] = int(np.max(hr_stream))
+
+    zone_stats = compute_hr_zone_stats(get_activity_zones(activity_id))
+    for key, value in zone_stats.items():
+        if value is not None:
+            row[key] = value
 
     if distance_stream and time_stream and hr_stream:
         return compute_run_pace_summary_from_streams(
@@ -330,6 +364,7 @@ def process_activities(
     activities: Sequence[Dict[str, Any]],
     get_streams: Callable[[Union[int, str], Sequence[str]], Dict[str, Any]],
     last_activity_id: str,
+    get_activity_zones: Callable[[Union[int, str]], Sequence[Dict[str, Any]]],
 ) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
     """Process Strava activities into enriched rows and run pace summaries.
 
@@ -341,12 +376,15 @@ def process_activities(
         Function used to fetch activity streams, typically ``StravaClient.get_streams``.
     last_activity_id : str
         Activities with an ID at or below this value are skipped.
+    get_activity_zones : callable
+        Function used to fetch activity zones, typically
+        ``StravaClient.get_activity_zones``.
 
     Returns
     -------
     tuple
         A dataframe of enriched activity rows and a list of run pace summaries.
-        Streams are fetched once per run and reused for both outputs.
+        Streams and zones are fetched once per new run and reused for outputs.
     """
     rows = []
     pace_summaries = []
@@ -361,10 +399,12 @@ def process_activities(
             is_race = act["workout_type"] == 1
             row["race"] = is_race
             row["race_distance"] = race_distance_label(row["distance_miles"], is_race)
-            summary = _enrich_run_from_streams(row, activity_id, get_streams)
+            summary = _enrich_run_from_streams(
+                row, activity_id, get_streams, get_activity_zones
+            )
             if summary is not None:
                 pace_summaries.append(summary)
-            time.sleep(1)  # avoid rate limit after stream fetch
+            time.sleep(1)  # avoid rate limit after stream/zones fetches
 
         rows.append(row)
 

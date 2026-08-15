@@ -1,4 +1,18 @@
 [client]
-# Minimal toolbar; sidebar nav must stay enabled for st.navigation(position="sidebar").
+# Minimal toolbar. Page list is drawn with st.page_link (st.navigation position="hidden").
 toolbarMode = "minimal"
 showSidebarNavigation = true
+runOnSave = true
+
+# Force light widget chrome. Streamlit 1.61 selectboxes use theme.secondaryBg;
+# a dark OS/theme makes them black against this app's light GLOBAL_CSS page.
+# primaryColor drives multiselect selected tags (default Streamlit red).
+[theme]
+base = "light"
+primaryColor = "#509B8F"
+backgroundColor = "#E8EEF2"
+secondaryBackgroundColor = "#FFFFFF"
+# Glide paints header + row-selection (checkbox) from this, not only CSS vars.
+# Keep transparent so Race History matches body cells / page wash.
+dataframeHeaderBackgroundColor = "transparent"
+textColor = "#152028"
