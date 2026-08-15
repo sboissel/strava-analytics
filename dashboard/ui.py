@@ -10,15 +10,18 @@ from charts import (
     RACE_EVENTS_TITLE,
     RACE_STRIP_DIAMOND_COLOR,
     RACE_STRIP_SQUARE_COLOR,
+    RACE_TYPE_COLORS,
     HR_ZONE_COLORS,
     aerobic_efficiency_title,
     compliance_title,
     elevation_title,
+    fitness_freshness_title,
     hr_zones_title,
     mileage_title,
     pace_hr_title,
 )
 from data import format_full_date
+from race_data import fastest_races_by_type
 from strava_analytics.activities import format_time
 from theme import (
     TRAFFIC_GREEN,
@@ -31,6 +34,7 @@ from theme import (
     LONGEST_RUN_GAUGE_MAX,
     LONGEST_RUN_GOAL,
     MILES_GAUGE_MAX,
+    MUTED,
     SHOE_MILEAGE_GOAL,
     WEEKLY_MILES_GOAL,
     eh_color,
@@ -104,14 +108,107 @@ def race_weeks_legend_html() -> str:
 
 
 
-def aerobic_efficiency_info_html(title: str) -> str:
-    """Return the chart title plus a right-gutter ⓘ with hover definition.
+def pace_hr_title_html(title: str, subtitle: str) -> str:
+    """Return the Average HR by Pace HTML title row (heading + ⓘ + subtitle).
 
-    Title sits in the Plotly title band; an info icon flush at the start of
-    the shared Fitness right deadspan (plot right edge / gutter left — same
-    ``FITNESS_MARGIN_R`` as Avg HR / HR Zones) shows the definition on hover
-    or focus. The ``.kpi-tooltip`` opens to the right of the icon into the
-    gutter (same pattern as Training/Metrics, different placement).
+    Renders outside Plotly (blank Plotly title) so multi-line copy is not
+    clipped by the SVG viewport. Subtitle is the grain rolling window
+    (e.g. ``4-week rolling average``). The ``.kpi-tooltip`` opens to the
+    right of the ⓘ on hover/focus.
+
+    Parameters
+    ----------
+    title : str
+        Chart heading from ``pace_hr_title``.
+    subtitle : str
+        Rolling-window line from ``pace_hr_trend_subtitle``.
+
+    Returns
+    -------
+    str
+        HTML markup for the title + info + subtitle stack above the chart.
+    """
+    tooltip = (
+        "<strong>Why pace bands</strong>"
+        "Same clock pace with a lower average HR over weeks is a classic "
+        "fitness signal — you are doing comparable work with less cardiac "
+        "cost. Tracking one familiar band strips out &ldquo;I just ran harder&rdquo; noise."
+        "<br><br>"
+        "<strong>Hills</strong>"
+        "Within each pace band we residualize time-weighted HR against activity "
+        "climb density (ft/mi), same idea as aerobic efficiency — not true GAP "
+        "or altitude streams. Bands with fewer than five samples fall back to a "
+        "global HR~ft/mi slope, then raw HR."
+        "<br><br>"
+        "<strong>Comparing bands</strong>"
+        "Pick one or more Pace Range chips in Controls. Each selected band "
+        "gets its own trend line (rolling average for the Show By grain). "
+        "Use a single easy or tempo band to watch fitness over time, or "
+        "several at once to see whether HR improves across intensities together."
+    )
+    return (
+        '<div class="pace-hr-info" role="group" '
+        'aria-label="Average heart rate by pace chart">'
+        '<div class="pace-hr-chart-heading">'
+        '<div class="pace-hr-chart-title-row">'
+        f'<span class="pace-hr-chart-title">{html.escape(title)}</span>'
+        '<span class="kpi-info" tabindex="0" role="button" '
+        'aria-label="About average heart rate by pace">'
+        '<span aria-hidden="true">ⓘ</span>'
+        f'<span class="kpi-tooltip" role="tooltip">{tooltip}</span>'
+        "</span></div>"
+        f'<span class="pace-hr-chart-subtitle">{html.escape(subtitle)}</span>'
+        "</div></div>"
+    )
+
+
+def fitness_freshness_info_html(title: str) -> str:
+    """Return the Fitness & Freshness title with an inline ⓘ definition.
+
+    Title and info icon sit together in the Plotly title band (blank Plotly
+    title). The ``.kpi-tooltip`` opens to the right of the icon on hover/focus.
+
+    Parameters
+    ----------
+    title : str
+        Chart heading (e.g. ``Weekly Fitness & Freshness``).
+
+    Returns
+    -------
+    str
+        HTML markup for the inline title + ``.kpi-info`` tooltip row.
+    """
+    tooltip = (
+        "<strong>Definition</strong>"
+        "Fitness (chronic load), Fatigue (acute load), and Form (Fitness − Fatigue), "
+        "in the spirit of Strava Fitness &amp; Freshness / TrainingPeaks CTL·ATL·TSB."
+        "<br><br>"
+        "<strong>Daily load</strong>"
+        "Edwards TRIMP from run HR zones: minutes in zone × zone number (1–5), "
+        "summed per day. Not official Strava Relative Effort / Suffer Score."
+        "<br><br>"
+        "<strong>Curves</strong>"
+        "Fitness = 42-day Banister EMA of daily load; Fatigue = 7-day EMA; "
+        "Form = Fitness − Fatigue. Each point is the value on the last day of "
+        "the Show By period."
+    )
+    return (
+        '<div class="fitness-freshness-info" role="group" '
+        'aria-label="Fitness and freshness chart info">'
+        f'<span class="fitness-freshness-chart-title">{title}</span>'
+        '<span class="kpi-info" tabindex="0" role="button" '
+        'aria-label="About fitness and freshness">'
+        '<span aria-hidden="true">ⓘ</span>'
+        f'<span class="kpi-tooltip" role="tooltip">{tooltip}</span>'
+        "</span></div>"
+    )
+
+
+def aerobic_efficiency_info_html(title: str) -> str:
+    """Return the chart title with an inline ⓘ hover definition.
+
+    Title and info icon sit together in the Plotly title band (blank Plotly
+    title). The ``.kpi-tooltip`` opens to the right of the icon on hover/focus.
 
     Parameters
     ----------
@@ -121,7 +218,7 @@ def aerobic_efficiency_info_html(title: str) -> str:
     Returns
     -------
     str
-        HTML markup for the title and right-gutter ``.kpi-info`` tooltip.
+        HTML markup for the inline title + ``.kpi-info`` tooltip row.
     """
     tooltip = (
         "<strong>Definition</strong>"
@@ -141,6 +238,50 @@ def aerobic_efficiency_info_html(title: str) -> str:
         f'<span class="aerobic-efficiency-chart-title">{title}</span>'
         '<span class="kpi-info" tabindex="0" role="button" '
         'aria-label="About aerobic efficiency">'
+        '<span aria-hidden="true">ⓘ</span>'
+        f'<span class="kpi-tooltip" role="tooltip">{tooltip}</span>'
+        "</span></div>"
+    )
+
+
+def compliance_info_html(title: str) -> str:
+    """Return the 80:20 compliance title with an inline ⓘ definition.
+
+    Title and info icon sit together in the Plotly title band (blank Plotly
+    title). The ``.kpi-tooltip`` opens to the right of the icon on hover/focus.
+
+    Parameters
+    ----------
+    title : str
+        Chart heading (e.g. ``Weekly 80:20 Compliance``).
+
+    Returns
+    -------
+    str
+        HTML markup for the inline title + ``.kpi-info`` tooltip row.
+    """
+    tooltip = (
+        "<strong>What is 80:20</strong>"
+        "Polarized training aims for roughly 80% of mileage easy and 20% "
+        "moderate/hard (the goal line on the chart)."
+        "<br><br>"
+        "<strong>Easy vs Moderate/Hard</strong>"
+        "From Strava heartrate zones: Zones 1–2 count as easy; the remaining "
+        "buckets (typically Zones 3–5) are Moderate/Hard. Per run, "
+        "<code>%_easy</code> is easy zone time ÷ all zone time."
+        "<br><br>"
+        "<strong>Bar percentages</strong>"
+        "For each run with HR-zone data, easy miles = distance × "
+        "(<code>%_easy</code> ÷ 100); the rest of that distance is hard miles. "
+        "Each bar is the share of those summed miles in the Show By period "
+        "(runs without HR zones are omitted from the %)."
+    )
+    return (
+        '<div class="compliance-info" role="group" '
+        'aria-label="80:20 compliance chart info">'
+        f'<span class="compliance-chart-title">{html.escape(title)}</span>'
+        '<span class="kpi-info" tabindex="0" role="button" '
+        'aria-label="About 80:20 compliance">'
         '<span aria-hidden="true">ⓘ</span>'
         f'<span class="kpi-tooltip" role="tooltip">{tooltip}</span>'
         "</span></div>"
@@ -207,12 +348,13 @@ def _hr_zone_duration_label(seconds: float | None) -> str:
 def hr_zones_last_week_pie_html(
     last_week_zones: Mapping[str, object] | None,
 ) -> str:
-    """Return a last-full-week HR-zone donut for the Fitness right gutter.
+    """Return a last-full-week HR-zone donut for the Training right gutter.
 
     Positioned under the Plotly Zone legend in the shared ``FITNESS_MARGIN_R``
-    deadspan so it sits beside the stacked area chart, not below it. Each zone
-    wedge is an SVG path with a ``.kpi-tooltip`` on hover/focus showing zone
-    name, percent of HR time, and total duration in that zone.
+    deadspan (same 168px legend column as other charts) so it sits beside the
+    stacked area chart, not below it. Each zone wedge is an SVG path with a
+    ``.kpi-tooltip`` on hover/focus showing zone name, percent of HR time, and
+    total duration in that zone.
 
     Parameters
     ----------
@@ -1016,7 +1158,7 @@ NAV_PAGES: tuple[tuple[str, str, str], ...] = (
     ("metrics", "Metrics", "pages/metrics.py"),
     ("training", "Training", "pages/training.py"),
     ("fitness", "Fitness", "pages/fitness.py"),
-    ("race_results", "Race Results", "pages/race_results.py"),
+    ("performance", "Performance", "pages/performance.py"),
 )
 
 METRICS_SECTIONS: list[tuple[str, str]] = [
@@ -1147,7 +1289,7 @@ def render_insights_section_nav(
         [
             ("chart-pace-hr", pace_hr_title(hr_grain, pace_labels)),
             ("chart-aerobic-efficiency", aerobic_efficiency_title(hr_grain)),
-            ("chart-hr-zones", hr_zones_title(hr_grain)),
+            ("chart-fitness-freshness", fitness_freshness_title(hr_grain)),
         ],
         aria_label="Fitness sections",
         current_page="fitness",
@@ -1182,14 +1324,68 @@ def render_sidebar_section_nav(grain: str) -> None:
             ("chart-compliance", compliance_title(grain)),
             ("chart-mileage", mileage_title(grain)),
             ("chart-elevation", elevation_title(grain)),
+            ("chart-hr-zones", hr_zones_title(grain)),
         ],
         aria_label="Training sections",
         current_page="training",
     )
 
 
+def fastest_race_cards_html(races) -> str:
+    """Render Personal Records cards for each non-``Other`` race type.
+
+    Parameters
+    ----------
+    races :
+        Race dataframe (typically the full loaded set). Cards use the fastest
+        finish time per type via ``fastest_races_by_type``.
+
+    Returns
+    -------
+    str
+        HTML markup for the Personal Records strip, or ``""`` when there are no
+        eligible races.
+    """
+    best = fastest_races_by_type(races)
+    if best.empty:
+        return ""
+
+    cards: list[str] = []
+    for _, row in best.iterrows():
+        race_type = str(row.get("race_type") or "").strip() or "—"
+        accent = RACE_TYPE_COLORS.get(race_type, MUTED)
+        time_label = str(row.get("elapsed_time_min") or "—").strip() or "—"
+        name = str(row.get("name") or "").strip() or "—"
+        date_raw = row.get("date")
+        try:
+            date_label = format_full_date(date_raw) if date_raw is not None else "—"
+        except (TypeError, ValueError):
+            date_label = "—"
+        pace = str(row.get("elapsed_pace") or "—").strip() or "—"
+        cards.append(
+            f'<div class="fastest-race-card" style="--accent:{accent}">'
+            f'<div class="fastest-race-type">{html.escape(race_type)}</div>'
+            f'<div class="fastest-race-time">{html.escape(time_label)}</div>'
+            f'<div class="fastest-race-name" title="{html.escape(name)}">'
+            f"{html.escape(name)}</div>"
+            f'<div class="fastest-race-meta">'
+            f"{html.escape(date_label)}"
+            f'<span class="fastest-race-meta-sep" aria-hidden="true">·</span>'
+            f"{html.escape(pace)} /mi"
+            f"</div>"
+            "</div>"
+        )
+
+    return (
+        '<div class="panel" id="fastest-races">'
+        '<div class="panel-label">Personal Records</div>'
+        f'<div class="fastest-race-grid">{"".join(cards)}</div>'
+        "</div>"
+    )
+
+
 def render_race_section_nav(*, chart_label: str = "Finish Times") -> None:
-    """Render in-page section links for Race Results.
+    """Render in-page section links for Performance.
 
     Parameters
     ----------
@@ -1203,9 +1399,10 @@ def render_race_section_nav(*, chart_label: str = "Finish Times") -> None:
     """
     render_section_nav(
         [
+            ("fastest-races", "Personal Records"),
             ("chart-race-results", chart_label),
             ("race-results-table", "Race History"),
         ],
-        aria_label="Race Results sections",
-        current_page="race_results",
+        aria_label="Performance sections",
+        current_page="performance",
     )

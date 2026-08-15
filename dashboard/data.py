@@ -604,7 +604,7 @@ _RACE_TYPE_PRIORITY = {
 
 
 def _normalize_period_race_type(value: object) -> str:
-    """Return a Race Results type label, defaulting to Other."""
+    """Return a race type label, defaulting to Other."""
     text = str(value).strip() if value is not None and not pd.isna(value) else ""
     return text if text else "Other"
 
@@ -702,7 +702,7 @@ def annotate_race_periods(
 
     A race period is the calendar day, ISO week, month, or year (matching
     ``grain``) that contains a race activity date. Races are the same rows
-    used by Race Results (``race`` is true on run analysis).
+    used by Performance (``race`` is true on run analysis).
 
     When a period contains multiple races, ``race_names`` lists every name
     and ``race_type`` is the primary type: longest ``distance_miles``, with

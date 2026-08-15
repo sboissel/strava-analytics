@@ -9,7 +9,9 @@ import _bootstrap  # noqa: F401
 from charts import (
     PLOTLY_CONFIG,
     compliance_chart,
+    compliance_title,
     elevation_chart,
+    hr_zones_stacked_area_chart,
     mileage_chart,
     mileage_heatmap_chart,
     race_weeks_chart,
@@ -22,9 +24,18 @@ from data import (
     latest_activity_label,
     load_runs,
 )
-from insights_data import mileage_heatmap_matrix
+from insights_data import (
+    aggregate_hr_zones_by_period,
+    last_full_week_hr_zone_shares,
+    mileage_heatmap_matrix,
+)
 from race_data import load_race_results
-from ui import race_weeks_legend_html, render_sidebar_section_nav
+from ui import (
+    compliance_info_html,
+    hr_zones_last_week_pie_html,
+    race_weeks_legend_html,
+    render_sidebar_section_nav,
+)
 
 
 def _race_week_strip(period_metrics, grain: str) -> None:
@@ -42,7 +53,7 @@ def _race_week_strip(period_metrics, grain: str) -> None:
 st.markdown(
     """
     <div class="panel-title">Training</div>
-    <div class="panel-summary">80:20 compliance, mileage, and elevation trends.</div>
+    <div class="panel-summary">80:20 compliance, mileage, elevation, and heart-rate zones.</div>
     """,
     unsafe_allow_html=True,
 )
@@ -87,10 +98,17 @@ render_sidebar_section_nav(grain)
 as_of = runs["date"].max() if not runs.empty else None
 period_metrics = aggregate_period_metrics(runs, grain, as_of=as_of)
 period_metrics = annotate_race_periods(period_metrics, load_race_results(), grain)
+zone_periods = aggregate_hr_zones_by_period(runs, grain, as_of=as_of)
+last_week_zones = last_full_week_hr_zone_shares(runs, as_of=as_of)
 
 st.markdown('<div id="chart-race-weeks" class="page-anchor"></div>', unsafe_allow_html=True)
 _race_week_strip(period_metrics, grain)
 st.markdown('<div id="chart-compliance" class="page-anchor"></div>', unsafe_allow_html=True)
+# Title + inline ⓘ outside the zero-height page-anchor so Streamlit does not clip them.
+st.markdown(
+    compliance_info_html(compliance_title(grain)),
+    unsafe_allow_html=True,
+)
 st.plotly_chart(
     compliance_chart(period_metrics, grain),
     use_container_width=True,
@@ -133,4 +151,16 @@ st.plotly_chart(
     use_container_width=True,
     config=PLOTLY_CONFIG,
     key="training_elevation",
+)
+# HR zone stack last — last-week donut in the shared right gutter under Zone legend.
+st.markdown('<div id="chart-hr-zones" class="page-anchor"></div>', unsafe_allow_html=True)
+st.markdown(
+    hr_zones_last_week_pie_html(last_week_zones),
+    unsafe_allow_html=True,
+)
+st.plotly_chart(
+    hr_zones_stacked_area_chart(zone_periods, grain),
+    use_container_width=True,
+    config=PLOTLY_CONFIG,
+    key="training_hr_zones",
 )

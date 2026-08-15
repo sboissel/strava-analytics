@@ -1,7 +1,8 @@
-"""Pace HR, HR-zone, and aerobic-efficiency data for Fitness, plus mileage heatmaps."""
+"""Pace HR, HR-zone, aerobic-efficiency, and fitness/form/fatigue data for Fitness."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +32,14 @@ from data import (
     window_mask,
     with_period_columns,
 )
+
+# Edwards TRIMP-style zone weights (minutes in zone × zone number).
+ZONE_LOAD_WEIGHTS = (1.0, 2.0, 3.0, 4.0, 5.0)
+# Banister / TrainingPeaks time constants (days) for chronic / acute load.
+FITNESS_TIME_CONSTANT = 42.0
+FATIGUE_TIME_CONSTANT = 7.0
+# Extra history before the chart window so EMAs can warm up.
+FITNESS_EMA_WARMUP_DAYS = 120
 
 HR_ZONE_PCT_COLUMNS = [f"zone_{idx}_pct" for idx in range(1, HR_ZONE_COUNT + 1)]
 
@@ -134,15 +143,23 @@ def _week_tooltip_label(month_key: str, week_idx: int) -> str:
 
 
 def _load_pace_runs_uncached(data_dir: Path) -> pd.DataFrame:
-    """Merge pace-bin seconds/HR with run dates."""
+    """Merge pace-bin seconds/HR with run dates and elevation."""
     path = data_dir / "strava_run_pace_analysis.csv"
     pace = pd.read_csv(path)
-    runs = load_runs(data_dir)[["activity_id", "date"]]
+    run_cols = ["activity_id", "date"]
+    runs_all = load_runs(data_dir)
+    for extra in ("elevation_gain_ft", "distance_miles"):
+        if extra in runs_all.columns:
+            run_cols.append(extra)
+    runs = runs_all[run_cols]
     merged = pace.merge(runs, on="activity_id", how="inner")
     merged["date"] = pd.to_datetime(merged["date"], utc=True, errors="coerce")
     merged = merged.dropna(subset=["date"]).sort_values("date")
     for col in merged.columns:
-        if col.startswith(("seconds_", "avg_hr_")):
+        if col.startswith(("seconds_", "avg_hr_")) or col in (
+            "elevation_gain_ft",
+            "distance_miles",
+        ):
             merged[col] = pd.to_numeric(merged[col], errors="coerce")
     return merged
 
@@ -153,7 +170,7 @@ def _load_pace_runs_cached(csv_mtime: float, runs_mtime: float, data_dir_str: st
 
 
 def load_pace_runs(data_dir: Path = DATA_DIR) -> pd.DataFrame:
-    """Load pace analysis rows merged with activity dates.
+    """Load pace analysis rows merged with activity dates and elevation.
 
     Parameters
     ----------
@@ -164,7 +181,8 @@ def load_pace_runs(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     Returns
     -------
     pandas.DataFrame
-        Pace-bin seconds and average heart-rate columns joined to run dates.
+        Pace-bin seconds and average heart-rate columns joined to run dates,
+        plus ``elevation_gain_ft`` / ``distance_miles`` when present on runs.
 
     Raises
     ------
@@ -178,6 +196,106 @@ def load_pace_runs(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     return _load_pace_runs_cached(pace_mtime, runs_mtime, str(data_dir))
 
 
+def _ols_slope(y, x, *, min_samples: int = 2) -> float | None:
+    """OLS slope of ``y ~ x``, or ``None`` when too few finite points.
+
+    When ``x`` has no variance, returns ``0.0`` (flat climb → no adjustment).
+    """
+    yv = np.asarray(y, dtype=float)
+    xv = np.asarray(x, dtype=float)
+    yv, xv = np.broadcast_arrays(yv, xv)
+    valid = np.isfinite(yv) & np.isfinite(xv)
+    if int(valid.sum()) < int(min_samples):
+        return None
+    xv = xv[valid]
+    yv = yv[valid]
+    if np.allclose(xv, xv[0]):
+        return 0.0
+    slope, _intercept = np.polyfit(xv, yv, 1)
+    return float(slope)
+
+
+def hr_elevation_adjusted(
+    avg_hr,
+    elev_ft_per_mile,
+    *,
+    train_hr=None,
+    train_elev=None,
+    min_samples: int = 2,
+):
+    """Elevation-adjusted HR via OLS of ``avg_hr ~ elev_ft_per_mile``.
+
+    Removes the linear climb-density effect while preserving mean HR in bpm:
+    ``adjusted = hr - slope * (elev - mean elev)``. Slope is estimated on the
+    same pairs, or on ``train_hr`` / ``train_elev`` when provided (global
+    fallback). Fewer than ``min_samples`` finite training points yields the
+    input HR unchanged (raw fallback).
+
+    Parameters
+    ----------
+    avg_hr : array-like
+        Observed average heart rate (bpm).
+    elev_ft_per_mile : array-like
+        Climb density in feet per mile.
+    train_hr, train_elev : array-like, optional
+        Alternate sample used only to estimate slope (e.g. all pace bins).
+    min_samples : int, optional
+        Minimum finite training pairs required to estimate a slope.
+
+    Returns
+    -------
+    numpy.ndarray
+        Elevation-adjusted HR, same shape as ``avg_hr``.
+    """
+    y = np.asarray(avg_hr, dtype=float)
+    x = np.asarray(elev_ft_per_mile, dtype=float)
+    y, x = np.broadcast_arrays(y, x)
+    out = np.array(y, dtype=float, copy=True)
+
+    if train_hr is None:
+        slope = _ols_slope(y, x, min_samples=min_samples)
+    else:
+        slope = _ols_slope(train_hr, train_elev, min_samples=2)
+    if slope is None:
+        return out
+
+    valid = np.isfinite(y) & np.isfinite(x)
+    if not bool(valid.any()):
+        return out
+    x_ref = float(np.mean(x[valid]))
+    out[valid] = y[valid] - slope * (x[valid] - x_ref)
+    return out
+
+
+def _stack_pace_bin_hr_elev(
+    work: pd.DataFrame, elev: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Collect (avg_hr, elev_ft_per_mile) across all pace bins with time in bin."""
+    hrs: list[np.ndarray] = []
+    elevs: list[np.ndarray] = []
+    for col in work.columns:
+        if not col.startswith("avg_hr_"):
+            continue
+        bin_key = col[len("avg_hr_") :]
+        seconds_col = f"seconds_{bin_key}"
+        if seconds_col not in work.columns:
+            continue
+        seconds = pd.to_numeric(work[seconds_col], errors="coerce").fillna(0.0).to_numpy()
+        hr = pd.to_numeric(work[col], errors="coerce").to_numpy(dtype=float)
+        mask = (seconds > 0) & np.isfinite(hr) & np.isfinite(elev)
+        if not bool(mask.any()):
+            continue
+        hrs.append(hr[mask])
+        elevs.append(elev[mask])
+    if not hrs:
+        return np.asarray([], dtype=float), np.asarray([], dtype=float)
+    return np.concatenate(hrs), np.concatenate(elevs)
+
+
+# Prefer within-bin HR~ft/mi OLS only with enough samples; else global slope.
+PACE_HR_ELEV_MIN_BIN_SAMPLES = 5
+
+
 def aggregate_pace_hr_by_period(
     pace_runs: pd.DataFrame,
     grain: PeriodGrain,
@@ -185,12 +303,17 @@ def aggregate_pace_hr_by_period(
     *,
     as_of: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    """Aggregate distance-normalized average HR for a pace bin by period.
+    """Aggregate elevation-adjusted, time-weighted average HR for a pace bin.
+
+    Within the Show By window, bin HR is residualized against activity climb
+    density (ft/mi) when the bin has enough samples; otherwise a global
+    ``avg_hr ~ elev`` slope across bins is used, then raw HR. Period values
+    remain time-weighted averages of the adjusted (or raw) HR.
 
     Parameters
     ----------
     pace_runs : pandas.DataFrame
-        Pace analysis rows merged with activity dates.
+        Pace analysis rows merged with activity dates and elevation.
     grain : PeriodGrain
         Calendar aggregation grain.
     bin_key : str
@@ -201,7 +324,8 @@ def aggregate_pace_hr_by_period(
     Returns
     -------
     pandas.DataFrame
-        One row per period with ``avg_hr`` and an ``in_progress`` flag.
+        One row per period with ``avg_hr`` (elevation-adjusted when possible)
+        and an ``in_progress`` flag.
     """
     seconds_col = f"seconds_{bin_key}"
     hr_col = f"avg_hr_{bin_key}"
@@ -221,8 +345,42 @@ def aggregate_pace_hr_by_period(
     work[seconds_col] = pd.to_numeric(work[seconds_col], errors="coerce").fillna(0.0)
     work[hr_col] = pd.to_numeric(work[hr_col], errors="coerce")
     valid = (work[seconds_col] > 0) & work[hr_col].notna() & np.isfinite(work[hr_col])
+
+    hr_for_weight = work[hr_col].to_numpy(dtype=float)
+    if (
+        valid.any()
+        and "elevation_gain_ft" in work.columns
+        and "distance_miles" in work.columns
+    ):
+        elev = climb_density_ft_per_mile(
+            work["elevation_gain_ft"], work["distance_miles"]
+        )
+        bin_hr = hr_for_weight[valid.to_numpy()]
+        bin_elev = elev[valid.to_numpy()]
+        bin_finite = int((np.isfinite(bin_hr) & np.isfinite(bin_elev)).sum())
+        if bin_finite >= PACE_HR_ELEV_MIN_BIN_SAMPLES:
+            adjusted = hr_elevation_adjusted(
+                bin_hr,
+                bin_elev,
+                min_samples=PACE_HR_ELEV_MIN_BIN_SAMPLES,
+            )
+        else:
+            train_hr, train_elev = _stack_pace_bin_hr_elev(work, elev)
+            adjusted = hr_elevation_adjusted(
+                bin_hr,
+                bin_elev,
+                train_hr=train_hr,
+                train_elev=train_elev,
+            )
+        hr_for_weight = hr_for_weight.copy()
+        hr_for_weight[valid.to_numpy()] = adjusted
+
+    work = work.copy()
+    work["_adj_hr"] = hr_for_weight
     work["_hr_weight"] = 0.0
-    work.loc[valid, "_hr_weight"] = work.loc[valid, hr_col] * work.loc[valid, seconds_col]
+    work.loc[valid, "_hr_weight"] = (
+        work.loc[valid, "_adj_hr"] * work.loc[valid, seconds_col]
+    )
 
     grouped = (
         work.groupby(["_period_key", "_period_label"], as_index=False)
@@ -852,3 +1010,374 @@ def mileage_heatmap_matrix(
     else:
         matrix, y_labels, x_labels, tooltips = _day_month_matrix(runs, as_of=as_of)
     return matrix, y_labels, x_labels, title, tooltips
+
+
+def edwards_zone_load(
+    zone_seconds: pd.DataFrame | Mapping[str, object] | Sequence[float] | None = None,
+    *,
+    weights: Sequence[float] = ZONE_LOAD_WEIGHTS,
+) -> float:
+    """Return Edwards TRIMP-style load from per-zone seconds.
+
+    Load = Σ (minutes in zone_i × weight_i). Default weights are 1…5 for zones
+    1…5. Missing or non-finite zone seconds contribute 0.
+
+    Parameters
+    ----------
+    zone_seconds : dataframe row, mapping, sequence, or None
+        Either a row/mapping with ``hr_zone_1_sec`` … ``hr_zone_5_sec``, or a
+        sequence of five second values.
+    weights : sequence of float, optional
+        Per-zone multipliers (length must match zone count).
+
+    Returns
+    -------
+    float
+        Training-load points for one activity (0 when input is empty/invalid).
+    """
+    if zone_seconds is None:
+        return 0.0
+
+    values: list[float]
+    if isinstance(zone_seconds, pd.Series):
+        cols = hr_zone_sec_columns(len(weights))
+        values = [
+            float(zone_seconds[col])
+            if col in zone_seconds.index and pd.notna(zone_seconds[col])
+            else 0.0
+            for col in cols
+        ]
+    elif isinstance(zone_seconds, Mapping):
+        cols = hr_zone_sec_columns(len(weights))
+        values = []
+        for col in cols:
+            raw = zone_seconds.get(col)
+            try:
+                val = float(raw)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                val = 0.0
+            values.append(0.0 if not np.isfinite(val) else val)
+    else:
+        values = []
+        for raw in list(zone_seconds)[: len(weights)]:
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                val = 0.0
+            values.append(0.0 if not np.isfinite(val) else val)
+        while len(values) < len(weights):
+            values.append(0.0)
+
+    total = 0.0
+    for seconds, weight in zip(values, weights, strict=True):
+        total += (seconds / 60.0) * float(weight)
+    return float(total)
+
+
+def activity_training_load(runs: pd.DataFrame) -> pd.Series:
+    """Compute Edwards zone load for each run row.
+
+    Parameters
+    ----------
+    runs : pandas.DataFrame
+        Run analysis rows with ``hr_zone_1_sec`` … ``hr_zone_5_sec``.
+
+    Returns
+    -------
+    pandas.Series
+        Per-activity load aligned to ``runs.index`` (0 when zones are missing).
+    """
+    if runs.empty:
+        return pd.Series(dtype=float)
+
+    sec_cols = hr_zone_sec_columns()
+    if any(col not in runs.columns for col in sec_cols):
+        return pd.Series(0.0, index=runs.index, dtype=float)
+
+    load = pd.Series(0.0, index=runs.index, dtype=float)
+    for idx, weight in enumerate(ZONE_LOAD_WEIGHTS, start=1):
+        col = f"hr_zone_{idx}_sec"
+        seconds = pd.to_numeric(runs[col], errors="coerce").fillna(0.0)
+        load = load + (seconds / 60.0) * weight
+    return load
+
+
+def banister_ema(daily_load: Sequence[float] | np.ndarray, time_constant: float) -> np.ndarray:
+    """Apply a Banister / TrainingPeaks EMA with the given time constant.
+
+    Uses the recursive form ``EMA_t = EMA_{t-1} + (load_t − EMA_{t-1}) / τ``
+    (equivalent to ``ewm(alpha=1/τ, adjust=False)``), starting from 0.
+
+    Parameters
+    ----------
+    daily_load : sequence of float
+        Daily training-load values (rest days should be 0).
+    time_constant : float
+        EMA time constant in days (e.g. 42 for Fitness, 7 for Fatigue).
+
+    Returns
+    -------
+    numpy.ndarray
+        EMA series of the same length as ``daily_load``.
+
+    Raises
+    ------
+    ValueError
+        If ``time_constant`` is not positive.
+    """
+    if time_constant <= 0:
+        raise ValueError("time_constant must be positive")
+    values = np.asarray(daily_load, dtype=float)
+    if values.size == 0:
+        return values.copy()
+    cleaned = np.where(np.isfinite(values), values, 0.0)
+    # Seed with 0 so the first output is α·load₀ (Banister / TrainingPeaks),
+    # not the raw first observation that pandas ``ewm(adjust=False)`` would use.
+    seeded = np.concatenate([[0.0], cleaned])
+    return (
+        pd.Series(seeded)
+        .ewm(alpha=1.0 / float(time_constant), adjust=False)
+        .mean()
+        .to_numpy(dtype=float)[1:]
+    )
+
+
+def daily_training_load(
+    runs: pd.DataFrame,
+    *,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Sum activity zone load by UTC calendar day, filling rest days with 0.
+
+    Parameters
+    ----------
+    runs : pandas.DataFrame
+        Run analysis rows with ``date`` and HR-zone seconds columns.
+    start : pandas.Timestamp, optional
+        First day of the returned series. Defaults to the earliest activity day.
+    end : pandas.Timestamp, optional
+        Last day of the returned series. Defaults to the latest activity day.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``date`` (UTC midnight) and ``load``. Empty when there is no
+        usable date range.
+    """
+    if runs.empty and start is None and end is None:
+        return pd.DataFrame(columns=["date", "load"])
+
+    end_ts = normalize_utc(end) if end is not None else (
+        reference_end(runs) if not runs.empty else None
+    )
+    if end_ts is None:
+        return pd.DataFrame(columns=["date", "load"])
+
+    if start is not None:
+        start_ts = normalize_utc(start)
+    elif not runs.empty:
+        start_ts = normalize_utc(runs["date"].min())
+    else:
+        start_ts = end_ts
+
+    if start_ts > end_ts:
+        start_ts, end_ts = end_ts, start_ts
+
+    dates = pd.date_range(start=start_ts, end=end_ts, freq="D", tz="UTC")
+    out = pd.DataFrame({"date": dates, "load": 0.0})
+    if runs.empty:
+        return out
+
+    work = runs.copy()
+    work["load"] = activity_training_load(work)
+    work["_day"] = pd.to_datetime(work["date"], utc=True).dt.normalize()
+    daily = work.groupby("_day", as_index=False)["load"].sum()
+    merged = out.merge(daily, left_on="date", right_on="_day", how="left", suffixes=("", "_sum"))
+    merged["load"] = merged["load_sum"].fillna(0.0)
+    return merged[["date", "load"]]
+
+
+def _first_zone_activity_day(runs: pd.DataFrame) -> pd.Timestamp | None:
+    """Return the UTC day of the earliest run with any HR-zone seconds."""
+    if runs.empty:
+        return None
+    sec_cols = hr_zone_sec_columns()
+    if any(col not in runs.columns for col in sec_cols):
+        return None
+    totals = runs[sec_cols].apply(pd.to_numeric, errors="coerce").sum(axis=1, min_count=1)
+    zoned = runs.loc[totals.notna() & (totals > 0)]
+    if zoned.empty:
+        return None
+    return normalize_utc(zoned["date"].min())
+
+
+def fitness_form_fatigue_daily(
+    runs: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp | None = None,
+    warmup_days: int = FITNESS_EMA_WARMUP_DAYS,
+) -> pd.DataFrame:
+    """Build a daily Fitness / Fatigue / Form series from zone load.
+
+    Fitness ≈ chronic load (CTL, τ=42), Fatigue ≈ acute load (ATL, τ=7),
+    Form = Fitness − Fatigue (TSB). Daily load is Edwards TRIMP from HR zones.
+
+    Parameters
+    ----------
+    runs : pandas.DataFrame
+        Run analysis rows.
+    as_of : pandas.Timestamp, optional
+        Last day of the series. Defaults to the latest activity date.
+    warmup_days : int, optional
+        Extra calendar days before the first zoned activity (or first activity)
+        so EMAs can warm up.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``date``, ``load``, ``fitness``, ``fatigue``, ``form``.
+    """
+    end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    if runs.empty:
+        return pd.DataFrame(columns=["date", "load", "fitness", "fatigue", "form"])
+
+    first_zone = _first_zone_activity_day(runs)
+    first = first_zone if first_zone is not None else normalize_utc(runs["date"].min())
+    start = first - pd.Timedelta(days=max(int(warmup_days), 0))
+    daily = daily_training_load(runs, start=start, end=end)
+    if daily.empty:
+        return pd.DataFrame(columns=["date", "load", "fitness", "fatigue", "form"])
+
+    loads = daily["load"].to_numpy(dtype=float)
+    fitness = banister_ema(loads, FITNESS_TIME_CONSTANT)
+    fatigue = banister_ema(loads, FATIGUE_TIME_CONSTANT)
+    daily = daily.copy()
+    daily["fitness"] = fitness
+    daily["fatigue"] = fatigue
+    daily["form"] = fitness - fatigue
+    return daily
+
+
+def _period_end_date(period_key: str, grain: PeriodGrain, as_of: pd.Timestamp) -> pd.Timestamp:
+    """Return the last UTC calendar day of a period, capped at ``as_of``."""
+    as_of = normalize_utc(as_of)
+    if grain == "Day":
+        day = pd.Timestamp(period_key, tz="UTC")
+        return min(day, as_of)
+    if grain == "Week":
+        year_str, week_str = period_key.split("-")
+        monday = pd.Timestamp.fromisocalendar(
+            int(year_str), int(week_str), 1
+        ).tz_localize("UTC")
+        sunday = monday + pd.Timedelta(days=6)
+        return min(sunday, as_of)
+    if grain == "Month":
+        start = pd.Timestamp(f"{period_key}-01", tz="UTC")
+        month_end = (start + pd.offsets.MonthBegin(1)) - pd.Timedelta(days=1)
+        return min(normalize_utc(month_end), as_of)
+    year_end = pd.Timestamp(f"{period_key}-12-31", tz="UTC")
+    return min(year_end, as_of)
+
+
+def _empty_fitness_form_fatigue_periods(
+    full_index: pd.DataFrame, current_key: str
+) -> pd.DataFrame:
+    """Return the period index with NaN Fitness/Fatigue/Form values."""
+    out = full_index.copy()
+    out["fitness"] = np.nan
+    out["fatigue"] = np.nan
+    out["form"] = np.nan
+    out["load"] = np.nan
+    out["in_progress"] = out["period_key"] == current_key
+    return out[
+        [
+            "period_key",
+            "period_label",
+            "period_tooltip",
+            "fitness",
+            "fatigue",
+            "form",
+            "load",
+            "in_progress",
+        ]
+    ]
+
+
+def aggregate_fitness_form_fatigue_by_period(
+    runs: pd.DataFrame,
+    grain: PeriodGrain,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Sample Fitness / Fatigue / Form at each Show By period end.
+
+    Daily Banister series are computed with warmup history, then each period
+    row takes the values on that period's last calendar day (capped at
+    ``as_of``). ``load`` is the sum of daily Edwards load inside the period
+    through that same end date.
+
+    Parameters
+    ----------
+    runs : pandas.DataFrame
+        Run analysis rows with dates and HR-zone seconds.
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    as_of : pandas.Timestamp, optional
+        Reference end date for the period window. Defaults to the latest activity.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per period with ``fitness``, ``fatigue``, ``form``, ``load``,
+        and ``in_progress``.
+    """
+    n = int(PERIOD_CONFIG[grain]["count"])
+    end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    full_index = generate_period_index(grain, end, n)
+    current_key = current_period_key(grain, end)
+
+    if runs.empty:
+        return _empty_fitness_form_fatigue_periods(full_index, current_key)
+
+    daily = fitness_form_fatigue_daily(runs, as_of=end)
+    if daily.empty:
+        return _empty_fitness_form_fatigue_periods(full_index, current_key)
+
+    by_date = daily.set_index("date")
+    # Precompute period membership once (avoids O(periods × history) work).
+    day_periods = with_period_columns(pd.DataFrame({"date": by_date.index}), grain)
+    day_keys = day_periods["_period_key"].to_numpy()
+    load_by_period = (
+        pd.DataFrame({"period_key": day_keys, "load": by_date["load"].to_numpy()})
+        .groupby("period_key", as_index=True)["load"]
+        .sum()
+    )
+
+    rows: list[dict[str, object]] = []
+    for _, period in full_index.iterrows():
+        period_key = str(period["period_key"])
+        sample_day = _period_end_date(period_key, grain, end)
+        if sample_day in by_date.index:
+            point = by_date.loc[sample_day]
+            fitness = float(point["fitness"])
+            fatigue = float(point["fatigue"])
+            form = float(point["form"])
+        else:
+            fitness = fatigue = form = float("nan")
+
+        load_sum = float(load_by_period.get(period_key, 0.0))
+
+        rows.append(
+            {
+                "period_key": period_key,
+                "period_label": period["period_label"],
+                "period_tooltip": period["period_tooltip"],
+                "fitness": fitness,
+                "fatigue": fatigue,
+                "form": form,
+                "load": load_sum,
+                "in_progress": period_key == current_key,
+            }
+        )
+    return pd.DataFrame(rows)

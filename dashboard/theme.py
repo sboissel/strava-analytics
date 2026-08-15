@@ -8,6 +8,8 @@ SURFACE = "#F7FAFC"
 CARD = "#FFFFFF"
 INK = "#152028"
 MUTED = "#5B6B75"
+# Race History Glide cells inherit the page wash (no opaque fill).
+RACE_TABLE_FILL = "transparent"
 # Transparent so Training charts show through the race-week strip.
 RACE_STRIP_BG = "rgba(0,0,0,0)"
 LINE = "#D5DEE5"
@@ -223,16 +225,27 @@ CHART_MILEAGE_MARGIN_TOP = "1.85rem"        # Training: mileage
 CHART_ELEVATION_MARGIN_TOP = "1.85rem"      # Training: elevation
 # Header offset for Training section jumps.
 RACE_STRIP_SCROLL_MARGIN_TOP = "3.75rem"
-# Compact strip width: past the last marker, not into the Training legend column.
+# Compact strip width: past the last marker; matches Training bar-chart right pad.
 RACE_STRIP_END_PAD_PX = 12
-TRAINING_PLOT_MARGIN_R_PX = 168
-CHART_PACE_HR_MARGIN_TOP = "2.75rem"          # Fitness: HR line
-CHART_HR_ZONES_MARGIN_TOP = "1.85rem"         # Fitness: HR zone stack
-CHART_AEROBIC_EFFICIENCY_MARGIN_TOP = "1.85rem"  # Fitness: elevation-adjusted efficiency
-# Shared Fitness right gutter (pace/zone legends + efficiency ⓘ tooltip).
-FITNESS_PLOT_MARGIN_R_PX = TRAINING_PLOT_MARGIN_R_PX
-CHART_RACE_RESULTS_MARGIN_TOP = LAYOUT_GAP      # Race Results: scatter
-CHART_RACE_TABLE_MARGIN_TOP = "0.75rem"         # Race Results: table
+# Training bar charts (race strip / 80:20 / mileage / elevation): slim right pad —
+# 80:20 Easy/Hard key is horizontal under the title, not a side legend.
+TRAINING_PLOT_MARGIN_R_PX = 32
+# Fitness sections share one gap so Avg HR → Aerobic Efficiency → Fitness &
+# Freshness read as one rhythm. Training keeps its own per-chart values.
+FITNESS_SECTION_GAP = "2.75rem"
+CHART_PACE_HR_MARGIN_TOP = FITNESS_SECTION_GAP          # Fitness: HR line
+CHART_HR_ZONES_MARGIN_TOP = "1.85rem"                   # Training: HR zone stack
+CHART_AEROBIC_EFFICIENCY_MARGIN_TOP = FITNESS_SECTION_GAP  # Fitness: efficiency
+CHART_FITNESS_FRESHNESS_MARGIN_TOP = FITNESS_SECTION_GAP   # Fitness: Fitness & Freshness
+# Fitness (+ Training HR Zones) right gutter: pace/zone legends + last-week pie.
+FITNESS_PLOT_MARGIN_R_PX = 168
+FITNESS_PLOT_MARGIN_L_PX = 80
+# Plotly puts the Fitness legends at paper x = 1 + this fraction of plot width.
+FITNESS_LEGEND_GUTTER_X_FRAC = 0.02
+CHART_RACE_RESULTS_MARGIN_TOP = LAYOUT_GAP      # Performance: scatter (or PB strip)
+CHART_RACE_PB_TO_SCATTER_GAP = "2.75rem"        # Performance: Personal Records → chart title
+CHART_RACE_TABLE_MARGIN_TOP = "0.75rem"         # Performance: table section (above title)
+CHART_RACE_TABLE_TITLE_GAP = "0.75rem"          # Performance: Race History title → table
 # Subtle athletic purple for Total Elevation achievement badge.
 ELEVATION_PURPLE = "#6F5F8D"
 
@@ -249,14 +262,18 @@ GLOBAL_CSS = f"""
     --race-strip-scroll-margin-top: {RACE_STRIP_SCROLL_MARGIN_TOP};
     --training-plot-margin-l: 78px;
     --training-plot-margin-r: {TRAINING_PLOT_MARGIN_R_PX}px;
+    --fitness-plot-margin-l: {FITNESS_PLOT_MARGIN_L_PX}px;
     --fitness-plot-margin-r: {FITNESS_PLOT_MARGIN_R_PX}px;
     --race-strip-end-pad: {RACE_STRIP_END_PAD_PX}px;
     --race-strip-bg: {RACE_STRIP_BG};
     --chart-pace-hr-margin-top: {CHART_PACE_HR_MARGIN_TOP};
     --chart-hr-zones-margin-top: {CHART_HR_ZONES_MARGIN_TOP};
     --chart-aerobic-efficiency-margin-top: {CHART_AEROBIC_EFFICIENCY_MARGIN_TOP};
+    --chart-fitness-freshness-margin-top: {CHART_FITNESS_FRESHNESS_MARGIN_TOP};
     --chart-race-results-margin-top: {CHART_RACE_RESULTS_MARGIN_TOP};
+    --chart-race-pb-to-scatter-gap: {CHART_RACE_PB_TO_SCATTER_GAP};
     --chart-race-table-margin-top: {CHART_RACE_TABLE_MARGIN_TOP};
+    --chart-race-table-title-gap: {CHART_RACE_TABLE_TITLE_GAP};
     background:
       radial-gradient(1200px 500px at 10% -10%, #d5e6df 0%, transparent 55%),
       radial-gradient(900px 420px at 100% 0%, #d9e3ec 0%, transparent 50%),
@@ -528,6 +545,7 @@ GLOBAL_CSS = f"""
   #chart-pace-hr,
   #chart-hr-zones,
   #chart-aerobic-efficiency,
+  #chart-fitness-freshness,
   #chart-race-results,
   #race-results-table {{
     scroll-margin-top: 1.25rem;
@@ -540,9 +558,10 @@ GLOBAL_CSS = f"""
   #chart-compliance {{
     scroll-margin-top: calc(var(--race-strip-scroll-margin-top) + 4.5rem);
   }}
-  /* Mileage / elevation: strip sits between these anchors and the chart. */
+  /* Mileage / elevation / HR zones: keep race strip in view on section jump. */
   #chart-mileage,
-  #chart-elevation {{
+  #chart-elevation,
+  #chart-hr-zones {{
     scroll-margin-top: var(--race-strip-scroll-margin-top);
   }}
   #key-indicators {{
@@ -646,6 +665,9 @@ GLOBAL_CSS = f"""
     margin-top: var(--layout-gap) !important;
     margin-bottom: 0 !important;
   }}
+  #fastest-races {{
+    scroll-margin-top: 1.25rem;
+  }}
   /* Main page stack: spacing is explicit via --layout-gap (not Streamlit gap). */
   .block-container > div[data-testid="stVerticalBlock"] {{
     gap: 0 !important;
@@ -713,7 +735,8 @@ GLOBAL_CSS = f"""
     width: var(--training-plot-margin-l);
     margin: 0 !important;
     padding: 0 !important;
-    z-index: 3;
+    /* Above compliance HTML title band (z-index 8) so the ⓘ tooltip is readable. */
+    z-index: 12;
     pointer-events: none;
   }}
   .race-week-legend {{
@@ -747,7 +770,10 @@ GLOBAL_CSS = f"""
     top: calc(100% + 0.35rem);
     transform: none;
     width: min(16.5rem, 72vw);
-    z-index: 60;
+    /* Solid white over the 80:20 title band; parent stack is z-index 12. */
+    background: {CARD};
+    background-color: {CARD};
+    z-index: 70;
   }}
   .kpi-tooltip .race-legend-row {{
     display: flex;
@@ -806,9 +832,70 @@ GLOBAL_CSS = f"""
     padding: 0 !important;
   }}
   /* Training charts: top gap on each chart container. */
+  /* 80:20: HTML title + ⓘ sit in the Plotly title band (blank Plotly title);
+     margin-top lives on the info container (Fitness pattern). */
   .st-key-training_compliance {{
-    margin-top: var(--chart-compliance-margin-top) !important;
+    margin-top: 0 !important;
     margin-bottom: 0 !important;
+  }}
+  [data-testid="stElementContainer"]:has(.compliance-info) {{
+    position: relative;
+    z-index: 8;
+    display: block;
+    width: 100%;
+    margin-top: var(--chart-compliance-margin-top) !important;
+    margin-bottom: -2.15rem !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    pointer-events: none;
+  }}
+  [data-testid="stElementContainer"]:has(.compliance-info)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(.compliance-info)
+    [data-testid="stMarkdown"] {{
+    overflow: visible !important;
+    width: 100% !important;
+  }}
+  [data-testid="stElementContainer"]:has(.compliance-info)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }}
+  .compliance-info {{
+    position: relative;
+    top: 0.4rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    max-width: calc(100% - var(--training-plot-margin-r) - 0.75rem);
+    min-height: 1.6rem;
+    z-index: 8;
+    pointer-events: none;
+  }}
+  .compliance-chart-title {{
+    display: inline;
+    font-family: {FONT_BODY};
+    font-size: {CHART_TITLE_SIZE_PX}px;
+    font-weight: {CHART_TITLE_FONT_WEIGHT};
+    color: {INK};
+    line-height: 1.2;
+  }}
+  .compliance-info .kpi-info {{
+    position: relative;
+    flex-shrink: 0;
+    opacity: 0.85;
+    pointer-events: auto;
+    z-index: 9;
+  }}
+  .compliance-info .kpi-tooltip {{
+    /* Open to the right of ⓘ on hover/focus. */
+    left: calc(100% + 0.35rem);
+    right: auto;
+    bottom: auto;
+    top: 0;
+    transform: none;
+    width: min(22rem, 72vw);
+    z-index: 60;
   }}
   .st-key-training_mileage {{
     margin-top: var(--chart-mileage-margin-top) !important;
@@ -853,13 +940,104 @@ GLOBAL_CSS = f"""
     margin-top: var(--chart-elevation-margin-top) !important;
     margin-bottom: 0 !important;
   }}
-  /* Fitness: pace vs HR chart */
-  [data-testid="stElementContainer"]:has(#chart-pace-hr)
-    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+  /* Fitness: Average HR by Pace — HTML title + rolling subtitle outside
+     Plotly (blank Plotly title) so SVG margin clipping cannot cut caps.
+     In-flow + negative margin mirrors AE / F&F title-band overlay. */
+  [data-testid="stElementContainer"]:has(.pace-hr-info) {{
+    position: relative;
+    z-index: 8;
+    display: block;
+    width: 100%;
     margin-top: var(--chart-pace-hr-margin-top) !important;
+    margin-bottom: -2.85rem !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    pointer-events: none;
+  }}
+  [data-testid="stElementContainer"]:has(.pace-hr-info)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(.pace-hr-info)
+    [data-testid="stMarkdown"] {{
+    overflow: visible !important;
+    width: 100% !important;
+  }}
+  [data-testid="stElementContainer"]:has(.pace-hr-info)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: 0 !important;
     margin-bottom: 0 !important;
   }}
-  /* Fitness: HR zone 100% stacked area — last-week donut overlays the shared
+  .pace-hr-info {{
+    position: relative;
+    top: 0.35rem;
+    display: block;
+    max-width: calc(100% - var(--fitness-plot-margin-r) - 0.75rem);
+    min-height: 2.35rem;
+    z-index: 8;
+    pointer-events: none;
+  }}
+  .pace-hr-chart-heading {{
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.12rem;
+  }}
+  .pace-hr-chart-title-row {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    max-width: 100%;
+  }}
+  .pace-hr-chart-title {{
+    display: inline;
+    font-family: {FONT_BODY};
+    font-size: {CHART_TITLE_SIZE_PX}px;
+    font-weight: {CHART_TITLE_FONT_WEIGHT};
+    color: {INK};
+    line-height: 1.2;
+  }}
+  .pace-hr-info .kpi-info {{
+    position: relative;
+    flex-shrink: 0;
+    opacity: 0.85;
+    pointer-events: auto;
+    z-index: 9;
+  }}
+  .pace-hr-info .kpi-tooltip {{
+    /* Open to the right of ⓘ on hover/focus. */
+    left: calc(100% + 0.35rem);
+    right: auto;
+    bottom: auto;
+    top: 0;
+    transform: none;
+    width: min(20rem, 72vw);
+    z-index: 60;
+  }}
+  .pace-hr-chart-subtitle {{
+    display: block;
+    font-family: {FONT_BODY};
+    font-size: 12px;
+    font-weight: 400;
+    color: {MUTED};
+    line-height: 1.25;
+  }}
+  /* Avg HR by Pace: unified hover has no Plotly API to drop the trace color
+     swatch (legend line/marker). Hide only in this chart's hoverlayer so other
+     Fitness/Training charts keep theirs. Side legend is outside .hoverlayer. */
+  [data-testid="stElementContainer"]:has(.pace-hr-info)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"])
+    .hoverlayer
+    .legendlines,
+  [data-testid="stElementContainer"]:has(.pace-hr-info)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"])
+    .hoverlayer
+    .legendsymbols,
+  [data-testid="stElementContainer"]:has(.pace-hr-info)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"])
+    .hoverlayer
+    .legendfill {{
+    display: none !important;
+  }}
+  /* Training: HR zone 100% stacked area — last-week donut overlays the shared
      right deadspan under the Zone legend (beside the stack, not below it). */
   [data-testid="stElementContainer"]:has(#chart-hr-zones)
     + [data-testid="stElementContainer"]:has(.hr-zones-pie-gutter) {{
@@ -979,12 +1157,10 @@ GLOBAL_CSS = f"""
     line-height: 1.25;
     color: {MUTED};
   }}
-  /* Fitness: aerobic efficiency — HTML title overlays the empty Plotly title
-     band; ⓘ sits flush at the start of the shared right deadspan (plot right
-     edge / gutter left), not centered in FITNESS_MARGIN_R. Hover/focus shows
-     definition via .kpi-tooltip opening to the right of the icon (into / past
-     the gutter, not over the plot). In-flow + negative margin so Streamlit
-     does not clip the overlay (not inside the zero-height page-anchor). */
+  /* Fitness: aerobic efficiency — HTML title + ⓘ inline in the empty Plotly
+     title band. Hover/focus shows definition via .kpi-tooltip opening to the
+     right of the icon. In-flow + negative margin so Streamlit does not clip
+     the overlay (not inside the zero-height page-anchor). */
   [data-testid="stElementContainer"]:has(.aerobic-efficiency-info) {{
     position: relative;
     z-index: 8;
@@ -1010,64 +1186,159 @@ GLOBAL_CSS = f"""
   }}
   .aerobic-efficiency-info {{
     position: relative;
-    width: 100%;
+    top: 0.4rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    max-width: calc(100% - var(--fitness-plot-margin-r) - 0.75rem);
     min-height: 1.6rem;
     z-index: 8;
     pointer-events: none;
   }}
   .aerobic-efficiency-chart-title {{
-    position: relative;
-    top: 0.4rem;
-    display: inline-block;
+    display: inline;
     font-family: {FONT_BODY};
     font-size: {CHART_TITLE_SIZE_PX}px;
     font-weight: {CHART_TITLE_FONT_WEIGHT};
     color: {INK};
     line-height: 1.2;
-    max-width: calc(100% - var(--fitness-plot-margin-r) - 0.75rem);
   }}
   .aerobic-efficiency-info .kpi-info {{
-    position: absolute;
-    top: 0.4rem;
-    /* Left edge of ⓘ = start of right gutter (plot’s right edge). */
-    left: calc(100% - var(--fitness-plot-margin-r));
-    right: auto;
+    position: relative;
+    flex-shrink: 0;
+    opacity: 0.85;
     pointer-events: auto;
     z-index: 9;
   }}
   .aerobic-efficiency-info .kpi-tooltip {{
-    /* Open to the right of ⓘ into/past the gutter — do not cover the plot. */
+    /* Open to the right of ⓘ on hover/focus. */
     left: calc(100% + 0.35rem);
     right: auto;
     bottom: auto;
     top: 0;
     transform: none;
-    /* ~20rem so definition paragraphs are readable (not clipped to gutter). */
     width: min(20rem, 72vw);
     z-index: 60;
   }}
-  /* Race Results: scatter chart */
+  /* Fitness: Fitness & Freshness — HTML title + ⓘ inline in the title band.
+     Tooltip opens to the right of the icon. In-flow + negative margin so
+     Streamlit does not clip the overlay. */
+  [data-testid="stElementContainer"]:has(.fitness-freshness-info) {{
+    position: relative;
+    z-index: 8;
+    display: block;
+    width: 100%;
+    margin-top: var(--chart-fitness-freshness-margin-top) !important;
+    margin-bottom: -2.15rem !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    pointer-events: none;
+  }}
+  [data-testid="stElementContainer"]:has(.fitness-freshness-info)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(.fitness-freshness-info)
+    [data-testid="stMarkdown"] {{
+    overflow: visible !important;
+    width: 100% !important;
+  }}
+  [data-testid="stElementContainer"]:has(.fitness-freshness-info)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }}
+  .fitness-freshness-info {{
+    position: relative;
+    top: 0.4rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    max-width: calc(100% - var(--fitness-plot-margin-r) - 0.75rem);
+    min-height: 1.6rem;
+    z-index: 8;
+    pointer-events: none;
+  }}
+  .fitness-freshness-chart-title {{
+    display: inline;
+    font-family: {FONT_BODY};
+    font-size: {CHART_TITLE_SIZE_PX}px;
+    font-weight: {CHART_TITLE_FONT_WEIGHT};
+    color: {INK};
+    line-height: 1.2;
+  }}
+  .fitness-freshness-info .kpi-info {{
+    position: relative;
+    flex-shrink: 0;
+    opacity: 0.85;
+    pointer-events: auto;
+    z-index: 9;
+  }}
+  .fitness-freshness-info .kpi-tooltip {{
+    /* Open to the right of ⓘ on hover/focus. */
+    left: calc(100% + 0.35rem);
+    right: auto;
+    bottom: auto;
+    top: 0;
+    transform: none;
+    width: min(20rem, 72vw);
+    z-index: 60;
+  }}
+  /* Performance: Personal Records strip above the scatter */
+  [data-testid="stElementContainer"]:has(#fastest-races) {{
+    margin-top: var(--chart-race-results-margin-top) !important;
+    margin-bottom: 0 !important;
+  }}
+  /* Performance: scatter chart — full-bleed like Race History table */
   [data-testid="stElementContainer"]:has(#chart-race-results)
     + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
     margin-top: var(--chart-race-results-margin-top) !important;
     margin-bottom: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }}
-  /* Race Results: table section */
+  /* Personal Records → Finish Times / Pace title: extra air under the card strip. */
+  [data-testid="stElementContainer"]:has(#fastest-races)
+    ~ [data-testid="stElementContainer"]:has(#chart-race-results)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: var(--chart-race-pb-to-scatter-gap) !important;
+  }}
+  [data-testid="stElementContainer"]:has(#chart-race-results)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"])
+    [data-testid="stPlotlyChart"],
+  [data-testid="stElementContainer"]:has(#chart-race-results)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"])
+    .js-plotly-plot,
+  [data-testid="stElementContainer"]:has(#chart-race-results)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"])
+    .plot-container {{
+    width: 100% !important;
+    max-width: 100% !important;
+  }}
+  /* Performance: table section */
   [data-testid="stElementContainer"]:has(#race-results-table)
     + [data-testid="stElementContainer"]:has(.chart-section-title) {{
     margin-top: var(--chart-race-table-margin-top) !important;
   }}
   [data-testid="stElementContainer"]:has(.chart-section-title)
     + [data-testid="stElementContainer"]:has([data-testid="stDataFrame"]) {{
-    margin-top: 0.35rem !important;
+    margin-top: var(--chart-race-table-title-gap) !important;
   }}
   [data-testid="stElementContainer"]:has(.chart-section-title)
     + [data-testid="stElementContainer"]:has([data-testid="stDataFrame"]) [data-testid="stDataFrame"] {{
-    background: rgba(255, 255, 255, 0.82);
+    background: {RACE_TABLE_FILL};
     border: 1px solid rgba(21, 32, 40, 0.06);
     border-radius: 20px;
     box-shadow: 0 10px 30px rgba(21, 32, 40, 0.04);
     overflow: hidden;
+    /* Transparent body, header, and row-marker chrome so the page wash shows
+       through. Streamlit also maps header/checkbox fills from
+       dataframeHeaderBackgroundColor (see .streamlit/config.toml). */
+    --gdg-bg-cell: {RACE_TABLE_FILL};
+    --gdg-bg-cell-medium: {RACE_TABLE_FILL};
+    --gdg-bg-header: {RACE_TABLE_FILL};
+    --gdg-bg-header-has-focus: {RACE_TABLE_FILL};
+    --gdg-bg-header-hovered: {RACE_TABLE_FILL};
+    --gdg-bg-group-header: {RACE_TABLE_FILL};
+    --gdg-bg-group-header-hovered: {RACE_TABLE_FILL};
   }}
 
   .panel {{
@@ -1186,7 +1457,7 @@ GLOBAL_CSS = f"""
     color: {INK} !important;
     -webkit-text-fill-color: {INK} !important;
   }}
-  /* Compact controls panels (Insights + Race Results): narrow selectboxes /
+  /* Compact controls panels (Fitness + Performance): narrow selectboxes /
      multiselects (same 75% width as Show By). */
   [data-testid="stColumn"]:has(.controls-panel--compact) [data-testid="stSelectbox"],
   [data-testid="column"]:has(.controls-panel--compact) [data-testid="stSelectbox"],
@@ -1370,6 +1641,23 @@ GLOBAL_CSS = f"""
   [data-testid="column"]:has(.race-controls-panel) {{
     max-width: 24rem;
   }}
+  /* Fitness Controls: same card language as the rest of the page, tuned so the
+     filter card reads as chrome next to the charts — soft top-lit surface,
+     teal-tinted hairline, and a little more room around the two filter columns. */
+  [data-testid="stColumn"]:has(.insights-controls-panel),
+  [data-testid="column"]:has(.insights-controls-panel) {{
+    background:
+      linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.92) 0%,
+        rgba(247, 250, 252, 0.80) 100%
+      ) !important;
+    border-color: rgba(80, 155, 143, 0.20) !important;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.75),
+      0 10px 30px rgba(21, 32, 40, 0.05) !important;
+    padding: 1.2rem 1.35rem 1.3rem !important;
+  }}
   /* Inner 2-col row: shrink-wrap columns; divider sits in visual whitespace. */
   [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"],
   [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] {{
@@ -1400,7 +1688,7 @@ GLOBAL_CSS = f"""
     width: 75%;
     max-width: 75%;
   }}
-  /* Race Results: side-by-side date pickers */
+  /* Performance: side-by-side date pickers */
   [data-testid="stElementContainer"]:has(.race-date-inputs)
     + [data-testid="stElementContainer"] [data-testid="stHorizontalBlock"] {{
     width: 75% !important;
@@ -2090,6 +2378,61 @@ GLOBAL_CSS = f"""
     text-transform: uppercase;
     color: {MUTED};
     margin-top: 0.35rem;
+  }}
+
+  .fastest-race-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    gap: 0.75rem;
+  }}
+  .fastest-race-card {{
+    background: {CARD};
+    border: 1px solid transparent;
+    border-radius: 16px;
+    padding: 1rem 0.75rem 0.9rem;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }}
+  .fastest-race-card::before {{
+    content: "";
+    position: absolute;
+    inset: 0 5% auto 5%;
+    height: 3px;
+    background: var(--accent, {MILES});
+  }}
+  .fastest-race-type {{
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: {MUTED};
+    margin-bottom: 0.4rem;
+  }}
+  .fastest-race-time {{
+    font-family: {FONT_BODY};
+    font-size: 1.45rem;
+    font-weight: 700;
+    line-height: 1.05;
+    color: var(--accent, {INK});
+  }}
+  .fastest-race-name {{
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: {INK};
+    margin-top: 0.45rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }}
+  .fastest-race-meta {{
+    font-size: 0.7rem;
+    color: {MUTED};
+    margin-top: 0.28rem;
+    line-height: 1.35;
+  }}
+  .fastest-race-meta-sep {{
+    margin: 0 0.28rem;
   }}
 
   /* Selectbox polish — Streamlit 1.61+ dropped BaseWeb select.

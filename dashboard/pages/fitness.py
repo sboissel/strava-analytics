@@ -10,21 +10,24 @@ from charts import (
     PLOTLY_CONFIG,
     aerobic_efficiency_line_chart,
     aerobic_efficiency_title,
-    hr_zones_stacked_area_chart,
+    fitness_form_fatigue_line_chart,
+    fitness_freshness_title,
     pace_hr_line_chart,
+    pace_hr_title,
+    pace_hr_trend_subtitle,
 )
 from data import PERIOD_CONFIG, PeriodGrain, latest_activity_label, load_runs
 from insights_data import (
     aggregate_aerobic_efficiency_by_period,
-    aggregate_hr_zones_by_period,
+    aggregate_fitness_form_fatigue_by_period,
     aggregate_pace_hr_by_period,
-    last_full_week_hr_zone_shares,
     load_pace_runs,
 )
 from pace_bins import DEFAULT_PACE_BIN_KEY, PACE_BIN_OPTIONS
 from ui import (
     aerobic_efficiency_info_html,
-    hr_zones_last_week_pie_html,
+    fitness_freshness_info_html,
+    pace_hr_title_html,
     render_insights_section_nav,
 )
 
@@ -37,7 +40,7 @@ default_idx = pace_keys.index(DEFAULT_PACE_BIN_KEY)
 st.markdown(
     """
     <div class="panel-title">Fitness</div>
-    <div class="panel-summary">Pace-bin heart rate trends, time in HR zones, and elevation-adjusted aerobic efficiency.</div>
+    <div class="panel-summary">Pace-bin heart rate trends, elevation-adjusted aerobic efficiency, and Fitness &amp; Freshness.</div>
     """,
     unsafe_allow_html=True,
 )
@@ -134,12 +137,20 @@ hr_series = [
     (label, aggregate_pace_hr_by_period(pace_runs, grain, key, as_of=as_of))
     for label, key in ordered_bins
 ]
-zone_periods = aggregate_hr_zones_by_period(runs, grain, as_of=as_of)
+freshness_periods = aggregate_fitness_form_fatigue_by_period(runs, grain, as_of=as_of)
 efficiency_periods = aggregate_aerobic_efficiency_by_period(runs, grain, as_of=as_of)
-last_week_zones = last_full_week_hr_zone_shares(runs, as_of=as_of)
 
 st.markdown(
     '<div id="chart-pace-hr" class="page-anchor insights-chart"></div>',
+    unsafe_allow_html=True,
+)
+# Title + rolling-window subtitle outside the zero-height page-anchor and
+# outside Plotly so SVG margin clipping cannot cut the heading/caps.
+st.markdown(
+    pace_hr_title_html(
+        pace_hr_title(grain, [label for label, _ in ordered_bins]),
+        pace_hr_trend_subtitle(grain),
+    ),
     unsafe_allow_html=True,
 )
 st.plotly_chart(
@@ -152,7 +163,7 @@ st.markdown(
     '<div id="chart-aerobic-efficiency" class="page-anchor insights-chart"></div>',
     unsafe_allow_html=True,
 )
-# Title + right-gutter ⓘ tooltip outside the zero-height page-anchor so
+# Title + inline ⓘ tooltip outside the zero-height page-anchor so
 # Streamlit does not clip them.
 st.markdown(
     aerobic_efficiency_info_html(aerobic_efficiency_title(grain)),
@@ -165,17 +176,15 @@ st.plotly_chart(
 )
 
 st.markdown(
-    '<div id="chart-hr-zones" class="page-anchor insights-chart"></div>',
+    '<div id="chart-fitness-freshness" class="page-anchor insights-chart"></div>',
     unsafe_allow_html=True,
 )
-# Last-week donut in the shared right gutter under the Zone legend (not a
-# full-width chart below the stack). Overlay sits beside the Plotly figure.
 st.markdown(
-    hr_zones_last_week_pie_html(last_week_zones),
+    fitness_freshness_info_html(fitness_freshness_title(grain)),
     unsafe_allow_html=True,
 )
 st.plotly_chart(
-    hr_zones_stacked_area_chart(zone_periods, grain),
+    fitness_form_fatigue_line_chart(freshness_periods, grain),
     use_container_width=True,
     config=PLOTLY_CONFIG,
 )

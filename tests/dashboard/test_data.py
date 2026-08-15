@@ -307,7 +307,7 @@ class MetricsSectionNavTests(unittest.TestCase):
             "Metrics",
             "Training",
             "Fitness",
-            "Race Results",
+            "Performance",
         ])
         self.assertNotIn("Inspect", labels)
 
@@ -319,6 +319,7 @@ class MetricsSectionNavTests(unittest.TestCase):
             ("chart-compliance", "Compliance"),
             ("chart-mileage", "Mileage"),
             ("chart-elevation", "Elevation"),
+            ("chart-hr-zones", "Heart Rate Zones"),
         ]
         entries = sidebar_nav_entries("training", sections)
         kinds = [(kind, label) for kind, _, label in entries]
@@ -327,7 +328,7 @@ class MetricsSectionNavTests(unittest.TestCase):
             ("page", "Metrics"),
             ("page", "Training"),
             ("page", "Fitness"),
-            ("page", "Race Results"),
+            ("page", "Performance"),
         ])
         self.assertEqual(
             kinds[page_count:],
@@ -336,6 +337,7 @@ class MetricsSectionNavTests(unittest.TestCase):
                 ("section", "Compliance"),
                 ("section", "Mileage"),
                 ("section", "Elevation"),
+                ("section", "Heart Rate Zones"),
             ],
         )
 
@@ -892,7 +894,7 @@ class PeriodMetricsTests(unittest.TestCase):
 
 
 class AnnotateRacePeriodsTests(unittest.TestCase):
-    """Race periods match Race Results rows (race=true) on the period axis."""
+    """Race periods match Performance race rows (race=true) on the period axis."""
 
     def _periods(self) -> pd.DataFrame:
         from dashboard.data import aggregate_period_metrics

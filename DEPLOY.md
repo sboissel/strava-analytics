@@ -57,6 +57,6 @@ The dashboard can run publicly from the GitHub mirror without Strava API secrets
 2. **Create app** → **From existing repo** → `sboissel/strava-analytics`.
 3. Set **Main file path** to `dashboard/streamlit_app.py`, branch `main`, Python **3.11**.
 4. Leave **Secrets** empty.
-5. Deploy and confirm **Metrics** (default) and **Training** load.
+5. Deploy and confirm **Metrics** (default), **Training**, **Fitness**, and **Performance** load.
 
 Requirements are installed from root [`requirements.txt`](requirements.txt) (includes `streamlit` and `plotly`). After the Sunday GitLab sync and mirror push, Streamlit Cloud redeploys with updated `data/` files.

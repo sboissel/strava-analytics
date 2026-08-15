@@ -10,13 +10,21 @@ from dashboard.data import PERIOD_CONFIG
 from dashboard.insights_data import (
     HEATMAP_MONTH_YEARS,
     HR_ZONE_PCT_COLUMNS,
+    ZONE_LOAD_WEIGHTS,
+    activity_training_load,
     aggregate_aerobic_efficiency_by_period,
+    aggregate_fitness_form_fatigue_by_period,
     aggregate_hr_zones_by_period,
     aggregate_pace_hr_by_period,
+    banister_ema,
     climb_density_ft_per_mile,
+    daily_training_load,
+    edwards_zone_load,
     efficiency_elevation_residuals,
     eligible_aerobic_efficiency_runs,
+    fitness_form_fatigue_daily,
     heatmap_showing_label,
+    hr_elevation_adjusted,
     last_completed_iso_week_monday,
     last_full_week_hr_zone_shares,
     mileage_heatmap_matrix,
@@ -70,6 +78,111 @@ class AggregatePaceHrTests(unittest.TestCase):
         )
         week_row = result.loc[result["period_key"] == "2026-11", "avg_hr"]
         self.assertTrue(np.isnan(float(week_row.iloc[0])))
+
+    def test_elevation_adjustment_equalizes_flat_and_hilly_weeks(self):
+        """Within-bin elev residual pulls flat/hilly weeks toward the same HR."""
+        # Five samples (≥ PACE_HR_ELEV_MIN_BIN_SAMPLES) on a perfect HR~elev line.
+        pace_runs = pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    [
+                        "2026-03-03T08:00:00Z",  # ISO week 2026-10
+                        "2026-03-04T08:00:00Z",
+                        "2026-03-05T08:00:00Z",
+                        "2026-03-10T08:00:00Z",  # ISO week 2026-11
+                        "2026-03-12T08:00:00Z",
+                    ],
+                    utc=True,
+                ),
+                "seconds_800_830": [600.0] * 5,
+                "avg_hr_800_830": [140.0, 145.0, 150.0, 155.0, 160.0],
+                "elevation_gain_ft": [0.0, 100.0, 200.0, 300.0, 400.0],
+                "distance_miles": [5.0] * 5,
+            }
+        )
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        result = aggregate_pace_hr_by_period(
+            pace_runs, "Week", "800_830", as_of=as_of
+        )
+        week_10 = float(result.loc[result["period_key"] == "2026-10", "avg_hr"].iloc[0])
+        week_11 = float(result.loc[result["period_key"] == "2026-11", "avg_hr"].iloc[0])
+        # Raw week means differ (145 vs 157.5); elev adjustment equalizes to ~150.
+        self.assertAlmostEqual(week_10, 150.0, places=4)
+        self.assertAlmostEqual(week_11, 150.0, places=4)
+
+    def test_sparse_bin_uses_global_slope_across_weeks(self):
+        """Fewer than 5 in-bin samples: global HR~elev slope adjusts weeks."""
+        pace_runs = pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    [
+                        "2026-03-03T08:00:00Z",  # week 10 — flat target
+                        "2026-03-10T08:00:00Z",  # week 11 — hilly target
+                        "2026-03-04T08:00:00Z",
+                        "2026-03-05T08:00:00Z",
+                        "2026-03-11T08:00:00Z",
+                        "2026-03-12T08:00:00Z",
+                    ],
+                    utc=True,
+                ),
+                "seconds_800_830": [600.0, 600.0, 0.0, 0.0, 0.0, 0.0],
+                "avg_hr_800_830": [150.0, 150.0, np.nan, np.nan, np.nan, np.nan],
+                # Other bins: HR rises 0.5 bpm per ft/mi (20 bpm / 40 ft/mi).
+                "seconds_730_800": [0.0, 0.0, 600.0, 600.0, 600.0, 600.0],
+                "avg_hr_730_800": [np.nan, np.nan, 140.0, 160.0, 140.0, 160.0],
+                "elevation_gain_ft": [0.0, 200.0, 0.0, 200.0, 0.0, 200.0],
+                "distance_miles": [5.0] * 6,
+            }
+        )
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        result = aggregate_pace_hr_by_period(
+            pace_runs, "Week", "800_830", as_of=as_of
+        )
+        week_10 = float(result.loc[result["period_key"] == "2026-10", "avg_hr"].iloc[0])
+        week_11 = float(result.loc[result["period_key"] == "2026-11", "avg_hr"].iloc[0])
+        # Same raw HR (150); global slope lifts the flat week and lowers the hilly week.
+        self.assertGreater(week_10, 150.0)
+        self.assertLess(week_11, 150.0)
+        self.assertAlmostEqual(week_10 + week_11, 300.0, places=4)
+
+    def test_missing_elevation_keeps_raw_weighted_hr(self):
+        """Without elev columns, aggregation matches the pre-adjustment formula."""
+        pace_runs = self._pace_runs()
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        result = aggregate_pace_hr_by_period(
+            pace_runs, "Week", "800_830", as_of=as_of
+        )
+        expected = (150.0 * 600 + 160.0 * 300) / 900.0
+        week_hr = float(result.loc[result["period_key"] == "2026-11", "avg_hr"].iloc[0])
+        self.assertAlmostEqual(week_hr, expected, places=4)
+
+
+class HrElevationAdjustedTests(unittest.TestCase):
+    """Unit tests for the pace-HR elevation residual helper."""
+
+    def test_perfect_line_preserves_mean_hr(self):
+        """Residuals sum to zero; adjusted series stays at the sample mean."""
+        hr = np.array([140.0, 150.0, 160.0])
+        elev = np.array([0.0, 40.0, 80.0])
+        adjusted = hr_elevation_adjusted(hr, elev)
+        np.testing.assert_allclose(adjusted, [150.0, 150.0, 150.0], atol=1e-8)
+
+    def test_single_point_returns_raw(self):
+        adjusted = hr_elevation_adjusted([150.0], [40.0])
+        self.assertAlmostEqual(float(adjusted[0]), 150.0, places=10)
+
+    def test_global_train_slope_applied_to_target(self):
+        """Sparse target uses slope from train pairs; preserves target mean."""
+        train_hr = np.array([140.0, 160.0])
+        train_elev = np.array([0.0, 80.0])
+        hr = np.array([145.0, 155.0])
+        elev = np.array([0.0, 80.0])
+        adjusted = hr_elevation_adjusted(
+            hr, elev, train_hr=train_hr, train_elev=train_elev
+        )
+        # slope = 20/80 = 0.25; mean elev = 40 → adj = hr - 0.25*(elev-40)
+        np.testing.assert_allclose(adjusted, [155.0, 145.0], atol=1e-8)
+        self.assertAlmostEqual(float(np.mean(adjusted)), 150.0, places=8)
 
 
 class AggregateHrZonesTests(unittest.TestCase):
@@ -568,6 +681,130 @@ class HeatmapShowingLabelTests(unittest.TestCase):
         self.assertEqual(heatmap_showing_label("Month"), "Last 10 years × months")
         self.assertEqual(heatmap_showing_label("Week"), "Last 2 years")
         self.assertEqual(heatmap_showing_label("Day"), "Last 1 year")
+
+
+class EdwardsZoneLoadTests(unittest.TestCase):
+    """Edwards TRIMP-style load from HR-zone seconds."""
+
+    def test_zone_minutes_times_weights(self):
+        """60s in Z1 + 120s in Z3 → 1×1 + 2×3 = 7."""
+        load = edwards_zone_load([60.0, 0.0, 120.0, 0.0, 0.0])
+        self.assertAlmostEqual(load, 7.0, places=6)
+
+    def test_mapping_and_missing_zones_are_zero(self):
+        load = edwards_zone_load(
+            {
+                "hr_zone_1_sec": 600.0,
+                "hr_zone_2_sec": None,
+                "hr_zone_4_sec": 60.0,
+            }
+        )
+        # 10 min × 1 + 1 min × 4
+        self.assertAlmostEqual(load, 14.0, places=6)
+
+    def test_activity_training_load_vectorized(self):
+        runs = pd.DataFrame(
+            {
+                "hr_zone_1_sec": [60.0, 0.0],
+                "hr_zone_2_sec": [0.0, 120.0],
+                "hr_zone_3_sec": [0.0, 0.0],
+                "hr_zone_4_sec": [0.0, 0.0],
+                "hr_zone_5_sec": [0.0, 0.0],
+            }
+        )
+        load = activity_training_load(runs)
+        self.assertAlmostEqual(float(load.iloc[0]), 1.0, places=6)
+        self.assertAlmostEqual(float(load.iloc[1]), 4.0, places=6)
+        self.assertEqual(tuple(ZONE_LOAD_WEIGHTS), (1.0, 2.0, 3.0, 4.0, 5.0))
+
+
+class BanisterEmaTests(unittest.TestCase):
+    """Banister / TrainingPeaks EMA recursion."""
+
+    def test_single_impulse_decays(self):
+        loads = [100.0, 0.0, 0.0]
+        ema = banister_ema(loads, time_constant=2.0)
+        self.assertAlmostEqual(ema[0], 50.0, places=6)
+        self.assertAlmostEqual(ema[1], 25.0, places=6)
+        self.assertAlmostEqual(ema[2], 12.5, places=6)
+
+    def test_rejects_non_positive_tau(self):
+        with self.assertRaises(ValueError):
+            banister_ema([1.0], time_constant=0.0)
+
+
+class FitnessFormFatigueTests(unittest.TestCase):
+    """Daily load → Fitness / Fatigue / Form and period sampling."""
+
+    def _runs(self) -> pd.DataFrame:
+        # Mon–Sun week of Mar 9–15, 2026 with one hard-ish session.
+        return pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    [
+                        "2026-03-09T08:00:00Z",
+                        "2026-03-11T08:00:00Z",
+                        "2026-03-13T08:00:00Z",
+                    ],
+                    utc=True,
+                ),
+                "hr_zone_1_sec": [600.0, 0.0, 300.0],
+                "hr_zone_2_sec": [1800.0, 0.0, 900.0],
+                "hr_zone_3_sec": [0.0, 2400.0, 0.0],
+                "hr_zone_4_sec": [0.0, 600.0, 0.0],
+                "hr_zone_5_sec": [0.0, 0.0, 0.0],
+            }
+        )
+
+    def test_daily_load_fills_rest_days(self):
+        runs = self._runs()
+        daily = daily_training_load(
+            runs,
+            start=pd.Timestamp("2026-03-09", tz="UTC"),
+            end=pd.Timestamp("2026-03-15", tz="UTC"),
+        )
+        self.assertEqual(len(daily), 7)
+        self.assertAlmostEqual(
+            float(daily.loc[daily["date"] == "2026-03-09", "load"].iloc[0]),
+            edwards_zone_load([600.0, 1800.0, 0.0, 0.0, 0.0]),
+            places=4,
+        )
+        rest = daily.loc[daily["date"] == "2026-03-10", "load"].iloc[0]
+        self.assertEqual(float(rest), 0.0)
+
+    def test_form_equals_fitness_minus_fatigue(self):
+        daily = fitness_form_fatigue_daily(
+            self._runs(),
+            as_of=pd.Timestamp("2026-03-15T12:00:00Z"),
+            warmup_days=0,
+        )
+        self.assertFalse(daily.empty)
+        delta = daily["form"] - (daily["fitness"] - daily["fatigue"])
+        self.assertTrue(np.allclose(delta.to_numpy(), 0.0))
+
+    def test_period_aggregation_samples_period_end(self):
+        as_of = pd.Timestamp("2026-03-15T12:00:00Z")
+        daily = fitness_form_fatigue_daily(self._runs(), as_of=as_of, warmup_days=0)
+        periods = aggregate_fitness_form_fatigue_by_period(
+            self._runs(), "Week", as_of=as_of
+        )
+        week = periods.loc[periods["period_key"] == "2026-11"].iloc[0]
+        sunday = pd.Timestamp("2026-03-15", tz="UTC")
+        point = daily.loc[daily["date"] == sunday].iloc[0]
+        self.assertAlmostEqual(float(week["fitness"]), float(point["fitness"]), places=4)
+        self.assertAlmostEqual(float(week["fatigue"]), float(point["fatigue"]), places=4)
+        self.assertAlmostEqual(float(week["form"]), float(point["form"]), places=4)
+        expected_load = float(
+            daily.loc[
+                daily["date"].isin(
+                    pd.to_datetime(
+                        ["2026-03-09", "2026-03-11", "2026-03-13"], utc=True
+                    )
+                ),
+                "load",
+            ].sum()
+        )
+        self.assertAlmostEqual(float(week["load"]), expected_load, places=4)
 
 
 if __name__ == "__main__":

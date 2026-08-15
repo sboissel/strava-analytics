@@ -79,7 +79,14 @@ The `sync` job runs only for scheduled pipelines; the `test` job still runs on n
 
 **Live app:** [https://strava-analytics-sboissel.streamlit.app/](https://strava-analytics-sboissel.streamlit.app/)
 
-A Streamlit app under [`dashboard/`](dashboard) provides four pages: **Metrics** (KPIs and shoe mileage), **Training** (80:20 compliance, mileage, mileage heatmap, and elevation), **Fitness** (pace-bin HR trends, aerobic efficiency, and HR zones), and **Race Results** (finish times, PRs, and race history).
+A Streamlit app under [`dashboard/`](dashboard) provides four pages:
+
+- **Metrics** — achievements, key indicators, shoe mileage
+- **Training** — races strip, 80:20 compliance, mileage (+ heatmap), elevation, HR zones
+- **Fitness** — elevation-adjusted pace-bin HR trends, aerobic efficiency, Fitness & Freshness
+- **Performance** — personal records cards, finish-time/pace scatter, race history
+
+Charts use Show By (Day / Week / Month / Year). Fitness and Training share plot alignment within each page; Performance links race-history row selection to the scatter highlight.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt

@@ -12,4 +12,7 @@ base = "light"
 primaryColor = "#509B8F"
 backgroundColor = "#E8EEF2"
 secondaryBackgroundColor = "#FFFFFF"
+# Glide paints header + row-selection (checkbox) from this, not only CSS vars.
+# Keep transparent so Race History matches body cells / page wash.
+dataframeHeaderBackgroundColor = "transparent"
 textColor = "#152028"

@@ -21,6 +21,9 @@ from theme import (
     CHART_TITLE_FONT_WEIGHT,
     CHART_TITLE_SIZE_PX,
     EASY_TARGET_FRAC,
+    FITNESS_LEGEND_GUTTER_X_FRAC,
+    FITNESS_PLOT_MARGIN_L_PX,
+    FITNESS_PLOT_MARGIN_R_PX,
     FONT_BODY,
     INK,
     MUTED,
@@ -43,10 +46,15 @@ def _plotly_font_family() -> str:
 
 # Locked Training plot box: race-week strip + 80:20 + mileage + elevation share
 # the same left/right margins, category range, and bargap so markers sit on
-# the vertical centerline of each period bar.
+# the vertical centerline of each period bar. Right margin is slim (no side
+# legend). HR Zones keeps a separate Fitness-style L/R box (80/168) for its
+# Zone legend + last-week pie gutter.
 TRAINING_MARGIN_L = 78
 TRAINING_MARGIN_R = TRAINING_PLOT_MARGIN_R_PX
 TRAINING_MARGIN_T = 52
+# Extra top margin on 80:20: HTML title + ⓘ band, then Easy / Moderate/Hard key.
+# Larger than TRAINING_MARGIN_T so the legend clears the overlaid title row.
+COMPLIANCE_MARGIN_T = 96
 TRAINING_BARGAP = 0.28
 TRAINING_OFFSETGROUP = "training-period"
 TRAINING_XAXIS_DOMAIN = [0.0, 1.0]
@@ -101,7 +109,8 @@ HR_ZONE_COLORS = (
 )
 HR_ZONE_STACKGROUP = "hr_zones"
 
-# Bottom margin: angled period labels. Right margin: vertical legend outside plot.
+# Bottom margin: angled period labels. Right margin: slim pad (bar charts) or
+# Fitness/HR Zones legend gutter when those layouts override margin.r.
 CHART_LAYOUT = dict(
     font=dict(family=_plotly_font_family(), color=INK, size=13),
     plot_bgcolor="rgba(0,0,0,0)",
@@ -122,6 +131,30 @@ LEGEND_OUTSIDE_RIGHT = dict(
     font=dict(size=11, color=MUTED),
     itemsizing="constant",
     tracegroupgap=4,
+)
+
+# Fitness legends sit just past the plot (paper x = 1.02).
+LEGEND_FITNESS_GUTTER = dict(
+    LEGEND_OUTSIDE_RIGHT,
+    x=1 + FITNESS_LEGEND_GUTTER_X_FRAC,
+)
+
+# Horizontal Easy / Moderate/Hard key under the HTML title band (not a side legend).
+# y=1.0 (bottom-anchored) keeps the key just above the plot; COMPLIANCE_MARGIN_T
+# clears compliance_info_html above it. traceorder + legendrank keep Easy first
+# (stack still draws Easy at the base).
+LEGEND_UNDER_TITLE = dict(
+    orientation="h",
+    yanchor="bottom",
+    y=1.0,
+    x=0,
+    xanchor="left",
+    bgcolor="rgba(0,0,0,0)",
+    borderwidth=0,
+    font=dict(size=11, color=MUTED),
+    itemsizing="constant",
+    tracegroupgap=16,
+    traceorder="normal",
 )
 
 def _title(text: str) -> dict:
@@ -354,23 +387,48 @@ def _chart_margin(grain: str, label_count: int) -> dict:
 PACE_HR_HEIGHT = 384
 HR_ZONES_HEIGHT = 384
 AEROBIC_EFFICIENCY_HEIGHT = 384
+FITNESS_FRESHNESS_HEIGHT = 384
 RACE_RESULTS_HEIGHT = 410
 
-# Shared Fitness plot box: Average HR, Aerobic Efficiency, and HR Zones share
-# the same L/R margins and x-domain so X axes line up. Shortest width is set by
-# the legend column (pace bins / Zone 1–5); Efficiency matches that right gutter
-# and places an ⓘ tooltip (HTML) in the deadspan instead of a legend.
-FITNESS_MARGIN_L = 80
-FITNESS_MARGIN_R = TRAINING_PLOT_MARGIN_R_PX  # 168 — legend / info deadspan
+# Shared Fitness plot box: Fitness & Freshness, Average HR, and Aerobic
+# Efficiency share the same L/R margins and x-domain so X axes line up.
+# HR Zones (on Training) reuses the same 168px right deadspan for Zone legend
+# + last-week pie. Shortest width is set by the legend column; Efficiency
+# matches that right gutter (title ⓘ is HTML inline, not a side legend).
+FITNESS_MARGIN_L = FITNESS_PLOT_MARGIN_L_PX  # 80 — shared Y title / tick column
+FITNESS_MARGIN_R = FITNESS_PLOT_MARGIN_R_PX  # 168 — legend deadspan
 FITNESS_MARGIN_T = 72
+# Avg HR by Pace heading + rolling subtitle live in HTML (``pace_hr_title_html``);
+# Plotly title is blank so top margin matches AE / F&F (X-axis alignment).
+PACE_HR_MARGIN_T = FITNESS_MARGIN_T
 FITNESS_MARGIN_B = 72
 FITNESS_MARGIN_B_DENSE = 96
 FITNESS_XAXIS_DOMAIN = [0.0, 1.0]
 
+# Fitness & Freshness series (slate / terracotta / teal — not purple-on-white).
+FITNESS_CTL_COLOR = "#2E4552"
+FATIGUE_ATL_COLOR = TRAINING_HARD
+FORM_TSB_COLOR = MILEAGE_BAR
+# Form area fill (tozeroy): translucent so Fitness/Fatigue lines stay readable.
+FORM_TSB_FILL_OPACITY = 0.28
+
+# Trailing rolling mean over Show By periods (Avg HR by Pace trend-only;
+# Aerobic Efficiency dashed companion).
+PACE_HR_TREND_WINDOWS = {
+    "Day": 5,
+    "Week": 4,
+    "Month": 3,
+    "Year": 3,
+}
+PACE_HR_TREND_WINDOW_DEFAULT = 4
+PACE_HR_TREND_LINE_WIDTH = 2
+EFFICIENCY_TREND_LINE_WIDTH = 1.5
+EFFICIENCY_TREND_OPACITY = 0.55
+
 PACE_HR_MARGIN = dict(
     l=FITNESS_MARGIN_L,
     r=FITNESS_MARGIN_R,
-    t=FITNESS_MARGIN_T,
+    t=PACE_HR_MARGIN_T,
     b=FITNESS_MARGIN_B,
     autoexpand=False,
 )
@@ -388,11 +446,24 @@ AEROBIC_EFFICIENCY_MARGIN = dict(
     b=FITNESS_MARGIN_B,
     autoexpand=False,
 )
-RACE_RESULTS_MARGIN = dict(l=66, r=168, t=52, b=72, autoexpand=False)
-PACE_HR_MARGIN_DENSE = dict(
+FITNESS_FRESHNESS_MARGIN = dict(
     l=FITNESS_MARGIN_L,
     r=FITNESS_MARGIN_R,
     t=FITNESS_MARGIN_T,
+    b=FITNESS_MARGIN_B,
+    autoexpand=False,
+)
+# Performance scatter: right gutter only needs short race-type labels
+# ("Marathon", "PR") — not the Fitness 168px legend/info deadspan — so
+# plot + legend span the same overall width as the Race History table.
+RACE_RESULTS_LEGEND_GUTTER_PX = 96
+RACE_RESULTS_MARGIN = dict(
+    l=66, r=RACE_RESULTS_LEGEND_GUTTER_PX, t=52, b=72, autoexpand=False
+)
+PACE_HR_MARGIN_DENSE = dict(
+    l=FITNESS_MARGIN_L,
+    r=FITNESS_MARGIN_R,
+    t=PACE_HR_MARGIN_T,
     b=FITNESS_MARGIN_B_DENSE,
     autoexpand=False,
 )
@@ -410,8 +481,18 @@ AEROBIC_EFFICIENCY_MARGIN_DENSE = dict(
     b=FITNESS_MARGIN_B_DENSE,
     autoexpand=False,
 )
-# Distance from Y tick labels to the rotated "Aerobic Efficiency" title.
-AEROBIC_EFFICIENCY_Y_TITLE_STANDOFF = 32
+FITNESS_FRESHNESS_MARGIN_DENSE = dict(
+    l=FITNESS_MARGIN_L,
+    r=FITNESS_MARGIN_R,
+    t=FITNESS_MARGIN_T,
+    b=FITNESS_MARGIN_B_DENSE,
+    autoexpand=False,
+)
+# Distance from Y tick labels to the rotated axis title. Shared by every
+# Fitness chart so the three stacked Y titles keep the same left rhythm.
+FITNESS_Y_TITLE_STANDOFF = 32
+AEROBIC_EFFICIENCY_Y_TITLE_STANDOFF = FITNESS_Y_TITLE_STANDOFF
+FITNESS_FRESHNESS_Y_TITLE_STANDOFF = FITNESS_Y_TITLE_STANDOFF
 
 
 def _fitness_margin(grain: str, label_count: int, *, dense: dict, normal: dict) -> dict:
@@ -429,12 +510,22 @@ def _pace_hr_margin(grain: str, label_count: int) -> dict:
 
 
 def _aerobic_efficiency_margin(grain: str, label_count: int) -> dict:
-    """Efficiency line: same right gutter as siblings (ⓘ tooltip, not legend)."""
+    """Efficiency line: same right gutter as siblings (no side legend)."""
     return _fitness_margin(
         grain,
         label_count,
         dense=AEROBIC_EFFICIENCY_MARGIN_DENSE,
         normal=AEROBIC_EFFICIENCY_MARGIN,
+    )
+
+
+def _fitness_freshness_margin(grain: str, label_count: int) -> dict:
+    """Fitness & Freshness: right gutter for the series legend."""
+    return _fitness_margin(
+        grain,
+        label_count,
+        dense=FITNESS_FRESHNESS_MARGIN_DENSE,
+        normal=FITNESS_FRESHNESS_MARGIN,
     )
 
 
@@ -584,6 +675,10 @@ def _add_race_week_diamonds(
 def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
     """Build a 100% stacked easy vs hard mileage compliance chart.
 
+    Heading comes from ``compliance_info_html`` (title + inline ⓘ); blank Plotly
+    title plus ``COMPLIANCE_MARGIN_T`` leave room for the Easy / Moderate/Hard
+    key under that HTML title band (no overlap).
+
     Parameters
     ----------
     period_df : pandas.DataFrame
@@ -596,15 +691,14 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
     plotly.graph_objects.Figure
         Stacked bar chart with an 80% easy target line.
     """
-    title = compliance_title(grain)
     fig = go.Figure()
     labels = [] if period_df.empty else period_df["period_label"].tolist()
     if period_df.empty:
         fig.update_layout(
-            title=_title(title),
+            title=_title(""),
             xaxis=_training_xaxis(labels, grain),
             yaxis=_training_yaxis(),
-            **{**CHART_LAYOUT, "margin": _training_margin(grain, 0)},
+            **{**CHART_LAYOUT, "margin": _training_margin(grain, 0, top=COMPLIANCE_MARGIN_T)},
         )
         return fig
 
@@ -624,6 +718,7 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
                 color=TRAINING_EASY,
                 pattern=in_progress_pattern,
             ),
+            legendrank=1,
             customdata=customdata,
             hovertemplate=(
                 "<b>%{customdata[0]}</b>%{customdata[1]}"
@@ -644,6 +739,7 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
                 pattern=in_progress_pattern,
                 cornerradius=5,
             ),
+            legendrank=2,
             customdata=customdata,
             hovertemplate=(
                 "<b>%{customdata[0]}</b>%{customdata[1]}"
@@ -661,9 +757,10 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
         annotation_bgcolor="rgba(255,255,255,0.35)",
     )
     fig.update_layout(
-        title=_title(title),
+        title=_title(""),
         barmode="stack",
-        legend=LEGEND_OUTSIDE_RIGHT,
+        showlegend=True,
+        legend=LEGEND_UNDER_TITLE,
         yaxis=_training_yaxis(
             title=dict(text="Fraction of mileage", font=dict(size=12, color=MUTED)),
             range=[0, 1.08],
@@ -674,7 +771,10 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
         bargap=TRAINING_BARGAP,
         bargroupgap=0,
         hoverlabel=_hoverlabel(),
-        **{**CHART_LAYOUT, "margin": _training_margin(grain, len(labels))},
+        **{
+            **CHART_LAYOUT,
+            "margin": _training_margin(grain, len(labels), top=COMPLIANCE_MARGIN_T),
+        },
     )
     stack_tops = period_df["easy_frac"].fillna(0.0) + period_df["hard_frac"].fillna(0.0)
     _add_race_week_diamonds(fig, period_df, stack_tops)
@@ -795,8 +895,8 @@ def _race_strip_label_gutter() -> dict:
 def _race_strip_compact_bg(n_labels: int) -> dict:
     """Transparent fill from the first through last category slot.
 
-    Ends at the last marker's slot so the Training legend column (right
-    margin) is not covered. Category range stays ``[-0.5, n-0.5]``.
+    Ends at the last marker's slot so the slim Training right margin is not
+    covered. Category range stays ``[-0.5, n-0.5]``.
     """
     return dict(
         type="rect",
@@ -1155,6 +1255,51 @@ def pace_hr_title(grain: str, pace_labels: str | Sequence[str] = ()) -> str:
     return "Average HR by Pace Range"
 
 
+def pace_hr_trend_window(grain: str) -> int:
+    """Return the rolling-mean window (periods) for Avg HR pace trends.
+
+    Windows match the Show By grain so weekly charts use a ~month smooth
+    (4 weeks) while day / month / year stay in a 3–5 period band.
+
+    Parameters
+    ----------
+    grain : str
+        Period grain label (``Day``, ``Week``, ``Month``, ``Year``).
+
+    Returns
+    -------
+    int
+        Trailing window length in calendar periods.
+    """
+    return int(PACE_HR_TREND_WINDOWS.get(grain, PACE_HR_TREND_WINDOW_DEFAULT))
+
+
+def pace_hr_trend_subtitle(grain: str) -> str:
+    """Return the on-chart rolling-window label for Avg HR by Pace.
+
+    Always-visible subtitle copy (not hover-only), e.g. ``4-week rolling
+    average`` when Show By is Week.
+
+    Parameters
+    ----------
+    grain : str
+        Period grain label (``Day``, ``Week``, ``Month``, ``Year``).
+
+    Returns
+    -------
+    str
+        Grain-appropriate trailing-window phrase.
+    """
+    window = pace_hr_trend_window(grain)
+    return f"{window}-{_grain_period_unit(grain)} rolling average"
+
+
+def _pace_hr_rolling_mean(values: pd.Series, window: int) -> pd.Series:
+    """Trailing rolling mean of average HR; early periods use a partial window."""
+    numeric = pd.to_numeric(values, errors="coerce")
+    return numeric.rolling(window=max(int(window), 1), min_periods=1).mean()
+
+
 def heatmap_title(grain: str) -> str:
     """Return the mileage heatmap title for a period grain.
 
@@ -1190,15 +1335,32 @@ def _efficiency_axis_range(residuals: pd.Series) -> tuple[float, float]:
     return y_min, y_max
 
 
+def _grain_period_unit(grain: str) -> str:
+    """Singular period noun for trend hover copy (day / week / …)."""
+    return {
+        "Day": "day",
+        "Week": "week",
+        "Month": "month",
+        "Year": "year",
+    }.get(grain, "period")
+
+
 def pace_hr_line_chart(
     series: Sequence[tuple[str, pd.DataFrame]],
     grain: str,
 ) -> go.Figure:
-    """Build an average heart-rate line chart for selected pace bins.
+    """Build an average heart-rate trend chart for selected pace bins.
 
-    Each series is one Avg HR line. Colors come from a fixed per-bin map on
-    ``PACE_HR_COLORSCALE`` (full list: darker = faster), not from the current
-    selection alone.
+    Each selected pace bin draws one solid trailing rolling-mean trend
+    (no raw Avg HR series) so multi-bin selections stay readable. Window
+    length follows ``pace_hr_trend_window`` for the grain; the same window
+    appears as a muted HTML subtitle via ``pace_hr_title_html`` (Plotly
+    title is blank). Legend labels are the pace-bin names. Hover shows
+    the period (unified x header), that period's Avg HR, and the rolling
+    mean — without the series name.
+
+    Colors come from a fixed per-bin map on ``PACE_HR_COLORSCALE`` (full
+    list: darker = faster), not from the current selection alone.
 
     Parameters
     ----------
@@ -1206,19 +1368,20 @@ def pace_hr_line_chart(
         ``(pace_label, period_df)`` pairs from ``aggregate_pace_hr_by_period``,
         ordered fastest to slowest.
     grain : str
-        Period grain label used for axis formatting.
+        Period grain label used for axis formatting and trend window.
 
     Returns
     -------
     plotly.graph_objects.Figure
-        Multi-trace line chart of average heart rate by calendar period.
+        Multi-trace line chart of smoothed average heart rate by period.
     """
+    # Heading + rolling subtitle come from ``pace_hr_title_html``; keep top
+    # margin so the plot domain matches Aerobic Efficiency / F&F.
     pace_labels = [label for label, _ in series]
-    title = pace_hr_title(grain, pace_labels)
     fig = go.Figure()
     frames = [df for _, df in series if df is not None and not df.empty]
     if not series or not frames:
-        fig.update_layout(title=_title(title), showlegend=False, **CHART_LAYOUT)
+        fig.update_layout(title=_title(""), showlegend=False, **CHART_LAYOUT)
         return fig
 
     axis_df = frames[0]
@@ -1228,25 +1391,46 @@ def pace_hr_line_chart(
 
     colors = pace_hr_series_colors(pace_labels)
     all_hr: list[pd.Series] = []
+    trend_window = pace_hr_trend_window(grain)
+    grain_unit = _grain_period_unit(grain)
+    multi_pace = sum(
+        1
+        for _, period_df in series
+        if period_df is not None
+        and not period_df.empty
+        and "avg_hr" in period_df.columns
+    ) > 1
+    # Unified x header is the period; body is point Avg HR + rolling mean.
+    # Omit Plotly's default series name (namelength=0); pace only when multi-bin.
+    trend_label = f"{trend_window}-{grain_unit} avg"
 
     for (pace_label, period_df), color in zip(series, colors):
         if period_df.empty or "avg_hr" not in period_df.columns:
             continue
-        hr_series = period_df["avg_hr"]
-        all_hr.append(hr_series)
+        avg_hr = period_df["avg_hr"]
+        trend = _pace_hr_rolling_mean(avg_hr, trend_window)
+        all_hr.append(trend)
         trace_tooltips = _period_tooltips(period_df)
         trace_x = trace_tooltips if trace_tooltips else period_df["period_label"].tolist()
-        opacities = _bar_opacities(period_df)
+        pace_suffix = f"<br>{pace_label}" if multi_pace else ""
+        hovertemplate = (
+            f"Avg HR: %{{customdata:.0f}} bpm<br>"
+            f"{trend_label}: %{{y:.0f}} bpm"
+            f"{pace_suffix}"
+            "<extra></extra>"
+        )
         fig.add_trace(
             go.Scatter(
                 x=trace_x,
-                y=_nan_to_none(hr_series),
-                mode="lines+markers",
+                y=_nan_to_none(trend),
+                mode="lines",
                 name=pace_label,
-                line=dict(color=color, width=2),
-                marker=dict(color=color, size=7, opacity=opacities),
+                legendgroup=pace_label,
+                line=dict(color=color, width=PACE_HR_TREND_LINE_WIDTH),
                 connectgaps=False,
-                hovertemplate="Avg HR: %{y:.0f} bpm<extra></extra>",
+                customdata=_nan_to_none(avg_hr),
+                hovertemplate=hovertemplate,
+                hoverlabel=dict(namelength=0),
             )
         )
 
@@ -1257,11 +1441,15 @@ def pace_hr_line_chart(
     y_max = max(y_max, y_min + 10.0)
 
     fig.update_layout(
-        title=_title(title),
+        title=_title(""),
         showlegend=True,
-        legend=LEGEND_OUTSIDE_RIGHT,
+        legend=LEGEND_FITNESS_GUTTER,
         yaxis=dict(
-            title=dict(text="Average HR (bpm)", font=dict(size=12, color=MUTED)),
+            title=dict(
+                text="Average HR (bpm)",
+                font=dict(size=12, color=MUTED),
+                standoff=FITNESS_Y_TITLE_STANDOFF,
+            ),
             range=[y_min, y_max],
             gridcolor="rgba(21, 32, 40, 0.08)",
             zeroline=False,
@@ -1270,7 +1458,7 @@ def pace_hr_line_chart(
         ),
         xaxis=_fitness_xaxis(labels, grain, hover_labels=hover_x or None),
         hovermode="x unified",
-        hoverlabel=_hoverlabel(),
+        hoverlabel={**_hoverlabel(), "namelength": 0},
         **{
             **CHART_LAYOUT,
             "height": PACE_HR_HEIGHT,
@@ -1316,7 +1504,7 @@ def hr_zones_stacked_area_chart(
     Each period's ``zone_1_pct`` … ``zone_5_pct`` already sum to 100 when HR
     data exists. Periods with no zone time use ``None`` so the stack gaps
     instead of drawing a fake 0% band. The last completed Mon–Sun week pie is
-    rendered beside this chart in the Fitness right gutter (see
+    rendered beside this chart in the Training right gutter (see
     ``hr_zones_last_week_pie_html``), under the Zone legend.
 
     Parameters
@@ -1388,7 +1576,7 @@ def hr_zones_stacked_area_chart(
 def aerobic_efficiency_title(grain: str) -> str:
     """Return the aerobic-efficiency chart title for a period grain.
 
-    Elevation adjustment is explained in the Fitness right-gutter panel, not in
+    Elevation adjustment is explained in the Fitness title ⓘ tooltip, not in
     the chart heading or Y-axis title.
 
     Parameters
@@ -1417,25 +1605,29 @@ def _efficiency_hover_number(value: object, spec: str) -> str:
 
 
 def aerobic_efficiency_line_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
-    """Build a line chart of elevation-adjusted aerobic-efficiency residuals.
+    """Build a line + markers + trend chart of elevation-adjusted efficiency residuals.
 
     Y values are OLS residuals of ``efficiency ~ ft/mi`` (mph per bpm).
-    Missing periods use ``None`` so the line gaps instead of drawing zero.
+    Period medians draw as lines+markers; a dashed trailing rolling-mean
+    **Trend** uses the same Show By window as Avg HR by Pace
+    (``pace_hr_trend_window``). Missing periods use ``None`` so the series gaps
+    instead of drawing zero. Legend entries are line-only (visible markers stay
+    on the plot via a hidden ``lines+markers`` trace plus a line legend proxy).
 
     Parameters
     ----------
     period_df : pandas.DataFrame
         Period aggregates from ``aggregate_aerobic_efficiency_by_period``.
     grain : str
-        Period grain label used for axis formatting.
+        Period grain label used for axis formatting and trend window.
 
     Returns
     -------
     plotly.graph_objects.Figure
-        Line chart of median residual by calendar period.
+        Scatter + trend of median residual by calendar period.
     """
-    # Heading comes from ``aerobic_efficiency_info_html`` (title + right-gutter
-    # ⓘ tooltip); keep top margin so the plot domain matches siblings.
+    # Heading comes from ``aerobic_efficiency_info_html`` (title + inline ⓘ);
+    # keep top margin so the plot domain matches siblings.
     fig = go.Figure()
     y_title = dict(
         text="Aerobic Efficiency",
@@ -1487,12 +1679,18 @@ def aerobic_efficiency_line_chart(period_df: pd.DataFrame, grain: str) -> go.Fig
         )
     ]
     opacities = _bar_opacities(period_df)
+    # Plot shows lines+markers; legend uses a line-only proxy (Plotly has no
+    # legend-without-markers for scatter lines+markers). Same pattern as Race
+    # Results PR star legend proxy.
+    ae_legend_group = "Aerobic Efficiency"
     fig.add_trace(
         go.Scatter(
             x=labels,
             y=y_vals,
             mode="lines+markers",
             name="Aerobic Efficiency",
+            legendgroup=ae_legend_group,
+            showlegend=False,
             line=dict(color=ELEVATION_BAR, width=2),
             marker=dict(color=ELEVATION_BAR, size=7, opacity=opacities),
             connectgaps=False,
@@ -1506,10 +1704,49 @@ def aerobic_efficiency_line_chart(period_df: pd.DataFrame, grain: str) -> go.Fig
             ),
         )
     )
-    y_min, y_max = _efficiency_axis_range(residuals)
+    fig.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="lines",
+            name="Aerobic Efficiency",
+            legendgroup=ae_legend_group,
+            showlegend=True,
+            line=dict(color=ELEVATION_BAR, width=2),
+            hoverinfo="skip",
+        )
+    )
+    trend_window = pace_hr_trend_window(grain)
+    grain_unit = _grain_period_unit(grain)
+    trend = _pace_hr_rolling_mean(residuals, trend_window)
+    r, g, b = _hex_to_rgb(ELEVATION_BAR)
+    trend_color = f"rgba({r}, {g}, {b}, {EFFICIENCY_TREND_OPACITY})"
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=_nan_to_none(trend),
+            mode="lines",
+            name="Trend",
+            legendgroup="Trend",
+            showlegend=True,
+            line=dict(
+                color=trend_color,
+                width=EFFICIENCY_TREND_LINE_WIDTH,
+                dash="dash",
+            ),
+            connectgaps=False,
+            hovertemplate=(
+                f"Trend ({trend_window}-{grain_unit} avg): %{{y:.4f}}<extra></extra>"
+            ),
+        )
+    )
+    y_min, y_max = _efficiency_axis_range(
+        pd.concat([residuals, trend], ignore_index=True)
+    )
     fig.update_layout(
         title=_title(""),
-        showlegend=False,
+        showlegend=True,
+        legend=LEGEND_FITNESS_GUTTER,
         yaxis=dict(
             title=y_title,
             range=[y_min, y_max],
@@ -1526,6 +1763,177 @@ def aerobic_efficiency_line_chart(period_df: pd.DataFrame, grain: str) -> go.Fig
             **CHART_LAYOUT,
             "height": AEROBIC_EFFICIENCY_HEIGHT,
             "margin": _aerobic_efficiency_margin(grain, len(labels)),
+        },
+    )
+    return fig
+
+
+def fitness_freshness_title(grain: str) -> str:
+    """Return the Fitness & Freshness chart title for a period grain.
+
+    Parameters
+    ----------
+    grain : str
+        Period grain label.
+
+    Returns
+    -------
+    str
+        Chart title string for the selected grain.
+    """
+    return {
+        "Day": "Daily Fitness & Freshness",
+        "Week": "Weekly Fitness & Freshness",
+        "Month": "Monthly Fitness & Freshness",
+        "Year": "Yearly Fitness & Freshness",
+    }.get(grain, "Fitness & Freshness")
+
+
+def _fitness_freshness_axis_range(
+    fitness: pd.Series, fatigue: pd.Series, form: pd.Series
+) -> tuple[float, float]:
+    """Return a padded Y range covering Fitness, Fatigue, and Form."""
+    frames = [s.dropna() for s in (fitness, fatigue, form) if s is not None]
+    finite = pd.concat(frames, ignore_index=True) if frames else pd.Series(dtype=float)
+    if finite.empty:
+        return -20.0, 60.0
+    y_min = float(finite.min())
+    y_max = float(finite.max())
+    pad = max((y_max - y_min) * 0.12, 5.0)
+    return y_min - pad, y_max + pad
+
+
+def fitness_form_fatigue_line_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
+    """Build Fitness / Fatigue lines and Form area at Show By period ends.
+
+    Heading comes from ``fitness_freshness_info_html`` (title + inline ⓘ);
+    Plotly title stays empty so the plot domain matches Fitness siblings. Form
+    is drawn first as a ``tozeroy`` fill (behind), then Fitness and Fatigue as
+    lines on top; legend order stays Fitness / Fatigue / Form via ``legendrank``.
+
+    Parameters
+    ----------
+    period_df : pandas.DataFrame
+        Period aggregates from ``aggregate_fitness_form_fatigue_by_period``.
+    grain : str
+        Period grain label used for axis formatting.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Fitness and Fatigue lines over a Form shaded area (fill to zero).
+    """
+    fig = go.Figure()
+    y_title = dict(
+        text="Load / balance",
+        font=dict(size=12, color=MUTED),
+        standoff=FITNESS_FRESHNESS_Y_TITLE_STANDOFF,
+    )
+    if period_df.empty:
+        fig.update_layout(title=_title(""), **CHART_LAYOUT)
+        fig.update_layout(
+            yaxis=dict(
+                title=y_title,
+                zeroline=True,
+                zerolinecolor="rgba(21, 32, 40, 0.18)",
+                gridcolor="rgba(21, 32, 40, 0.08)",
+                automargin=False,
+                fixedrange=True,
+            ),
+            xaxis=_fitness_xaxis([], grain),
+            height=FITNESS_FRESHNESS_HEIGHT,
+            margin=_fitness_freshness_margin(grain, 0),
+            showlegend=False,
+        )
+        return fig
+
+    labels = period_df["period_label"].tolist()
+    tooltips = _period_tooltips(period_df)
+    opacities = _bar_opacities(period_df)
+    fitness = period_df["fitness"] if "fitness" in period_df.columns else pd.Series(dtype=float)
+    fatigue = period_df["fatigue"] if "fatigue" in period_df.columns else pd.Series(dtype=float)
+    form = period_df["form"] if "form" in period_df.columns else pd.Series(dtype=float)
+    loads = (
+        period_df["load"]
+        if "load" in period_df.columns
+        else pd.Series(np.nan, index=period_df.index)
+    )
+
+    form_r, form_g, form_b = _hex_to_rgb(FORM_TSB_COLOR)
+    form_fill = f"rgba({form_r}, {form_g}, {form_b}, {FORM_TSB_FILL_OPACITY})"
+    # Form shade first (behind); positive above zero and negative below both fill.
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=_nan_to_none(form),
+            mode="lines+markers",
+            name="Form",
+            line=dict(color=FORM_TSB_COLOR, width=2),
+            marker=dict(color=FORM_TSB_COLOR, size=7, opacity=opacities),
+            fill="tozeroy",
+            fillcolor=form_fill,
+            connectgaps=False,
+            customdata=[[tip] for tip in tooltips],
+            hovertemplate="Form: %{y:.1f}<extra></extra>",
+            legendrank=3,
+        )
+    )
+
+    line_specs = (
+        ("Fitness", fitness, FITNESS_CTL_COLOR, 1),
+        ("Fatigue", fatigue, FATIGUE_ATL_COLOR, 2),
+    )
+    for name, values, color, legendrank in line_specs:
+        if name == "Fitness":
+            customdata = [
+                [tip, _efficiency_hover_number(load, ".1f")]
+                for tip, load in zip(tooltips, loads, strict=True)
+            ]
+            hovertemplate = (
+                "<b>%{customdata[0]}</b><br>"
+                "Fitness: %{y:.1f}<br>"
+                "Period load: %{customdata[1]}"
+                "<extra></extra>"
+            )
+        else:
+            customdata = [[tip] for tip in tooltips]
+            hovertemplate = f"{name}: %{{y:.1f}}<extra></extra>"
+        fig.add_trace(
+            go.Scatter(
+                x=labels,
+                y=_nan_to_none(values),
+                mode="lines+markers",
+                name=name,
+                line=dict(color=color, width=2),
+                marker=dict(color=color, size=7, opacity=opacities),
+                connectgaps=False,
+                customdata=customdata,
+                hovertemplate=hovertemplate,
+                legendrank=legendrank,
+            )
+        )
+
+    y_min, y_max = _fitness_freshness_axis_range(fitness, fatigue, form)
+    fig.update_layout(
+        title=_title(""),
+        showlegend=True,
+        legend=LEGEND_FITNESS_GUTTER,
+        yaxis=dict(
+            title=y_title,
+            range=[y_min, y_max],
+            zeroline=True,
+            zerolinecolor="rgba(21, 32, 40, 0.18)",
+            gridcolor="rgba(21, 32, 40, 0.08)",
+            automargin=False,
+            fixedrange=True,
+        ),
+        xaxis=_fitness_xaxis(labels, grain),
+        hovermode="x unified",
+        hoverlabel=_hoverlabel(),
+        **{
+            **CHART_LAYOUT,
+            "height": FITNESS_FRESHNESS_HEIGHT,
+            "margin": _fitness_freshness_margin(grain, len(labels)),
         },
     )
     return fig
@@ -1657,6 +2065,12 @@ PR_LEGEND_STAR_SIZE = 9
 PR_LEGEND_STAR_LINE_WIDTH = 1
 PR_Y_PAD = 6.0
 PR_PACE_Y_PAD = 0.5
+# Selected race from Race History: larger marker + ink ring on top of type color.
+RACE_HIGHLIGHT_SIZE = 16
+RACE_HIGHLIGHT_PR_SIZE = 18
+RACE_HIGHLIGHT_RING_WIDTH = 2.5
+RACE_DIM_OPACITY = 0.32
+RACE_DEFAULT_OPACITY = 0.92
 
 RaceChartMetric = Literal["time", "pace"]
 
@@ -1751,7 +2165,10 @@ _RACE_PR_HOVER_TEMPLATE = (
 
 
 def race_results_scatter(
-    races: pd.DataFrame, *, metric: RaceChartMetric = "time"
+    races: pd.DataFrame,
+    *,
+    metric: RaceChartMetric = "time",
+    highlight_activity_id: str | int | None = None,
 ) -> go.Figure:
     """Build a race finish-time or pace scatter chart over time.
 
@@ -1761,6 +2178,9 @@ def race_results_scatter(
         Filtered race dataframe with date, type, and metric columns.
     metric : {"time", "pace"}, optional
         Y-axis metric selection. Defaults to ``"time"``.
+    highlight_activity_id : str or int or None, optional
+        When set, emphasize the matching race marker (larger size + ink ring)
+        and dim the other points.
 
     Returns
     -------
@@ -1784,7 +2204,14 @@ def race_results_scatter(
 
     fig = go.Figure()
     if races.empty:
-        fig.update_layout(title=_title(title), **CHART_LAYOUT)
+        fig.update_layout(
+            title=_title(title),
+            **{
+                **CHART_LAYOUT,
+                "height": RACE_RESULTS_HEIGHT,
+                "margin": RACE_RESULTS_MARGIN,
+            },
+        )
         return fig
 
     if metric == "pace":
@@ -1792,8 +2219,27 @@ def race_results_scatter(
 
     work = races.dropna(subset=[y_col]).copy()
     if work.empty:
-        fig.update_layout(title=_title(title), **CHART_LAYOUT)
+        fig.update_layout(
+            title=_title(title),
+            **{
+                **CHART_LAYOUT,
+                "height": RACE_RESULTS_HEIGHT,
+                "margin": RACE_RESULTS_MARGIN,
+            },
+        )
         return fig
+
+    highlight_key = (
+        None if highlight_activity_id is None else str(highlight_activity_id)
+    )
+    if "activity_id" in work.columns:
+        work["_activity_key"] = work["activity_id"].astype(str)
+    else:
+        work["_activity_key"] = ""
+    has_highlight = bool(
+        highlight_key and (work["_activity_key"] == highlight_key).any()
+    )
+    marker_opacity = RACE_DIM_OPACITY if has_highlight else RACE_DEFAULT_OPACITY
 
     y_min = float(work[y_col].min())
     y_max = float(work[y_col].max())
@@ -1816,7 +2262,7 @@ def race_results_scatter(
                     color=RACE_TYPE_COLORS.get(race_type, MUTED),
                     size=9,
                     line=dict(width=0),
-                    opacity=0.92,
+                    opacity=marker_opacity,
                 ),
                 customdata=hover,
                 hovertemplate=_RACE_HOVER_TEMPLATE,
@@ -1843,6 +2289,7 @@ def race_results_scatter(
                     size=PR_STAR_SIZE,
                     color=pr_colors,
                     line=dict(width=0),
+                    opacity=marker_opacity,
                 ),
                 customdata=pr_hover,
                 hovertemplate=_RACE_PR_HOVER_TEMPLATE,
@@ -1863,6 +2310,32 @@ def race_results_scatter(
                 ),
                 showlegend=True,
                 hoverinfo="skip",
+            )
+        )
+
+    if has_highlight:
+        hit = work.loc[work["_activity_key"] == highlight_key].iloc[0]
+        race_type = str(hit.get("race_type", "") or "")
+        is_pr = bool(hit.get("is_pr", False))
+        color = RACE_TYPE_COLORS.get(race_type, MUTED)
+        fig.add_trace(
+            go.Scatter(
+                x=[hit["date"]],
+                y=[hit[y_col]],
+                mode="markers",
+                name="Selected",
+                marker=dict(
+                    symbol="star" if is_pr else "circle",
+                    size=RACE_HIGHLIGHT_PR_SIZE if is_pr else RACE_HIGHLIGHT_SIZE,
+                    color=color,
+                    line=dict(width=RACE_HIGHLIGHT_RING_WIDTH, color=INK),
+                    opacity=1.0,
+                ),
+                customdata=[_race_hover_row(hit, race_type)],
+                hovertemplate=(
+                    _RACE_PR_HOVER_TEMPLATE if is_pr else _RACE_HOVER_TEMPLATE
+                ),
+                showlegend=False,
             )
         )
 
