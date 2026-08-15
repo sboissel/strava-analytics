@@ -1,4 +1,4 @@
-"""Race Results page."""
+"""Performance page."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import _bootstrap  # noqa: F401
 
 from charts import PLOTLY_CONFIG, race_results_scatter
 from race_data import (
+    RACE_TABLE_DISPLAY_COLUMNS,
     filter_race_results,
     load_race_results,
     race_date_bounds,
@@ -16,7 +17,55 @@ from race_data import (
     race_table_rows,
     race_type_options,
 )
-from ui import render_race_section_nav
+from theme import INK, RACE_TABLE_FILL
+from ui import fastest_race_cards_html, render_race_section_nav
+
+RACE_HISTORY_TABLE_KEY = "race_history_table"
+
+
+def _selection_rows(state: object) -> list[int]:
+    """Return selected row indices from a Streamlit dataframe selection state."""
+    if state is None:
+        return []
+    if isinstance(state, dict):
+        selection = state.get("selection") or {}
+        rows = selection.get("rows") if isinstance(selection, dict) else None
+    else:
+        selection = getattr(state, "selection", None)
+        if isinstance(selection, dict):
+            rows = selection.get("rows")
+        else:
+            rows = getattr(selection, "rows", None) if selection is not None else None
+    if not rows:
+        return []
+    return [int(idx) for idx in rows]
+
+
+def _selected_activity_id(table_df: pd.DataFrame) -> str | None:
+    """Map the Race History row selection to a stable ``activity_id``."""
+    if table_df.empty or "activity_id" not in table_df.columns:
+        return None
+    rows = _selection_rows(st.session_state.get(RACE_HISTORY_TABLE_KEY))
+    if not rows:
+        return None
+    idx = rows[0]
+    if idx < 0 or idx >= len(table_df):
+        return None
+    value = table_df.iloc[idx]["activity_id"]
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _style_race_table(table_df: pd.DataFrame):
+    """Keep body cells transparent so the page wash shows through."""
+    return table_df.style.set_properties(
+        **{
+            "background-color": RACE_TABLE_FILL,
+            "color": INK,
+        }
+    )
 
 
 def _render_race_table(table_df: pd.DataFrame) -> None:
@@ -28,10 +77,12 @@ def _render_race_table(table_df: pd.DataFrame) -> None:
         return
 
     st.dataframe(
-        table_df,
+        _style_race_table(table_df),
         use_container_width=True,
         hide_index=True,
+        column_order=RACE_TABLE_DISPLAY_COLUMNS,
         column_config={
+            "activity_id": None,
             "Name": st.column_config.TextColumn("Name"),
             "Date": st.column_config.DateColumn("Date", format="MMMM D, YYYY"),
             "Race Type": st.column_config.TextColumn("Race Type"),
@@ -40,6 +91,9 @@ def _render_race_table(table_df: pd.DataFrame) -> None:
             "Pace": st.column_config.TextColumn("Pace"),
             "PR": st.column_config.TextColumn("PR", width="small"),
         },
+        key=RACE_HISTORY_TABLE_KEY,
+        on_select="rerun",
+        selection_mode="single-row",
     )
 
 
@@ -47,7 +101,7 @@ all_races = load_race_results()
 
 st.markdown(
     """
-    <div class="panel-title">Race Results</div>
+    <div class="panel-title">Performance</div>
     <div class="panel-summary">Finish times, personal records, and race history at a glance.</div>
     """,
     unsafe_allow_html=True,
@@ -159,12 +213,23 @@ with panel_col:
 
 render_race_section_nav(chart_label=chart_label)
 
+table_df = race_table_rows(filtered)
+selected_activity_id = _selected_activity_id(table_df)
+
+cards_html = fastest_race_cards_html(all_races)
+if cards_html:
+    st.markdown(cards_html, unsafe_allow_html=True)
+
 st.markdown(
     '<div id="chart-race-results" class="page-anchor"></div>',
     unsafe_allow_html=True,
 )
 st.plotly_chart(
-    race_results_scatter(filtered, metric=chart_metric),
+    race_results_scatter(
+        filtered,
+        metric=chart_metric,
+        highlight_activity_id=selected_activity_id,
+    ),
     use_container_width=True,
     config=PLOTLY_CONFIG,
 )
@@ -174,4 +239,4 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown('<div class="chart-section-title">Race History</div>', unsafe_allow_html=True)
-_render_race_table(race_table_rows(filtered))
+_render_race_table(table_df)

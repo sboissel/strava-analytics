@@ -12,13 +12,14 @@ Versioning follows [Semantic Versioning](https://semver.org/); see [CHANGELOG.md
 
 The main script in [`src/strava_analytics/pipeline.py`](src/strava_analytics/pipeline.py) refreshes a Strava API token, downloads recent activities, processes each activity, and writes several CSV files into the [data](data) folder:
 
-- [data/strava_run_analysis.csv](data/strava_run_analysis.csv): run-specific enrichment including pace, HR, and easy/hard time metrics
+- [data/strava_run_analysis.csv](data/strava_run_analysis.csv): run-specific enrichment including pace, HR, Strava HR-zone time in seconds (`hr_zone_1_sec`…`hr_zone_5_sec`), easy/hard time metrics (zones 1–2 vs 3+), and `gear_id` for shoe mileage
 - [data/strava_ride_analysis.csv](data/strava_ride_analysis.csv): ride exports
 - [data/strava_swim_analysis.csv](data/strava_swim_analysis.csv): swim exports
 - [data/strava_hike_analysis.csv](data/strava_hike_analysis.csv): hike exports
 - [data/strava_run_pace_analysis.csv](data/strava_run_pace_analysis.csv): per-run pace-bin summaries keyed by activity ID
 - [data/activities_last_week.csv](data/activities_last_week.csv): a rolling 7-day summary of recent activity data
-- [data/strava_gear.csv](data/strava_gear.csv): shoe mileage (Strava gear distance plus pre-tracking baselines); active shoes are refreshed each run, retired rows are kept but not updated
+
+Shoe mileage on the dashboard is computed from activity `gear_id` values: for each shoe in `TRACKED_GEAR`, miles = baseline + sum of `distance_miles` for activities with that `gear_id` (baseline defaults to 0 when unset).
 
 ## Requirements
 
@@ -78,7 +79,14 @@ The `sync` job runs only for scheduled pipelines; the `test` job still runs on n
 
 **Live app:** [https://strava-analytics-sboissel.streamlit.app/](https://strava-analytics-sboissel.streamlit.app/)
 
-A Streamlit app under [`dashboard/`](dashboard) provides three pages: **Training Overview** (KPIs, 80:20 compliance, mileage), **Training Insights** (pace-bin HR trends and mileage heatmaps), and **Race Results** (finish times, PRs, and race history).
+A Streamlit app under [`dashboard/`](dashboard) provides four pages:
+
+- **Metrics** — achievements, key indicators, shoe mileage
+- **Training** — races strip, 80:20 compliance, mileage (+ heatmap), elevation, HR zones
+- **Fitness** — elevation-adjusted pace-bin HR trends, aerobic efficiency, Fitness & Freshness
+- **Performance** — personal records cards, finish-time/pace scatter, race history
+
+Charts use Show By (Day / Week / Month / Year). Fitness and Training share plot alignment within each page; Performance links race-history row selection to the scatter highlight.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt

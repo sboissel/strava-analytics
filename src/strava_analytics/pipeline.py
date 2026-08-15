@@ -13,7 +13,6 @@ from strava_analytics.csv_io import (
     update_run_pace_analysis_csv,
     write_last_activity_id,
 )
-from strava_analytics.gear import update_gear_mileage_csv
 
 
 def main(data_dir: Optional[Path] = None) -> None:
@@ -36,7 +35,10 @@ def main(data_dir: Optional[Path] = None) -> None:
 
     print(f"Processing {len(activities)} activities...")
     df, pace_summaries = process_activities(
-        activities, client.get_streams, client.last_activity_id
+        activities,
+        client.get_streams,
+        client.last_activity_id,
+        client.get_activity_zones,
     )
 
     if df.empty:
@@ -52,9 +54,6 @@ def main(data_dir: Optional[Path] = None) -> None:
     weekly_output = data_dir / "activities_last_week.csv"
     save_activities_last_week(data_dir, weekly_output)
     print(f"Saved weekly summary: {weekly_output}")
-
-    gear_output = update_gear_mileage_csv(client.get_gear, data_dir)
-    print(f"Saved gear mileage: {gear_output}")
 
 
 if __name__ == "__main__":

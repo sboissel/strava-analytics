@@ -1,4 +1,4 @@
-"""Race results loading and PR logic for the Race Results page."""
+"""Race results loading and PR logic for the Performance page."""
 
 from __future__ import annotations
 
@@ -341,6 +341,17 @@ def _race_table_date(series: pd.Series) -> pd.Series:
     return series.dt.tz_convert("UTC").dt.tz_localize(None).dt.normalize()
 
 
+RACE_TABLE_DISPLAY_COLUMNS = [
+    "Name",
+    "Date",
+    "Race Type",
+    "Miles",
+    "Time",
+    "Pace",
+    "PR",
+]
+
+
 def race_table_rows(races: pd.DataFrame) -> pd.DataFrame:
     """Build display columns for the race results table.
 
@@ -352,15 +363,22 @@ def race_table_rows(races: pd.DataFrame) -> pd.DataFrame:
     Returns
     -------
     pandas.DataFrame
-        Table-ready columns sorted by date ascending.
+        Table-ready columns sorted by date ascending. Includes a hidden
+        ``activity_id`` key for chart selection wiring; UI should omit it from
+        ``column_order`` / ``column_config``.
     """
-    columns = ["Name", "Date", "Race Type", "Miles", "Time", "Pace", "PR"]
+    columns = ["activity_id", *RACE_TABLE_DISPLAY_COLUMNS]
     if races.empty:
         return pd.DataFrame(columns=columns)
 
     display = races.sort_values("date", ascending=True).copy()
+    if "activity_id" in display.columns:
+        activity_ids = display["activity_id"].astype(str)
+    else:
+        activity_ids = pd.Series([""] * len(display), index=display.index, dtype=str)
     return pd.DataFrame(
         {
+            "activity_id": activity_ids,
             "Name": display["name"],
             "Date": _race_table_date(display["date"]),
             "Race Type": display["race_type"],
@@ -369,4 +387,50 @@ def race_table_rows(races: pd.DataFrame) -> pd.DataFrame:
             "Pace": display["elapsed_pace"],
             "PR": display["is_pr"].map(lambda pr: "🏆" if pr else ""),
         }
+    ).reset_index(drop=True)
+
+
+def fastest_races_by_type(races: pd.DataFrame) -> pd.DataFrame:
+    """Return the fastest race per type, excluding ``Other``.
+
+    Parameters
+    ----------
+    races : pandas.DataFrame
+        Race dataframe with ``race_type``, ``elapsed_min``, and ``date``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per non-``Other`` race type present in ``races``, ordered by
+        ``RACE_TYPE_ORDER`` (unknown types last, A–Z). Ties on finish time keep
+        the most recent race.
+    """
+    if races.empty or "race_type" not in races.columns:
+        return races.iloc[0:0].copy()
+
+    eligible = races.loc[
+        (races["race_type"].notna())
+        & (races["race_type"] != "Other")
+        & races["elapsed_min"].notna()
+    ].copy()
+    if eligible.empty:
+        return eligible.iloc[0:0].copy()
+
+    eligible = eligible.sort_values(
+        ["elapsed_min", "date"],
+        ascending=[True, False],
+        kind="mergesort",
+    )
+    best = eligible.groupby("race_type", sort=False, as_index=False).first()
+
+    known = [t for t in RACE_TYPE_ORDER if t != "Other"]
+    order = {t: i for i, t in enumerate(known)}
+    extras = sorted(set(best["race_type"]) - set(known))
+    for i, race_type in enumerate(extras, start=len(known)):
+        order[race_type] = i
+    best["_ord"] = best["race_type"].map(order)
+    return (
+        best.sort_values("_ord", kind="mergesort")
+        .drop(columns=["_ord"])
+        .reset_index(drop=True)
     )

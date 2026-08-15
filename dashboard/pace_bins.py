@@ -1,4 +1,4 @@
-"""Pace bin labels for the Training Insights page."""
+"""Pace bin labels for the Fitness page."""
 
 from __future__ import annotations
 

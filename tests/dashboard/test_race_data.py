@@ -7,6 +7,7 @@ import pandas as pd
 from dashboard.data import format_full_date
 from dashboard.race_data import (
     ensure_race_pace_min,
+    fastest_races_by_type,
     filter_race_results,
     mark_personal_records,
     parse_duration_minutes,
@@ -136,6 +137,7 @@ class RaceTableRowsTests(unittest.TestCase):
     def _races(self) -> pd.DataFrame:
         return pd.DataFrame(
             {
+                "activity_id": ["111", "222"],
                 "date": pd.to_datetime(
                     ["2019-05-19T14:00:00Z", "2018-09-09T14:00:00Z"],
                     utc=True,
@@ -153,10 +155,20 @@ class RaceTableRowsTests(unittest.TestCase):
         result = race_table_rows(self._races())
         self.assertEqual(
             list(result.columns),
-            ["Name", "Date", "Race Type", "Miles", "Time", "Pace", "PR"],
+            [
+                "activity_id",
+                "Name",
+                "Date",
+                "Race Type",
+                "Miles",
+                "Time",
+                "Pace",
+                "PR",
+            ],
         )
         self.assertNotIn("Avg Pace", result.columns)
         self.assertNotIn("Day of Date", result.columns)
+        self.assertEqual(list(result["activity_id"]), ["222", "111"])
 
     def test_default_sort_is_date_ascending(self):
         result = race_table_rows(self._races())
@@ -185,6 +197,113 @@ class RaceTypeOptionsTests(unittest.TestCase):
         self.assertEqual(options.index("5k"), 2)
         self.assertEqual(options.index("Half"), 3)
         self.assertEqual(options.index("Other"), 4)
+
+
+class FastestRacesByTypeTests(unittest.TestCase):
+    """Fastest (personal-record) row per race type for Performance cards."""
+
+    def _races(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "activity_id": ["1", "2", "3", "4", "5", "6"],
+                "date": pd.to_datetime(
+                    [
+                        "2019-05-19T14:00:00Z",
+                        "2020-05-19T14:00:00Z",
+                        "2018-09-09T14:00:00Z",
+                        "2021-03-01T14:00:00Z",
+                        "2017-01-01T14:00:00Z",
+                        "2022-06-01T14:00:00Z",
+                    ],
+                    utc=True,
+                ),
+                "name": [
+                    "Brooklyn Half",
+                    "Faster Half",
+                    "Bridge 10k",
+                    "Park 5k",
+                    "Odd Race",
+                    "Trail Other",
+                ],
+                "race_type": ["Half", "Half", "10k", "5k", "8k", "Other"],
+                "elapsed_min": [120.0, 110.0, 47.0, 22.0, 55.0, 90.0],
+                "elapsed_time_min": [
+                    "2:00:00",
+                    "1:50:00",
+                    "0:47:00",
+                    "0:22:00",
+                    "0:55:00",
+                    "1:30:00",
+                ],
+                "elapsed_pace": ["9:09", "8:24", "7:35", "7:06", "11:00", "9:00"],
+            }
+        )
+
+    def test_excludes_other_and_orders_known_types(self):
+        result = fastest_races_by_type(self._races())
+        self.assertEqual(list(result["race_type"]), ["5k", "10k", "Half", "8k"])
+        self.assertNotIn("Other", result["race_type"].tolist())
+
+    def test_picks_fastest_finish_per_type(self):
+        result = fastest_races_by_type(self._races())
+        by_type = result.set_index("race_type")
+        self.assertEqual(by_type.loc["Half", "elapsed_min"], 110.0)
+        self.assertEqual(by_type.loc["Half", "name"], "Faster Half")
+        self.assertEqual(by_type.loc["5k", "elapsed_min"], 22.0)
+
+    def test_tie_prefers_most_recent(self):
+        races = pd.DataFrame(
+            {
+                "race_type": ["5k", "5k"],
+                "elapsed_min": [22.0, 22.0],
+                "date": pd.to_datetime(
+                    ["2018-01-01T12:00:00Z", "2020-01-01T12:00:00Z"],
+                    utc=True,
+                ),
+                "name": ["Older", "Newer"],
+                "elapsed_time_min": ["0:22:00", "0:22:00"],
+            }
+        )
+        result = fastest_races_by_type(races)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["name"], "Newer")
+
+    def test_empty_input(self):
+        result = fastest_races_by_type(pd.DataFrame())
+        self.assertTrue(result.empty)
+
+
+class FastestRaceCardsHtmlTests(unittest.TestCase):
+    """Personal Records card strip markup."""
+
+    def test_renders_cards_for_non_other_types(self):
+        from dashboard.ui import fastest_race_cards_html
+
+        races = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2019-05-19T14:00:00Z"], utc=True),
+                "name": ["Brooklyn Half"],
+                "race_type": ["Half"],
+                "elapsed_min": [118.0],
+                "elapsed_time_min": ["1:58:35"],
+                "elapsed_pace": ["9:03"],
+            }
+        )
+        html = fastest_race_cards_html(races)
+        self.assertIn('id="fastest-races"', html)
+        self.assertIn("Personal Records", html)
+        self.assertNotIn("Personal Bests", html)
+        self.assertIn("Half", html)
+        self.assertIn("1:58:35", html)
+        self.assertIn("Brooklyn Half", html)
+        self.assertIn("May 19, 2019", html)
+        self.assertIn("9:03 /mi", html)
+        self.assertNotIn("Other", html)
+
+    def test_empty_returns_blank(self):
+        from dashboard.ui import fastest_race_cards_html
+
+        self.assertEqual(fastest_race_cards_html(pd.DataFrame()), "")
 
 
 if __name__ == "__main__":

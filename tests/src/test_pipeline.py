@@ -44,15 +44,12 @@ class MainPipelineTests(unittest.TestCase):
                 "strava_analytics.pipeline.update_activity_analysis_csvs"
             ) as update_csvs_mock, patch(
                 "strava_analytics.pipeline.update_run_pace_analysis_csv"
-            ) as update_pace_mock, patch(
-                "strava_analytics.pipeline.update_gear_mileage_csv"
-            ) as update_gear_mock:
+            ) as update_pace_mock:
                 main(data_dir=data_dir)
 
             process_mock.assert_called_once()
             update_csvs_mock.assert_not_called()
             update_pace_mock.assert_not_called()
-            update_gear_mock.assert_called_once_with(client.get_gear, data_dir)
             self.assertTrue((data_dir / "activities_last_week.csv").exists())
             self.assertEqual(read_last_activity_id(data_dir), "1")
 
@@ -97,16 +94,13 @@ class MainPipelineTests(unittest.TestCase):
                 "strava_analytics.pipeline.update_activity_analysis_csvs"
             ) as update_csvs_mock, patch(
                 "strava_analytics.pipeline.update_run_pace_analysis_csv"
-            ) as update_pace_mock, patch(
-                "strava_analytics.pipeline.update_gear_mileage_csv"
-            ) as update_gear_mock:
+            ) as update_pace_mock:
                 main(data_dir=data_dir)
 
             update_csvs_mock.assert_called_once()
             update_pace_mock.assert_called_once_with(
                 pace_summaries, data_dir / "strava_run_pace_analysis.csv"
             )
-            update_gear_mock.assert_called_once_with(client.get_gear, data_dir)
             self.assertEqual(read_last_activity_id(data_dir), "99")
             self.assertTrue((data_dir / "activities_last_week.csv").exists())
 
@@ -131,8 +125,6 @@ class MainPipelineTests(unittest.TestCase):
                 client, "refresh_access_token", return_value={"access_token": "token"}
             ), patch.object(client, "get_activities", return_value=[]), patch(
                 "strava_analytics.pipeline.process_activities", return_value=(pd.DataFrame(), [])
-            ), patch(
-                "strava_analytics.pipeline.update_gear_mileage_csv"
             ):
                 main()
 

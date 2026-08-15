@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class StravaClient:
-    """Thin client for Strava OAuth and activity/gear API calls."""
+    """Thin client for Strava OAuth and activity API calls."""
 
     def __init__(
         self,
@@ -166,18 +166,19 @@ class StravaClient:
 
         return res.json()
 
-    def get_gear(self, gear_id: str) -> Dict[str, Any]:
-        """Retrieve a Strava gear (shoe/bike) record by ID.
+    def get_activity_zones(self, activity_id: Union[int, str]) -> List[Dict[str, Any]]:
+        """Retrieve Strava activity zone distributions for a given activity.
 
         Parameters
         ----------
-        gear_id : str
-            The Strava gear identifier (for example ``g33031373``).
+        activity_id : int or str
+            The Strava activity identifier.
 
         Returns
         -------
-        dict
-            Gear payload including ``distance`` (meters) and ``retired``.
+        list[dict]
+            Zone objects from the Strava activity zones endpoint (heartrate,
+            pace, and/or power). May be empty when no zone data is available.
 
         Raises
         ------
@@ -185,11 +186,16 @@ class StravaClient:
             If the API request fails.
         """
         access_token = self._require_access_token()
-        url = f"https://www.strava.com/api/v3/gear/{gear_id}"
+        url = f"https://www.strava.com/api/v3/activities/{activity_id}/zones"
         headers = {"Authorization": f"Bearer {access_token}"}
 
         res = requests.get(url, headers=headers, timeout=30)
         if res.status_code != 200:
-            raise RuntimeError(f"Strava gear request failed: {res.status_code} {res.text[:200]}")
+            raise RuntimeError(
+                f"Strava activity zones request failed: {res.status_code} {res.text[:200]}"
+            )
 
-        return res.json()
+        payload = res.json()
+        if not isinstance(payload, list):
+            raise RuntimeError("Strava activity zones response was not a list.")
+        return payload
