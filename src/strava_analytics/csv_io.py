@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 import numpy as np
 import pandas as pd
 
-from strava_analytics.activities import hr_zone_pct_columns, run_pace_columns, week_summary_bounds
+from strava_analytics.activities import hr_zone_sec_columns, run_pace_columns, week_summary_bounds
 
 LAST_ACTIVITY_ID_FILENAME = "highest_activity_id.txt"
 
@@ -85,7 +85,7 @@ def activity_analysis_columns(activity_type: str) -> List[str]:
             "%_easy",
             "mt_min_easy",
             "mt_min_hard",
-            *hr_zone_pct_columns(),
+            *hr_zone_sec_columns(),
             "race",
             "race_distance",
         ]

@@ -1,4 +1,4 @@
-"""Pace HR and mileage heatmap data for Training Insights."""
+"""Pace HR, HR-zone, and aerobic-efficiency data for Fitness, plus mileage heatmaps."""
 
 from __future__ import annotations
 
@@ -13,12 +13,15 @@ try:
 except ImportError:
     import _bootstrap  # noqa: F401
 
+from strava_analytics.activities import HR_ZONE_COUNT, hr_zone_sec_columns
+
 from data import (
     DATA_DIR,
     PERIOD_CONFIG,
     PeriodGrain,
     format_full_date,
     format_full_month,
+    format_week_range_short,
     normalize_utc,
     reference_end,
     current_period_key,
@@ -26,7 +29,10 @@ from data import (
     generate_period_index,
     load_runs,
     window_mask,
+    with_period_columns,
 )
+
+HR_ZONE_PCT_COLUMNS = [f"zone_{idx}_pct" for idx in range(1, HR_ZONE_COUNT + 1)]
 
 MONTH_COLUMNS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 HEATMAP_MONTH_YEARS = 10
@@ -236,6 +242,421 @@ def aggregate_pace_hr_by_period(
     )
     merged["in_progress"] = merged["period_key"] == current_key
     return merged[["period_key", "period_label", "period_tooltip", "avg_hr", "in_progress"]]
+
+
+def _empty_hr_zone_periods(
+    full_index: pd.DataFrame, current_key: str
+) -> pd.DataFrame:
+    """Return the period index with NaN zone shares and an in-progress flag."""
+    out = full_index.copy()
+    for column in HR_ZONE_PCT_COLUMNS:
+        out[column] = np.nan
+    out["in_progress"] = out["period_key"] == current_key
+    return out[
+        ["period_key", "period_label", "period_tooltip", *HR_ZONE_PCT_COLUMNS, "in_progress"]
+    ]
+
+
+def aggregate_hr_zones_by_period(
+    runs: pd.DataFrame,
+    grain: PeriodGrain,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Sum HR-zone seconds by period and convert each period to a 100% stack.
+
+    Periods with no HR-zone data (all-null columns, or a summed total of 0)
+    keep ``NaN`` shares so charts can skip them instead of drawing a fake 0%
+    stack.
+
+    Parameters
+    ----------
+    runs : pandas.DataFrame
+        Run analysis rows with ``date`` and ``hr_zone_1_sec`` … ``hr_zone_5_sec``.
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    as_of : pandas.Timestamp, optional
+        Reference end date for the period window. Defaults to the latest activity.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per period with ``zone_1_pct`` … ``zone_5_pct`` (0–100) and an
+        ``in_progress`` flag.
+    """
+    n = int(PERIOD_CONFIG[grain]["count"])
+    end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    full_index = generate_period_index(grain, end, n)
+    current_key = current_period_key(grain, end)
+    sec_cols = hr_zone_sec_columns()
+
+    if runs.empty or any(col not in runs.columns for col in sec_cols):
+        return _empty_hr_zone_periods(full_index, current_key)
+
+    work = with_period_columns(runs.copy(), grain)
+    keep_keys = set(full_index["period_key"])
+    work = work.loc[work["_period_key"].isin(keep_keys)]
+    if work.empty:
+        return _empty_hr_zone_periods(full_index, current_key)
+
+    for col in sec_cols:
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+    # All-null rows stay NaN (not 0) so they do not invent a zero-second run.
+    work["_hr_zone_total"] = work[sec_cols].sum(axis=1, min_count=1)
+    valid = work["_hr_zone_total"].notna() & (work["_hr_zone_total"] > 0)
+    work = work.loc[valid]
+    if work.empty:
+        return _empty_hr_zone_periods(full_index, current_key)
+
+    for col in sec_cols:
+        work[col] = work[col].fillna(0.0)
+
+    grouped = (
+        work.groupby(["_period_key", "_period_label"], as_index=False)[sec_cols]
+        .sum()
+        .rename(columns={"_period_key": "period_key", "_period_label": "period_label"})
+    )
+    grouped["_hr_zone_total"] = grouped[sec_cols].sum(axis=1)
+    positive = grouped["_hr_zone_total"] > 0
+    for idx, sec_col in enumerate(sec_cols, start=1):
+        pct_col = f"zone_{idx}_pct"
+        grouped[pct_col] = np.where(
+            positive,
+            grouped[sec_col] / grouped["_hr_zone_total"] * 100.0,
+            np.nan,
+        )
+
+    merged = full_index.merge(
+        grouped[["period_key", *HR_ZONE_PCT_COLUMNS]],
+        on="period_key",
+        how="left",
+    )
+    merged["in_progress"] = merged["period_key"] == current_key
+    return merged[
+        ["period_key", "period_label", "period_tooltip", *HR_ZONE_PCT_COLUMNS, "in_progress"]
+    ]
+
+
+def last_completed_iso_week_monday(as_of: pd.Timestamp) -> pd.Timestamp:
+    """Return the Monday of the latest full ISO week before ``as_of``'s week.
+
+    The current ISO week (even on Sunday) is treated as in progress, so this
+    always returns the previous Monday–Sunday week.
+
+    Parameters
+    ----------
+    as_of : pandas.Timestamp
+        Reference instant (typically latest activity or "today").
+
+    Returns
+    -------
+    pandas.Timestamp
+        UTC Monday of the last completed Mon–Sun ISO week.
+    """
+    end = normalize_utc(as_of)
+    iso = end.isocalendar()
+    current_monday = pd.Timestamp.fromisocalendar(
+        int(iso.year), int(iso.week), 1
+    ).tz_localize("UTC")
+    return current_monday - pd.Timedelta(days=7)
+
+
+def last_full_week_hr_zone_shares(
+    runs: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> dict[str, object]:
+    """Aggregate HR-zone shares for the last completed Mon–Sun ISO week.
+
+    Parameters
+    ----------
+    runs : pandas.DataFrame
+        Run analysis rows with ``date`` and ``hr_zone_1_sec`` … ``hr_zone_5_sec``.
+    as_of : pandas.Timestamp, optional
+        Reference end date. Defaults to the latest activity.
+
+    Returns
+    -------
+    dict
+        Always includes ``week_key`` and ``week_label`` (Mon–Sun range). When
+        that week has positive zone seconds, also includes ``zone_1_pct`` …
+        ``zone_5_pct`` and ``zone_1_sec`` … ``zone_5_sec``; otherwise those
+        keys are omitted (pie shows empty).
+    """
+    end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    monday = last_completed_iso_week_monday(end)
+    sunday_exclusive = monday + pd.Timedelta(days=7)
+    iso = monday.isocalendar()
+    week_key = f"{int(iso.year)}-{int(iso.week):02d}"
+    week_label = format_week_range_short(monday)
+    out: dict[str, object] = {
+        "week_key": week_key,
+        "week_label": week_label,
+    }
+    sec_cols = hr_zone_sec_columns()
+
+    if runs.empty or any(col not in runs.columns for col in sec_cols):
+        return out
+
+    work = runs.loc[window_mask(runs, monday, sunday_exclusive)].copy()
+    if work.empty:
+        return out
+
+    for col in sec_cols:
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+    work["_hr_zone_total"] = work[sec_cols].sum(axis=1, min_count=1)
+    valid = work["_hr_zone_total"].notna() & (work["_hr_zone_total"] > 0)
+    work = work.loc[valid]
+    if work.empty:
+        return out
+
+    for col in sec_cols:
+        work[col] = work[col].fillna(0.0)
+    totals = work[sec_cols].sum(axis=0)
+    grand = float(totals.sum())
+    if grand <= 0:
+        return out
+
+    for idx, sec_col in enumerate(sec_cols, start=1):
+        sec = float(totals[sec_col])
+        out[f"zone_{idx}_sec"] = sec
+        out[f"zone_{idx}_pct"] = sec / grand * 100.0
+    return out
+
+
+# Minimum distance (miles) before climb density is defined. Near-zero distance
+# would send ft/mi to inf; those rows are dropped from the efficiency set.
+CLIMB_DENSITY_MIN_DISTANCE_MILES = 1e-6
+
+AEROBIC_EFFICIENCY_COLUMNS = (
+    "period_key",
+    "period_label",
+    "period_tooltip",
+    "residual",
+    "efficiency",
+    "elev_ft_per_mile",
+    "in_progress",
+)
+
+
+def raw_aerobic_efficiency(avg_pace_sec, avg_hr):
+    """Speed per heart rate: ``(3600 / avg_pace_sec) / avg_hr``.
+
+    Units are miles/hour per bpm. Invalid or non-positive pace or HR yield
+    ``NaN``.
+
+    Parameters
+    ----------
+    avg_pace_sec : array-like
+        Average pace in seconds per mile.
+    avg_hr : array-like
+        Average heart rate in beats per minute.
+
+    Returns
+    -------
+    numpy.ndarray
+        Aerobic efficiency, same shape as the broadcast inputs.
+    """
+    pace = np.asarray(avg_pace_sec, dtype=float)
+    hr = np.asarray(avg_hr, dtype=float)
+    pace, hr = np.broadcast_arrays(pace, hr)
+    out = np.full(pace.shape, np.nan, dtype=float)
+    valid = np.isfinite(pace) & np.isfinite(hr) & (pace > 0) & (hr > 0)
+    np.divide(3600.0, pace, out=out, where=valid)
+    np.divide(out, hr, out=out, where=valid)
+    return out
+
+
+def climb_density_ft_per_mile(elevation_gain_ft, distance_miles):
+    """Elevation gain per mile: ``elevation_gain_ft / distance_miles``.
+
+    Non-finite elevation is treated as 0 ft (flat). Distances at or below
+    ``CLIMB_DENSITY_MIN_DISTANCE_MILES`` yield ``NaN``.
+
+    Parameters
+    ----------
+    elevation_gain_ft : array-like
+        Elevation gain in feet.
+    distance_miles : array-like
+        Distance in miles.
+
+    Returns
+    -------
+    numpy.ndarray
+        Feet per mile, same shape as the broadcast inputs.
+    """
+    elev = np.asarray(elevation_gain_ft, dtype=float)
+    dist = np.asarray(distance_miles, dtype=float)
+    elev, dist = np.broadcast_arrays(elev, dist)
+    elev = np.where(np.isfinite(elev), elev, 0.0)
+    out = np.full(dist.shape, np.nan, dtype=float)
+    valid = np.isfinite(dist) & (dist > CLIMB_DENSITY_MIN_DISTANCE_MILES)
+    np.divide(elev, dist, out=out, where=valid)
+    return out
+
+
+def efficiency_elevation_residuals(efficiency, elev_ft_per_mile):
+    """OLS residual of ``efficiency ~ elevation_ft_per_mile``.
+
+    Fits a line with intercept across finite pairs. Residual = observed −
+    predicted; higher means more efficient than expected for that climb.
+    Fewer than two finite points, or a degenerate fit, yields all ``NaN``.
+    When climb density has no variance, predicted efficiency is the mean.
+
+    Parameters
+    ----------
+    efficiency : array-like
+        Raw aerobic efficiency (mph per bpm).
+    elev_ft_per_mile : array-like
+        Climb density in feet per mile.
+
+    Returns
+    -------
+    numpy.ndarray
+        Residuals aligned with the inputs.
+    """
+    y = np.asarray(efficiency, dtype=float)
+    x = np.asarray(elev_ft_per_mile, dtype=float)
+    y, x = np.broadcast_arrays(y, x)
+    out = np.full(y.shape, np.nan, dtype=float)
+    valid = np.isfinite(y) & np.isfinite(x)
+    if int(valid.sum()) < 2:
+        return out
+    xv = x[valid]
+    yv = y[valid]
+    if np.allclose(xv, xv[0]):
+        predicted = np.full(yv.shape, float(yv.mean()))
+    else:
+        slope, intercept = np.polyfit(xv, yv, 1)
+        predicted = intercept + slope * xv
+    out[valid] = yv - predicted
+    return out
+
+
+def _is_race_run(series: pd.Series) -> pd.Series:
+    """True where ``race`` is an explicit true-like flag."""
+    if pd.api.types.is_bool_dtype(series):
+        return series.fillna(False)
+    text = series.astype(str).str.strip().str.lower()
+    return text.isin(("true", "1", "yes"))
+
+
+def eligible_aerobic_efficiency_runs(runs: pd.DataFrame) -> pd.DataFrame:
+    """Non-race runs with valid pace, HR, and distance for efficiency.
+
+    Parameters
+    ----------
+    runs : pandas.DataFrame
+        Run analysis rows.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Eligible rows with ``efficiency`` and ``elev_ft_per_mile`` columns.
+    """
+    required = ("avg_hr", "avg_pace_sec", "distance_miles")
+    if runs.empty or any(col not in runs.columns for col in required):
+        return pd.DataFrame(columns=[*runs.columns, "efficiency", "elev_ft_per_mile"])
+
+    work = runs.copy()
+    if "race" in work.columns:
+        work = work.loc[~_is_race_run(work["race"])]
+    if work.empty:
+        return work.assign(efficiency=np.nan, elev_ft_per_mile=np.nan)
+
+    elev = (
+        work["elevation_gain_ft"]
+        if "elevation_gain_ft" in work.columns
+        else 0.0
+    )
+    work["efficiency"] = raw_aerobic_efficiency(work["avg_pace_sec"], work["avg_hr"])
+    work["elev_ft_per_mile"] = climb_density_ft_per_mile(elev, work["distance_miles"])
+    keep = (
+        np.isfinite(work["efficiency"].to_numpy())
+        & np.isfinite(work["elev_ft_per_mile"].to_numpy())
+    )
+    return work.loc[keep].copy()
+
+
+def _empty_aerobic_efficiency_periods(
+    full_index: pd.DataFrame, current_key: str
+) -> pd.DataFrame:
+    """Return the period index with NaN efficiency residuals."""
+    out = full_index.copy()
+    out["residual"] = np.nan
+    out["efficiency"] = np.nan
+    out["elev_ft_per_mile"] = np.nan
+    out["in_progress"] = out["period_key"] == current_key
+    return out[list(AEROBIC_EFFICIENCY_COLUMNS)]
+
+
+def aggregate_aerobic_efficiency_by_period(
+    runs: pd.DataFrame,
+    grain: PeriodGrain,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Median elevation-adjusted aerobic-efficiency residual by period.
+
+    Eligible non-race runs in the Fitness window get raw efficiency
+    ``(3600 / avg_pace_sec) / avg_hr`` (mph per bpm). A linear fit
+    ``efficiency ~ elevation_ft_per_mile`` is estimated on that set;
+    each run's residual is observed − predicted. Periods aggregate the
+    **median** residual (and median raw efficiency / ft/mi for hover).
+    Periods with no eligible runs stay ``NaN`` so charts can gap.
+
+    Parameters
+    ----------
+    runs : pandas.DataFrame
+        Run analysis rows with date, pace, HR, distance, elevation, and race.
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    as_of : pandas.Timestamp, optional
+        Reference end date for the period window. Defaults to the latest activity.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per period with ``residual``, ``efficiency``,
+        ``elev_ft_per_mile``, and ``in_progress``.
+    """
+    n = int(PERIOD_CONFIG[grain]["count"])
+    end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    full_index = generate_period_index(grain, end, n)
+    current_key = current_period_key(grain, end)
+
+    eligible = eligible_aerobic_efficiency_runs(runs)
+    if eligible.empty or "date" not in eligible.columns:
+        return _empty_aerobic_efficiency_periods(full_index, current_key)
+
+    work = with_period_columns(eligible, grain)
+    keep_keys = set(full_index["period_key"])
+    work = work.loc[work["_period_key"].isin(keep_keys)]
+    if work.empty:
+        return _empty_aerobic_efficiency_periods(full_index, current_key)
+
+    work = work.copy()
+    work["residual"] = efficiency_elevation_residuals(
+        work["efficiency"].to_numpy(),
+        work["elev_ft_per_mile"].to_numpy(),
+    )
+    grouped = (
+        work.groupby(["_period_key", "_period_label"], as_index=False)
+        .agg(
+            residual=("residual", "median"),
+            efficiency=("efficiency", "median"),
+            elev_ft_per_mile=("elev_ft_per_mile", "median"),
+        )
+        .rename(columns={"_period_key": "period_key", "_period_label": "period_label"})
+    )
+
+    merged = full_index.merge(
+        grouped[["period_key", "residual", "efficiency", "elev_ft_per_mile"]],
+        on="period_key",
+        how="left",
+    )
+    merged["in_progress"] = merged["period_key"] == current_key
+    return merged[list(AEROBIC_EFFICIENCY_COLUMNS)]
 
 
 def _year_matrix(

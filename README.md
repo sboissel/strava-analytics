@@ -12,7 +12,7 @@ Versioning follows [Semantic Versioning](https://semver.org/); see [CHANGELOG.md
 
 The main script in [`src/strava_analytics/pipeline.py`](src/strava_analytics/pipeline.py) refreshes a Strava API token, downloads recent activities, processes each activity, and writes several CSV files into the [data](data) folder:
 
-- [data/strava_run_analysis.csv](data/strava_run_analysis.csv): run-specific enrichment including pace, HR, Strava HR-zone percentages (`hr_zone_1_pct`…`hr_zone_5_pct`), easy/hard time metrics (zones 1–2 vs 3+), and `gear_id` for shoe mileage
+- [data/strava_run_analysis.csv](data/strava_run_analysis.csv): run-specific enrichment including pace, HR, Strava HR-zone time in seconds (`hr_zone_1_sec`…`hr_zone_5_sec`), easy/hard time metrics (zones 1–2 vs 3+), and `gear_id` for shoe mileage
 - [data/strava_ride_analysis.csv](data/strava_ride_analysis.csv): ride exports
 - [data/strava_swim_analysis.csv](data/strava_swim_analysis.csv): swim exports
 - [data/strava_hike_analysis.csv](data/strava_hike_analysis.csv): hike exports
@@ -79,7 +79,7 @@ The `sync` job runs only for scheduled pipelines; the `test` job still runs on n
 
 **Live app:** [https://strava-analytics-sboissel.streamlit.app/](https://strava-analytics-sboissel.streamlit.app/)
 
-A Streamlit app under [`dashboard/`](dashboard) provides four pages: **Metrics** (KPIs and shoe mileage), **Training** (80:20 compliance, mileage, and elevation), **Training Insights** (pace-bin HR trends and mileage heatmaps), and **Race Results** (finish times, PRs, and race history).
+A Streamlit app under [`dashboard/`](dashboard) provides four pages: **Metrics** (KPIs and shoe mileage), **Training** (80:20 compliance, mileage, mileage heatmap, and elevation), **Fitness** (pace-bin HR trends, aerobic efficiency, and HR zones), and **Race Results** (finish times, PRs, and race history).
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt

@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import html
 import math
+from collections.abc import Mapping, Sequence
 
 from charts import (
     RACE_EVENTS_TITLE,
     RACE_STRIP_DIAMOND_COLOR,
     RACE_STRIP_SQUARE_COLOR,
+    HR_ZONE_COLORS,
+    aerobic_efficiency_title,
     compliance_title,
     elevation_title,
-    heatmap_title,
+    hr_zones_title,
     mileage_title,
     pace_hr_title,
 )
 from data import format_full_date
+from strava_analytics.activities import format_time
 from theme import (
     TRAFFIC_GREEN,
     TRAFFIC_LIME,
@@ -35,7 +39,6 @@ from theme import (
     miles_legend_labels,
     shoe_wear_color,
 )
-
 
 
 def band_dot(color_hex: str) -> str:
@@ -99,6 +102,207 @@ def race_weeks_legend_html() -> str:
         "</span></div>"
     )
 
+
+
+def aerobic_efficiency_info_html(title: str) -> str:
+    """Return the chart title plus a right-gutter ⓘ with hover definition.
+
+    Title sits in the Plotly title band; an info icon flush at the start of
+    the shared Fitness right deadspan (plot right edge / gutter left — same
+    ``FITNESS_MARGIN_R`` as Avg HR / HR Zones) shows the definition on hover
+    or focus. The ``.kpi-tooltip`` opens to the right of the icon into the
+    gutter (same pattern as Training/Metrics, different placement).
+
+    Parameters
+    ----------
+    title : str
+        Chart heading (e.g. ``Weekly Aerobic Efficiency``).
+
+    Returns
+    -------
+    str
+        HTML markup for the title and right-gutter ``.kpi-info`` tooltip.
+    """
+    tooltip = (
+        "<strong>Definition</strong>"
+        "How much speed you get per heartbeat, after accounting for hills."
+        "<br><br>"
+        "<strong>Calculation</strong>"
+        "Per non-race run, raw efficiency = (3600 ÷ avg pace sec/mi) ÷ avg HR "
+        "(mph per bpm). We fit that against climb density (ft/mi) and take the "
+        "residual (observed − predicted). Each point is the median residual for "
+        "the Show By period."
+        "<br><br>"
+        "Higher means more efficient than expected for that elevation."
+    )
+    return (
+        '<div class="aerobic-efficiency-info" role="group" '
+        'aria-label="Aerobic efficiency chart info">'
+        f'<span class="aerobic-efficiency-chart-title">{title}</span>'
+        '<span class="kpi-info" tabindex="0" role="button" '
+        'aria-label="About aerobic efficiency">'
+        '<span aria-hidden="true">ⓘ</span>'
+        f'<span class="kpi-tooltip" role="tooltip">{tooltip}</span>'
+        "</span></div>"
+    )
+
+
+def _parse_zone_float(raw: object) -> float:
+    """Coerce a zone share/seconds value to a finite float (else ``0.0``)."""
+    try:
+        val = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    if math.isnan(val):
+        return 0.0
+    return val
+
+
+def _hr_zone_pie_slice_path(
+    start_frac: float,
+    end_frac: float,
+    *,
+    cx: float = 50.0,
+    cy: float = 50.0,
+    r: float = 50.0,
+) -> str:
+    """Return an SVG pie-slice path from ``start_frac`` to ``end_frac`` (0–1).
+
+    Angles start at 12 o'clock and sweep clockwise, matching the previous
+    ``conic-gradient(from -90deg, …)`` donut.
+    """
+    span = end_frac - start_frac
+    if span <= 1e-9:
+        return ""
+    if span >= 1.0 - 1e-9:
+        return (
+            f"M {cx},{cy - r} "
+            f"A {r},{r} 0 1 1 {cx},{cy + r} "
+            f"A {r},{r} 0 1 1 {cx},{cy - r} Z"
+        )
+
+    def _point(frac: float) -> tuple[float, float]:
+        angle = math.radians(-90.0 + frac * 360.0)
+        return cx + r * math.cos(angle), cy + r * math.sin(angle)
+
+    x1, y1 = _point(start_frac)
+    x2, y2 = _point(end_frac)
+    large_arc = 1 if span > 0.5 else 0
+    return (
+        f"M {cx},{cy} L {x1:.4f},{y1:.4f} "
+        f"A {r},{r} 0 {large_arc} 1 {x2:.4f},{y2:.4f} Z"
+    )
+
+
+def _hr_zone_duration_label(seconds: float | None) -> str:
+    """Format zone seconds with the dashboard ``HH:MM:SS`` / ``MM:SS`` helper."""
+    if seconds is None or seconds < 0:
+        return "—"
+    # Under one hour, prefer MM:SS (pace-style); otherwise HH:MM:SS like moving time.
+    include_hours = seconds >= 3600
+    formatted = format_time(seconds, include_hours=include_hours)
+    return formatted if formatted else "—"
+
+
+def hr_zones_last_week_pie_html(
+    last_week_zones: Mapping[str, object] | None,
+) -> str:
+    """Return a last-full-week HR-zone donut for the Fitness right gutter.
+
+    Positioned under the Plotly Zone legend in the shared ``FITNESS_MARGIN_R``
+    deadspan so it sits beside the stacked area chart, not below it. Each zone
+    wedge is an SVG path with a ``.kpi-tooltip`` on hover/focus showing zone
+    name, percent of HR time, and total duration in that zone.
+
+    Parameters
+    ----------
+    last_week_zones : mapping or None
+        Shares from ``last_full_week_hr_zone_shares`` (``week_label`` plus
+        ``zone_1_pct`` … ``zone_5_pct``, optionally ``zone_1_sec`` …).
+
+    Returns
+    -------
+    str
+        HTML for ``.hr-zones-pie-gutter`` (caption + SVG donut or empty state).
+    """
+    label = ""
+    values: list[float] = []
+    seconds: list[float | None] = []
+    if last_week_zones is not None:
+        label = str(last_week_zones.get("week_label") or "")
+        for idx in range(1, len(HR_ZONE_COLORS) + 1):
+            if f"zone_{idx}_pct" not in last_week_zones:
+                values = []
+                seconds = []
+                break
+            values.append(_parse_zone_float(last_week_zones.get(f"zone_{idx}_pct")))
+            sec_key = f"zone_{idx}_sec"
+            if sec_key in last_week_zones:
+                seconds.append(_parse_zone_float(last_week_zones.get(sec_key)))
+            else:
+                seconds.append(None)
+
+    caption = "Last week"
+    if label:
+        caption = f"Last week<br>{html.escape(label)}"
+
+    total = sum(values)
+    if not values or total <= 0:
+        body = (
+            '<div class="hr-zones-pie-empty" role="img" '
+            'aria-label="No HR zone data for last week">No HR data</div>'
+        )
+    else:
+        paths: list[str] = []
+        tips: list[str] = []
+        aria_parts: list[str] = []
+        cursor = 0.0
+        for idx, (color, pct, sec) in enumerate(
+            zip(HR_ZONE_COLORS, values, seconds, strict=True), start=1
+        ):
+            start_frac = cursor / total
+            cursor += pct
+            end_frac = cursor / total
+            duration = _hr_zone_duration_label(sec)
+            pct_label = f"{pct:.0f}%"
+            tip_plain = f"Zone {idx}: {pct_label} · {duration}"
+            aria_parts.append(tip_plain)
+            tip_html = (
+                f"<strong>Zone {idx}</strong>"
+                f"{html.escape(pct_label)} of HR time"
+                f"<br>{html.escape(duration)}"
+            )
+            tips.append(
+                f'<span class="kpi-tooltip hr-zones-pie-tip" data-zone="{idx}" '
+                f'role="tooltip">{tip_html}</span>'
+            )
+            path_d = _hr_zone_pie_slice_path(start_frac, end_frac)
+            if not path_d:
+                continue
+            paths.append(
+                f'<path class="hr-zones-pie-slice" data-zone="{idx}" '
+                f'tabindex="0" role="listitem" '
+                f'aria-label="{html.escape(tip_plain)}" '
+                f'fill="{color}" d="{path_d}" />'
+            )
+        aria = html.escape(", ".join(aria_parts))
+        body = (
+            f'<div class="hr-zones-pie-donut" role="list" aria-label="{aria}">'
+            '<svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">'
+            f'{"".join(paths)}'
+            "</svg>"
+            f'{"".join(tips)}'
+            "</div>"
+        )
+
+    return (
+        '<div class="hr-zones-pie-gutter" role="group" '
+        'aria-label="Last week heart rate zone share">'
+        '<aside class="hr-zones-pie-panel">'
+        f'<div class="hr-zones-pie-caption">{caption}</div>'
+        f"{body}"
+        "</aside></div>"
+    )
 
 
 RACE_WEEK_STRIP_KEYS = ("race_week_strip",)
@@ -811,7 +1015,7 @@ def shoe_kpi_cards_html(gear, goal: float = SHOE_MILEAGE_GOAL) -> str:
 NAV_PAGES: tuple[tuple[str, str, str], ...] = (
     ("metrics", "Metrics", "pages/metrics.py"),
     ("training", "Training", "pages/training.py"),
-    ("training_insights", "Training Insights", "pages/training_insights.py"),
+    ("fitness", "Fitness", "pages/fitness.py"),
     ("race_results", "Race Results", "pages/race_results.py"),
 )
 
@@ -923,18 +1127,16 @@ def render_section_nav(
 
 
 def render_insights_section_nav(
-    hr_grain: str, heatmap_grain: str, pace_label: str
+    hr_grain: str, pace_labels: str | Sequence[str]
 ) -> None:
-    """Render in-page section links for Training Insights.
+    """Render in-page section links for Fitness.
 
     Parameters
     ----------
     hr_grain : str
         Period grain label for the pace-vs-HR chart title.
-    heatmap_grain : str
-        Period grain label for the mileage heatmap title.
-    pace_label : str
-        Selected pace-bin display label.
+    pace_labels : str or sequence of str
+        Selected pace-bin display label(s).
 
     Returns
     -------
@@ -943,11 +1145,12 @@ def render_insights_section_nav(
     """
     render_section_nav(
         [
-            ("chart-pace-hr", pace_hr_title(hr_grain, pace_label)),
-            ("chart-mileage-heatmap", heatmap_title(heatmap_grain)),
+            ("chart-pace-hr", pace_hr_title(hr_grain, pace_labels)),
+            ("chart-aerobic-efficiency", aerobic_efficiency_title(hr_grain)),
+            ("chart-hr-zones", hr_zones_title(hr_grain)),
         ],
-        aria_label="Training Insights sections",
-        current_page="training_insights",
+        aria_label="Fitness sections",
+        current_page="fitness",
     )
 
 

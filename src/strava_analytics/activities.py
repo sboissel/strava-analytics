@@ -29,19 +29,19 @@ PACE_BIN_LABELS = [
 # ========================
 # RUNNING HR ZONE STATS
 # ========================
-def hr_zone_pct_columns(zone_count: int = HR_ZONE_COUNT) -> List[str]:
-    """Return canonical per-HR-zone percentage column names."""
-    return [f"hr_zone_{idx}_pct" for idx in range(1, zone_count + 1)]
+def hr_zone_sec_columns(zone_count: int = HR_ZONE_COUNT) -> List[str]:
+    """Return canonical per-HR-zone time-in-seconds column names."""
+    return [f"hr_zone_{idx}_sec" for idx in range(1, zone_count + 1)]
 
 
 def _empty_hr_zone_stats(zone_count: int = HR_ZONE_COUNT) -> Dict[str, Optional[float]]:
-    """Return null easy/hard and per-zone percentage fields."""
+    """Return null easy/hard and per-zone time-in-seconds fields."""
     stats: Dict[str, Optional[float]] = {
         "%_easy": None,
         "mt_min_easy": None,
         "mt_min_hard": None,
     }
-    for column in hr_zone_pct_columns(zone_count):
+    for column in hr_zone_sec_columns(zone_count):
         stats[column] = None
     return stats
 
@@ -50,7 +50,7 @@ def compute_hr_zone_stats(
     zones: Sequence[Dict[str, Any]],
     zone_count: int = HR_ZONE_COUNT,
 ) -> Dict[str, Optional[float]]:
-    """Summarize easy/hard time and per-zone percentages from Strava zones.
+    """Summarize easy/hard time and per-zone seconds from Strava zones.
 
     Parameters
     ----------
@@ -58,19 +58,20 @@ def compute_hr_zone_stats(
         Activity zone objects from ``GET /activities/{id}/zones``. Only the
         ``type == "heartrate"`` object is used; pace/power zones are ignored.
     zone_count : int, optional
-        Number of ``hr_zone_N_pct`` columns to emit (padded with ``None`` when
+        Number of ``hr_zone_N_sec`` columns to emit (padded with ``None`` when
         fewer buckets are present). Defaults to 5.
 
     Returns
     -------
     dict
-        ``%_easy``, ``mt_min_easy``, ``mt_min_hard``, and ``hr_zone_1_pct`` …
-        ``hr_zone_{zone_count}_pct``. Values are ``None`` when heartrate zones
+        ``%_easy``, ``mt_min_easy``, ``mt_min_hard``, and ``hr_zone_1_sec`` …
+        ``hr_zone_{zone_count}_sec``. Values are ``None`` when heartrate zones
         are missing or total bucket time is zero.
 
     Easy time is the sum of the first two heartrate distribution buckets;
-    moderate/hard is the sum of the remaining buckets. Percentages use the sum
-    of all bucket ``time`` values (seconds) as the denominator.
+    moderate/hard is the sum of the remaining buckets. Easy/hard percentages
+    use the sum of all bucket ``time`` values (seconds) as the denominator.
+    Per-zone columns store those bucket ``time`` values as-is.
     """
     empty = _empty_hr_zone_stats(zone_count)
     hr_section = next((section for section in zones if section.get("type") == "heartrate"), None)
@@ -95,9 +96,9 @@ def compute_hr_zone_stats(
         "mt_min_hard": round(hard_duration_s / 60, 1),
     }
     for idx in range(zone_count):
-        column = f"hr_zone_{idx + 1}_pct"
+        column = f"hr_zone_{idx + 1}_sec"
         if idx < len(times):
-            stats[column] = round((times[idx] / total_duration_s) * 100, 1)
+            stats[column] = times[idx]
         else:
             stats[column] = None
     return stats

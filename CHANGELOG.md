@@ -14,11 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Metrics** dashboard page with **Achievements**, **Key Indicators**, Inspect, and **Shoes** mileage.
 - **Training** **Races** marker strip under Controls: cool-gray squares for training periods, gold diamonds for race periods, and an ⓘ legend; gold diamonds also mark race periods on the 80:20, mileage, and elevation charts.
 - Summed **elevation** chart (ft) on Training, on the same period axis as 80:20 and mileage.
-- `StravaClient.get_activity_zones` and per-HR-zone percentage columns on `data/strava_run_analysis.csv` (`hr_zone_1_pct` … `hr_zone_5_pct`).
+- 100% stacked **Heart Rate Zones** area chart on **Fitness** (`hr_zone_1_sec` … `hr_zone_5_sec` summed per Show By period), with a **last-week** SVG donut in the shared right plot gutter under the Zone legend (latest completed Mon–Sun ISO week; per-zone hover/focus tooltips with %, and duration via `format_time`).
+- Elevation-adjusted **aerobic efficiency** line chart on **Fitness** (non-race runs; residual of mph/bpm vs ft/mi, median by Show By period), with an ⓘ in the shared right plot gutter (formula, elevation residual, and median-by-period aggregation on hover/focus).
+- `StravaClient.get_activity_zones` and per-HR-zone time-in-seconds columns on `data/strava_run_analysis.csv` (`hr_zone_1_sec` … `hr_zone_5_sec`).
 - `gear_id` column on activity analysis CSVs (from Strava summary `gear_id`, or nested `gear.id` when present).
 
 ### Changed
 
+- Renamed the **Training Insights** page to **Fitness** (`training_insights.py` → `fitness.py`).
+- Fitness chart order is Average HR by Pace, then Aerobic Efficiency, then Heart Rate Zones (efficiency is a separate chart; the dual-axis overlay on HR-by-pace is removed).
+- Fitness Average HR, Aerobic Efficiency, and Heart Rate Zones share identical plot margins (`l=80`, `r=168`) and x-domain so X axes align across the legend / info gutter.
+- Fitness Aerobic Efficiency chart heading omits “(elevation-adjusted)”; the Y-axis title is **Aerobic Efficiency** (`standoff=32`), with elevation details only in the right-gutter ⓘ tooltip.
+- Fitness Pace Range multiselect uses pale teal selected chips (Streamlit `primaryColor`, not default red), ~90% Controls width (wider than Show By’s 75%) so “Choose options” fits; chips wrap and grow height with no min-width floor, and single-selection height hugs the chip (collapsed filter input, no blank second row).
+- Fitness Controls / Avg HR column keep SHOWING and LATEST ACTIVITY aligned without clipping (`overflow` no longer hidden on the meta column).
+- Fitness pace-bin line colors are fixed across the full bin list (darker = faster).
+- Fitness chart hovers (Average HR and Heart Rate Zones) show ISO week ranges as abbreviated dates when Show By is Week (e.g. `Jan 5, 2026 - Jan 11, 2026`).
+- Per-HR-zone run columns store seconds (`hr_zone_1_sec` … `hr_zone_5_sec`) instead of percent of time.
 - Shoe mileage is baseline + sum of activity `distance_miles` by `gear_id` instead of the Strava gear API distance.
 - Easy/hard run metrics (`%_easy`, `mt_min_easy`, `mt_min_hard`) now come from Strava activity heartrate **zones** (zones 1–2 = easy, remaining buckets = moderate/hard) instead of a fixed HR stream threshold.
 - Training charts use a sampled 5-swatch earthy palette (slate goal lines, teal mileage, gold race markers, peach Easy, terracotta Hard); elevation stays muted purple (`#8575A8`) since the strip has no purple.
@@ -30,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Mileage heatmap from **Fitness**; it remains on **Training** as an expander.
 - `StravaClient.get_gear`, gear CSV sync (`update_gear_mileage_csv`), and `data/strava_gear.csv`.
 
 ## [1.2.0] — 2026-08-12

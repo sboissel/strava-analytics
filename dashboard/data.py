@@ -14,7 +14,7 @@ try:
 except ImportError:
     import _bootstrap  # noqa: F401
 
-from strava_analytics.activities import last_full_week_bounds
+from strava_analytics.activities import hr_zone_sec_columns, last_full_week_bounds
 from strava_analytics.csv_io import activity_analysis_paths
 from strava_analytics.gear import gear_mileage_from_activities
 from theme import LONGEST_RUN_GOAL, WEEKLY_MILES_GOAL
@@ -32,6 +32,25 @@ PERIOD_CONFIG: dict[PeriodGrain, dict[str, int | str]] = {
 }
 
 
+def _coerce_race_flag(series: pd.Series) -> pd.Series:
+    """Normalize CSV race flags to boolean.
+
+    Parameters
+    ----------
+    series : pandas.Series
+        Raw ``race`` column from run analysis (bool, string, or mixed).
+
+    Returns
+    -------
+    pandas.Series
+        Boolean series; only explicit true-like values are ``True``.
+    """
+    if pd.api.types.is_bool_dtype(series):
+        return series.fillna(False)
+    text = series.astype(str).str.strip().str.lower()
+    return text.isin(("true", "1", "yes"))
+
+
 def _load_runs_uncached(data_dir: Path) -> pd.DataFrame:
     """Load run analysis rows with parsed dates and numeric fields."""
     path = data_dir / "strava_run_analysis.csv"
@@ -44,9 +63,14 @@ def _load_runs_uncached(data_dir: Path) -> pd.DataFrame:
         "mt_min_easy",
         "mt_min_hard",
         "elevation_gain_ft",
+        "avg_hr",
+        "avg_pace_sec",
+        *hr_zone_sec_columns(),
     ):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+    if "race" in df.columns:
+        df["race"] = _coerce_race_flag(df["race"])
     return df.sort_values("date")
 
 
@@ -68,7 +92,8 @@ def load_runs(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     -------
     pandas.DataFrame
         Run rows sorted by activity date with parsed timestamps and numeric
-        columns for distance and heart-rate metrics.
+        columns for distance, pace, heart rate, elevation, and a boolean
+        ``race`` flag.
 
     Raises
     ------
@@ -188,6 +213,45 @@ def format_full_month(ts: pd.Timestamp) -> str:
     return f"{ts.strftime('%B')} {ts.year}"
 
 
+def _format_short_date(ts: pd.Timestamp) -> str:
+    """Format a timestamp as an abbreviated calendar date.
+
+    Parameters
+    ----------
+    ts : pandas.Timestamp
+        Timestamp to format.
+
+    Returns
+    -------
+    str
+        Abbreviated date such as ``Jan 1, 2026``.
+    """
+    stamp = pd.Timestamp(ts)
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("UTC")
+    return f"{stamp.strftime('%b')} {stamp.day}, {stamp.year}"
+
+
+def format_week_range_short(monday: pd.Timestamp) -> str:
+    """Format an ISO week Monday as a short Mon–Sun range.
+
+    Parameters
+    ----------
+    monday : pandas.Timestamp
+        Monday (ISO day 1) of the week.
+
+    Returns
+    -------
+    str
+        Range such as ``Jan 1, 2026 - Jan 7, 2026``.
+    """
+    monday = pd.Timestamp(monday)
+    if monday.tzinfo is not None:
+        monday = monday.tz_convert("UTC")
+    sunday = monday + pd.Timedelta(days=6)
+    return f"{_format_short_date(monday)} - {_format_short_date(sunday)}"
+
+
 def normalize_utc(ts: pd.Timestamp) -> pd.Timestamp:
     """Normalize a timestamp to UTC midnight.
 
@@ -235,7 +299,7 @@ def _format_mdy_label(dates: pd.Series) -> pd.Series:
 
 
 def period_tooltip_label(period_key: str, grain: PeriodGrain) -> str:
-    """Return a full-date hover label for a sortable period key.
+    """Return a hover label for a sortable period key.
 
     Parameters
     ----------
@@ -247,14 +311,15 @@ def period_tooltip_label(period_key: str, grain: PeriodGrain) -> str:
     Returns
     -------
     str
-        Human-readable tooltip label for chart hovers.
+        Human-readable tooltip label for chart hovers. Week grain is the ISO
+        Mon–Sun range with abbreviated months (``Jan 5, 2026 - Jan 11, 2026``).
     """
     if grain == "Day":
         return format_full_date(pd.Timestamp(period_key, tz="UTC"))
     if grain == "Week":
         year_str, week_str = period_key.split("-")
         monday = pd.Timestamp.fromisocalendar(int(year_str), int(week_str), 1).tz_localize("UTC")
-        return format_full_date(monday)
+        return format_week_range_short(monday)
     if grain == "Month":
         return format_full_month(pd.Timestamp(f"{period_key}-01", tz="UTC"))
     return period_key

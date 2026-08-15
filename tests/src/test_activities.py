@@ -13,7 +13,7 @@ from strava_analytics.activities import (
     compute_run_pace_summary_from_streams,
     extract_gear_id,
     format_time,
-    hr_zone_pct_columns,
+    hr_zone_sec_columns,
     last_full_week_bounds,
     pace_bin_for_seconds,
     process_activities,
@@ -57,12 +57,12 @@ class HeartRateZoneAnalysisTests(unittest.TestCase):
     """Test compute_hr_zone_stats."""
 
     def test_compute_hr_zone_stats_returns_none_without_heartrate_zones(self):
-        """Ensure missing heartrate zones leave easy/hard and zone %s empty."""
+        """Ensure missing heartrate zones leave easy/hard and zone seconds empty."""
         empty = compute_hr_zone_stats([])
         self.assertIsNone(empty["%_easy"])
         self.assertIsNone(empty["mt_min_easy"])
         self.assertIsNone(empty["mt_min_hard"])
-        for column in hr_zone_pct_columns():
+        for column in hr_zone_sec_columns():
             self.assertIsNone(empty[column])
 
         pace_only = compute_hr_zone_stats(
@@ -71,18 +71,18 @@ class HeartRateZoneAnalysisTests(unittest.TestCase):
         self.assertIsNone(pace_only["%_easy"])
 
     def test_compute_hr_zone_stats_sample_payload(self):
-        """Validate easy/hard and zone %s against the Strava sample heartrate zones."""
+        """Validate easy/hard and zone seconds against the Strava sample heartrate zones."""
         stats = compute_hr_zone_stats(SAMPLE_HR_ZONES)
         total = 167.0 + 2400.0
 
         self.assertEqual(stats["%_easy"], round(total / total * 100, 1))
         self.assertEqual(stats["mt_min_easy"], round(total / 60, 1))
         self.assertEqual(stats["mt_min_hard"], 0.0)
-        self.assertEqual(stats["hr_zone_1_pct"], round(167.0 / total * 100, 1))
-        self.assertEqual(stats["hr_zone_2_pct"], round(2400.0 / total * 100, 1))
-        self.assertEqual(stats["hr_zone_3_pct"], 0.0)
-        self.assertEqual(stats["hr_zone_4_pct"], 0.0)
-        self.assertEqual(stats["hr_zone_5_pct"], 0.0)
+        self.assertEqual(stats["hr_zone_1_sec"], 167.0)
+        self.assertEqual(stats["hr_zone_2_sec"], 2400.0)
+        self.assertEqual(stats["hr_zone_3_sec"], 0.0)
+        self.assertEqual(stats["hr_zone_4_sec"], 0.0)
+        self.assertEqual(stats["hr_zone_5_sec"], 0.0)
 
     def test_compute_hr_zone_stats_returns_none_when_all_bucket_times_zero(self):
         """Ensure all-zero heartrate bucket times are treated as missing HR."""
@@ -98,7 +98,7 @@ class HeartRateZoneAnalysisTests(unittest.TestCase):
             ]
         )
         self.assertIsNone(stats["%_easy"])
-        self.assertIsNone(stats["hr_zone_1_pct"])
+        self.assertIsNone(stats["hr_zone_1_sec"])
 
     def test_compute_hr_zone_stats_handles_fewer_and_more_buckets(self):
         """Ensure first two buckets are easy, the rest hard, and zone columns pad to five."""
@@ -117,11 +117,11 @@ class HeartRateZoneAnalysisTests(unittest.TestCase):
         self.assertEqual(three_buckets["%_easy"], 50.0)
         self.assertEqual(three_buckets["mt_min_easy"], round(100.0 / 60, 1))
         self.assertEqual(three_buckets["mt_min_hard"], round(100.0 / 60, 1))
-        self.assertEqual(three_buckets["hr_zone_1_pct"], 15.0)
-        self.assertEqual(three_buckets["hr_zone_2_pct"], 35.0)
-        self.assertEqual(three_buckets["hr_zone_3_pct"], 50.0)
-        self.assertIsNone(three_buckets["hr_zone_4_pct"])
-        self.assertIsNone(three_buckets["hr_zone_5_pct"])
+        self.assertEqual(three_buckets["hr_zone_1_sec"], 30.0)
+        self.assertEqual(three_buckets["hr_zone_2_sec"], 70.0)
+        self.assertEqual(three_buckets["hr_zone_3_sec"], 100.0)
+        self.assertIsNone(three_buckets["hr_zone_4_sec"])
+        self.assertIsNone(three_buckets["hr_zone_5_sec"])
 
         six_buckets = compute_hr_zone_stats(
             [
@@ -140,8 +140,8 @@ class HeartRateZoneAnalysisTests(unittest.TestCase):
         )
         self.assertEqual(six_buckets["%_easy"], 20.0)
         self.assertEqual(six_buckets["mt_min_hard"], round(80.0 / 60, 1))
-        self.assertEqual(six_buckets["hr_zone_5_pct"], 10.0)
-        self.assertNotIn("hr_zone_6_pct", six_buckets)
+        self.assertEqual(six_buckets["hr_zone_5_sec"], 10.0)
+        self.assertNotIn("hr_zone_6_sec", six_buckets)
 
 
 class PaceFormattingTests(unittest.TestCase):
@@ -334,7 +334,9 @@ class ActivityRowHelperTests(unittest.TestCase):
         self.assertEqual(row["%_easy"], 100.0)
         self.assertEqual(row["mt_min_easy"], round(2567.0 / 60, 1))
         self.assertEqual(row["mt_min_hard"], 0.0)
-        self.assertIn("hr_zone_1_pct", row)
+        self.assertIn("hr_zone_1_sec", row)
+        self.assertEqual(row["hr_zone_1_sec"], 167.0)
+        self.assertEqual(row["hr_zone_2_sec"], 2400.0)
         self.assertEqual(pace_summary["activity_id"], 123)
         self.assertEqual(pace_summary["seconds_1000_1030"], 600)
         get_streams.assert_called_once_with(123, ["heartrate", "distance", "time"])
@@ -356,7 +358,7 @@ class ActivityRowHelperTests(unittest.TestCase):
 
         self.assertEqual(row["avg_hr"], 140.0)
         self.assertNotIn("%_easy", row)
-        self.assertNotIn("hr_zone_1_pct", row)
+        self.assertNotIn("hr_zone_1_sec", row)
 
 
 class ActivityProcessingTests(unittest.TestCase):
@@ -615,8 +617,8 @@ class CsvProcessingTests(unittest.TestCase):
         self.assertEqual(sorted(run_df["activity_id"].astype(str).tolist()), ["123", "999"])
         self.assertEqual(ride_df["activity_id"].astype(str).tolist(), ["456"])
         self.assertIn("avg_hr", run_df.columns)
-        self.assertIn("hr_zone_1_pct", run_df.columns)
-        self.assertIn("hr_zone_5_pct", run_df.columns)
+        self.assertIn("hr_zone_1_sec", run_df.columns)
+        self.assertIn("hr_zone_5_sec", run_df.columns)
         self.assertNotIn("avg_hr", ride_df.columns)
 
     def test_update_activity_analysis_csvs_keeps_new_row_for_duplicate_activity_id(self):

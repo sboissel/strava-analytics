@@ -9,10 +9,20 @@ import pandas as pd
 from dashboard.charts import (
     ELEVATION_BAR,
     ELEVATION_COLORSCALE,
+    HR_ZONE_COLORS,
+    HR_ZONE_STACKGROUP,
     IN_PROGRESS_HATCH_COLOR,
     IN_PROGRESS_HATCH_SHAPE,
     MILEAGE_BAR,
     MILEAGE_COLORSCALE,
+    PACE_HR_COLORSCALE,
+    PACE_HR_MARGIN,
+    HR_ZONES_MARGIN,
+    AEROBIC_EFFICIENCY_MARGIN,
+    AEROBIC_EFFICIENCY_Y_TITLE_STANDOFF,
+    FITNESS_MARGIN_L,
+    FITNESS_MARGIN_R,
+    FITNESS_XAXIS_DOMAIN,
     RACE_CHART_DIAMOND_SIZE,
     RACE_CHART_DIAMOND_Y_PAD_FRAC,
     RACE_STRIP_DIAMOND_COLOR,
@@ -32,17 +42,28 @@ from dashboard.charts import (
     TRAINING_MARGIN_R,
     TRAINING_OFFSETGROUP,
     TRAINING_XAXIS_DOMAIN,
+    aerobic_efficiency_line_chart,
+    aerobic_efficiency_title,
     compliance_chart,
     elevation_chart,
+    hr_zones_stacked_area_chart,
+    hr_zones_title,
     mileage_chart,
     mileage_heatmap_chart,
+    pace_hr_line_chart,
+    pace_hr_bin_color_map,
+    pace_hr_series_colors,
+    pace_hr_title,
     race_weeks_chart,
 )
 from dashboard.theme import (
     CARD,
+    CHART_AEROBIC_EFFICIENCY_MARGIN_TOP,
     CHART_COMPLIANCE_MARGIN_TOP,
     CHART_ELEVATION_MARGIN_TOP,
+    CHART_HR_ZONES_MARGIN_TOP,
     CHART_MILEAGE_MARGIN_TOP,
+    CHART_PACE_HR_MARGIN_TOP,
     CHART_RACE_WEEKS_MARGIN_TOP,
     EASY,
     ELEVATION_PURPLE,
@@ -58,6 +79,8 @@ from dashboard.theme import (
 )
 from dashboard.ui import (
     RACE_WEEK_STRIP_KEYS,
+    aerobic_efficiency_info_html,
+    hr_zones_last_week_pie_html,
     race_weeks_legend_html,
 )
 from race_data import RACE_TYPE_ORDER
@@ -308,7 +331,7 @@ class TrainingChartTests(unittest.TestCase):
         self.assertEqual(TRAINING_GOAL_LINE, "#2E4552")
 
     def test_mileage_heatmap_uses_mileage_bar_palette(self):
-        """Insights/Training calendar heatmap shares MILEAGE_COLORSCALE."""
+        """Training calendar heatmap shares MILEAGE_COLORSCALE."""
         matrix = np.array([[5.0, 10.0], [15.0, 20.0]])
         fig = mileage_heatmap_chart(
             matrix,
@@ -661,6 +684,34 @@ class TrainingChartThemeTests(unittest.TestCase):
         self.assertNotIn("race_weeks_snap_html", metrics)
         self.assertNotIn("race_week_strip", metrics)
 
+    def test_fitness_page_has_no_mileage_heatmap(self):
+        """Mileage heatmap lives on Training, not Fitness."""
+        fitness = (
+            Path(__file__).resolve().parents[2]
+            / "dashboard"
+            / "pages"
+            / "fitness.py"
+        ).read_text()
+        self.assertIn("pace_hr_line_chart", fitness)
+        self.assertIn("hr_zones_stacked_area_chart", fitness)
+        self.assertNotIn("mileage_heatmap_chart", fitness)
+        self.assertNotIn("mileage_heatmap_matrix", fitness)
+        self.assertNotIn("chart-mileage-heatmap", fitness)
+        self.assertNotIn("heatmap_showing_label", fitness)
+        self.assertNotIn("Heatmap", fitness)
+        ui = (
+            Path(__file__).resolve().parents[2] / "dashboard" / "ui.py"
+        ).read_text()
+        insights_nav = ui[
+            ui.index("def render_insights_section_nav") : ui.index(
+                "def render_metrics_section_nav"
+            )
+        ]
+        self.assertIn("chart-pace-hr", insights_nav)
+        self.assertIn("chart-hr-zones", insights_nav)
+        self.assertNotIn("chart-mileage-heatmap", insights_nav)
+        self.assertNotIn("heatmap_title", insights_nav)
+
     def test_race_week_strip_compact_box_css(self):
         self.assertIn(".st-key-race_week_strip::before", GLOBAL_CSS)
         self.assertIn(
@@ -739,6 +790,609 @@ class TrainingChartThemeTests(unittest.TestCase):
         strong_block = GLOBAL_CSS.split(".kpi-tooltip strong {", 1)[1].split("}", 1)[0]
         self.assertIn(f"color: {MUTED} !important", strong_block)
         self.assertIn(".kpi-tooltip .race-legend-marker {", GLOBAL_CSS)
+
+
+class FitnessHrZoneChartTests(unittest.TestCase):
+    """100% stacked HR-zone area chart on Fitness."""
+
+    def _period_df(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "period_key": ["2026-10", "2026-11"],
+                "period_label": ["Mar 2, 26", "Mar 9, 26"],
+                "period_tooltip": [
+                    "Mar 2, 2026 - Mar 8, 2026",
+                    "Mar 9, 2026 - Mar 15, 2026",
+                ],
+                "zone_1_pct": [20.0, np.nan],
+                "zone_2_pct": [50.0, np.nan],
+                "zone_3_pct": [20.0, np.nan],
+                "zone_4_pct": [10.0, np.nan],
+                "zone_5_pct": [0.0, np.nan],
+                "in_progress": [False, True],
+            }
+        )
+
+    def test_five_area_traces_y_in_0_100(self):
+        fig = hr_zones_stacked_area_chart(self._period_df(), "Week")
+        area = [t for t in fig.data if getattr(t, "type", None) == "scatter"]
+        self.assertEqual(len(area), 5)
+        self.assertEqual(
+            [trace.name for trace in area],
+            ["Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5"],
+        )
+        expected_first = [20.0, 50.0, 20.0, 10.0, 0.0]
+        for trace, color, first_y in zip(
+            area, HR_ZONE_COLORS, expected_first, strict=True
+        ):
+            self.assertEqual(trace.type, "scatter")
+            self.assertEqual(trace.stackgroup, HR_ZONE_STACKGROUP)
+            self.assertFalse(trace.connectgaps)
+            self.assertEqual(trace.line.color, color)
+            self.assertEqual(trace.fillcolor, color)
+            y_vals = list(trace.y)
+            self.assertEqual(len(y_vals), 2)
+            self.assertAlmostEqual(float(y_vals[0]), first_y)
+            self.assertTrue(y_vals[1] is None or (isinstance(y_vals[1], float) and np.isnan(y_vals[1])))
+            self.assertGreaterEqual(float(y_vals[0]), 0.0)
+            self.assertLessEqual(float(y_vals[0]), 100.0)
+        self.assertEqual(tuple(fig.layout.yaxis.range), (0, 100))
+        self.assertEqual(fig.layout.yaxis.ticksuffix, "%")
+        self.assertEqual(fig.layout.title.text, "Weekly Heart Rate Zones")
+        self.assertEqual(hr_zones_title("Week"), "Weekly Heart Rate Zones")
+        self.assertEqual(
+            HR_ZONE_COLORS,
+            ("#6B9B96", "#509B8F", "#E3C677", "#D87659", "#A33B3B"),
+        )
+        self.assertEqual(HR_ZONE_COLORS[1], MILEAGE_BAR)
+        self.assertEqual(HR_ZONE_COLORS[2], RACE_STRIP_DIAMOND_COLOR)
+        self.assertEqual(HR_ZONE_COLORS[3], TRAINING_HARD)
+
+    def test_last_week_pie_under_legend(self):
+        """Donut HTML sits in the right gutter; Plotly figure has no pie trace."""
+        last_week = {
+            "week_key": "2026-10",
+            "week_label": "Mar 2, 2026 - Mar 8, 2026",
+            "zone_1_pct": 40.0,
+            "zone_2_pct": 30.0,
+            "zone_3_pct": 20.0,
+            "zone_4_pct": 10.0,
+            "zone_5_pct": 0.0,
+            "zone_1_sec": 240.0,
+            "zone_2_sec": 180.0,
+            "zone_3_sec": 120.0,
+            "zone_4_sec": 60.0,
+            "zone_5_sec": 0.0,
+        }
+        fig = hr_zones_stacked_area_chart(self._period_df(), "Week")
+        pies = [t for t in fig.data if getattr(t, "type", None) == "pie"]
+        self.assertEqual(len(pies), 0)
+        self.assertEqual(fig.layout.margin.r, FITNESS_MARGIN_R)
+
+        html = hr_zones_last_week_pie_html(last_week)
+        self.assertIn("hr-zones-pie-gutter", html)
+        self.assertIn("hr-zones-pie-panel", html)
+        self.assertIn("hr-zones-pie-donut", html)
+        self.assertIn("hr-zones-pie-slice", html)
+        self.assertIn("hr-zones-pie-tip", html)
+        self.assertIn("Last week", html)
+        self.assertIn("Mar 2, 2026 - Mar 8, 2026", html)
+        self.assertIn("<svg", html)
+        self.assertNotIn("conic-gradient", html)
+        # Zero-share zones omit a path (no hover target); colors for used wedges only.
+        for color in HR_ZONE_COLORS[:4]:
+            self.assertIn(color, html)
+        self.assertNotIn(HR_ZONE_COLORS[4], html)
+        self.assertIn("Zone 1: 40% · 04:00", html)
+        self.assertIn("<strong>Zone 1</strong>", html)
+        self.assertIn("40% of HR time", html)
+        self.assertIn("04:00", html)
+        self.assertIn("Zone 2: 30% · 03:00", html)
+        self.assertIn("01:00", html)  # zone 4 duration
+
+        empty = hr_zones_last_week_pie_html({"week_label": "Mar 2, 2026 - Mar 8, 2026"})
+        self.assertIn("hr-zones-pie-empty", empty)
+        self.assertIn("No HR data", empty)
+
+    def test_week_hover_uses_iso_week_range(self):
+        """Unified hover header (x) and customdata are abbreviated Mon–Sun ranges."""
+        fig = hr_zones_stacked_area_chart(self._period_df(), "Week")
+        expected = ["Mar 2, 2026 - Mar 8, 2026", "Mar 9, 2026 - Mar 15, 2026"]
+        area = [t for t in fig.data if getattr(t, "type", None) == "scatter"]
+        for trace in area:
+            self.assertEqual(list(trace.x), expected)
+            self.assertEqual(list(trace.customdata), expected)
+            self.assertIn("Zone", trace.hovertemplate)
+            self.assertNotIn("%{x}", trace.hovertemplate)
+        self.assertEqual(list(fig.layout.xaxis.ticktext), ["Mar 2, 26", "Mar 9, 26"])
+        self.assertEqual(list(fig.layout.xaxis.tickvals), expected)
+
+    def test_empty_chart_keeps_percent_axis(self):
+        fig = hr_zones_stacked_area_chart(pd.DataFrame(), "Month")
+        area = [t for t in fig.data if getattr(t, "type", None) == "scatter"]
+        self.assertEqual(len(area), 0)
+        self.assertEqual(tuple(fig.layout.yaxis.range), (0, 100))
+        self.assertEqual(fig.layout.title.text, "Monthly Heart Rate Zones")
+
+    def test_fitness_page_wires_hr_zones_chart(self):
+        fitness = (
+            Path(__file__).resolve().parents[2]
+            / "dashboard"
+            / "pages"
+            / "fitness.py"
+        ).read_text()
+        self.assertIn("hr_zones_stacked_area_chart", fitness)
+        self.assertIn("aggregate_hr_zones_by_period", fitness)
+        self.assertIn("last_full_week_hr_zone_shares", fitness)
+        self.assertIn("hr_zones_last_week_pie_html", fitness)
+        self.assertIn("hr_zones_last_week_pie_html(last_week_zones)", fitness)
+        self.assertIn("hr_zones_stacked_area_chart(zone_periods, grain)", fitness)
+        self.assertNotIn("last_week_zones=", fitness)
+        self.assertIn('id="chart-hr-zones"', fitness)
+        self.assertLess(fitness.find("chart-pace-hr"), fitness.find("chart-hr-zones"))
+        self.assertIn("#chart-hr-zones", GLOBAL_CSS)
+        self.assertIn("--chart-hr-zones-margin-top:", GLOBAL_CSS)
+        self.assertIn(".hr-zones-pie-gutter", GLOBAL_CSS)
+        self.assertIn(".hr-zones-pie-panel", GLOBAL_CSS)
+        self.assertIn(".hr-zones-pie-donut", GLOBAL_CSS)
+        self.assertIn(".hr-zones-pie-slice", GLOBAL_CSS)
+        self.assertIn(".hr-zones-pie-tip", GLOBAL_CSS)
+        tip_block = GLOBAL_CSS.split(
+            ".hr-zones-pie-donut .hr-zones-pie-tip {", 1
+        )[1].split("}", 1)[0]
+        self.assertIn("width: min(12rem, 72vw);", tip_block)
+        self.assertIn("width: var(--fitness-plot-margin-r)", GLOBAL_CSS)
+        self.assertEqual(CHART_HR_ZONES_MARGIN_TOP, "1.85rem")
+        self.assertEqual(CHART_PACE_HR_MARGIN_TOP, "2.75rem")
+        ui = (
+            Path(__file__).resolve().parents[2] / "dashboard" / "ui.py"
+        ).read_text()
+        insights_nav = ui[
+            ui.index("def render_insights_section_nav") : ui.index(
+                "def render_metrics_section_nav"
+            )
+        ]
+        self.assertIn("chart-pace-hr", insights_nav)
+        self.assertIn("chart-hr-zones", insights_nav)
+        self.assertIn("hr_zones_title", insights_nav)
+
+
+class FitnessPaceHrChartTests(unittest.TestCase):
+    """Average HR line chart on Fitness."""
+
+    def _period_df(self, avg_hr: list[float] | None = None) -> pd.DataFrame:
+        values = [148.0, 152.0] if avg_hr is None else avg_hr
+        return pd.DataFrame(
+            {
+                "period_key": ["2026-10", "2026-11"],
+                "period_label": ["Mar 2, 26", "Mar 9, 26"],
+                "period_tooltip": [
+                    "Mar 2, 2026 - Mar 8, 2026",
+                    "Mar 9, 2026 - Mar 15, 2026",
+                ],
+                "avg_hr": values,
+                "in_progress": [False, True],
+            }
+        )
+
+    def _brightness(self, color: str) -> float:
+        hex_color = color.lstrip("#")
+        r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+        return 0.299 * r + 0.587 * g + 0.114 * b
+
+    def test_week_hover_uses_iso_week_range(self):
+        """Unified hover header is the abbreviated ISO week Mon–Sun range."""
+        fig = pace_hr_line_chart(
+            [("8:00-8:30", self._period_df())],
+            "Week",
+        )
+        self.assertEqual(len(fig.data), 1)
+        scatter = fig.data[0]
+        expected = ["Mar 2, 2026 - Mar 8, 2026", "Mar 9, 2026 - Mar 15, 2026"]
+        self.assertEqual(list(scatter.x), expected)
+        self.assertEqual(list(fig.layout.xaxis.ticktext), ["Mar 2, 26", "Mar 9, 26"])
+        self.assertEqual(fig.layout.hovermode, "x unified")
+        self.assertIn("Avg HR", scatter.hovertemplate)
+        self.assertEqual(scatter.name, "8:00-8:30")
+
+    def test_multiple_traces_use_fixed_bin_colors_darker_equals_faster(self):
+        """Selected bins keep full-list colors; fastest is darkest teal."""
+        from dashboard.pace_bins import PACE_BIN_OPTIONS
+
+        series = [
+            ("7:30-8:00", self._period_df([150.0, 151.0])),
+            ("8:00-8:30", self._period_df([148.0, 152.0])),
+            ("8:30-9:00", self._period_df([146.0, 149.0])),
+        ]
+        fig = pace_hr_line_chart(series, "Week")
+        self.assertEqual(len(fig.data), 3)
+        color_map = pace_hr_bin_color_map()
+        colors = pace_hr_series_colors([label for label, _ in series])
+        self.assertEqual(colors, [color_map[label] for label, _ in series])
+        # Full list has more than 3 bins, so these mid bins are not scale endpoints.
+        all_labels = [label for label, _ in PACE_BIN_OPTIONS]
+        self.assertGreater(len(all_labels), 3)
+        self.assertNotEqual(colors[0], PACE_HR_COLORSCALE[-1][1])
+        self.assertNotEqual(colors[-1], PACE_HR_COLORSCALE[0][1])
+        for scatter, expected_name, expected_color in zip(
+            fig.data,
+            ["7:30-8:00", "8:00-8:30", "8:30-9:00"],
+            colors,
+        ):
+            self.assertEqual(scatter.name, expected_name)
+            self.assertEqual(scatter.line.color, expected_color)
+            self.assertEqual(scatter.marker.color, expected_color)
+        self.assertLess(self._brightness(colors[0]), self._brightness(colors[1]))
+        self.assertLess(self._brightness(colors[1]), self._brightness(colors[2]))
+        self.assertTrue(fig.layout.showlegend)
+
+    def test_pace_colors_are_static_not_selection_relative(self):
+        """A lone slow bin stays light; Under 7:00 stays darkest alone or with peers."""
+        color_map = pace_hr_bin_color_map()
+        under = "Under 7:00"
+        slow = "9:30-10:00"
+        self.assertIn(under, color_map)
+        self.assertIn(slow, color_map)
+        self.assertEqual(color_map[under], PACE_HR_COLORSCALE[-1][1])
+        self.assertEqual(color_map[slow], pace_hr_series_colors([slow])[0])
+        self.assertEqual(
+            pace_hr_series_colors([under]),
+            [color_map[under]],
+        )
+        self.assertEqual(
+            pace_hr_series_colors([under, slow]),
+            [color_map[under], color_map[slow]],
+        )
+        # Slow alone must not jump to the dark end (old selection-relative behavior).
+        self.assertNotEqual(pace_hr_series_colors([slow])[0], PACE_HR_COLORSCALE[-1][1])
+        self.assertGreater(
+            self._brightness(color_map[slow]),
+            self._brightness(color_map[under]),
+        )
+        fig = pace_hr_line_chart([(slow, self._period_df())], "Week")
+        self.assertEqual(fig.data[0].line.color, color_map[slow])
+
+    def test_single_default_bin_uses_fixed_mid_scale_color(self):
+        colors = pace_hr_series_colors(["8:00-8:30"])
+        self.assertEqual(len(colors), 1)
+        self.assertEqual(colors[0], pace_hr_bin_color_map()["8:00-8:30"])
+        self.assertNotEqual(colors[0], PACE_HR_COLORSCALE[-1][1])
+        fig = pace_hr_line_chart([("8:00-8:30", self._period_df())], "Week")
+        self.assertEqual(fig.data[0].line.color, colors[0])
+        self.assertEqual(
+            fig.layout.title.text,
+            "Average HR for 8:00-8:30 min/mile pace",
+        )
+        self.assertEqual(
+            pace_hr_title("Week", ["8:00-8:30"]),
+            "Average HR for 8:00-8:30 min/mile pace",
+        )
+
+    def test_multi_bin_title_is_generic(self):
+        self.assertEqual(
+            pace_hr_title("Week", ["7:30-8:00", "8:00-8:30"]),
+            "Average HR by Pace Range",
+        )
+        fig = pace_hr_line_chart(
+            [
+                ("7:30-8:00", self._period_df()),
+                ("8:00-8:30", self._period_df()),
+            ],
+            "Week",
+        )
+        self.assertEqual(fig.layout.title.text, "Average HR by Pace Range")
+
+    def test_fitness_page_uses_pace_multiselect(self):
+        fitness = (
+            Path(__file__).resolve().parents[2]
+            / "dashboard"
+            / "pages"
+            / "fitness.py"
+        ).read_text()
+        self.assertIn("st.multiselect", fitness)
+        self.assertIn('key="insights_pace_bins"', fitness)
+        self.assertIn("default=[default_label]", fitness)
+        self.assertIn("DEFAULT_PACE_BIN_KEY", fitness)
+        self.assertIn("pace_hr_line_chart(hr_series, grain)", fitness)
+        self.assertNotIn('key="insights_pace_bin"', fitness)
+
+    def test_pace_hr_chart_has_no_efficiency_dual_axis(self):
+        """Average HR by Pace is HR-only; efficiency lives on its own chart."""
+        series = [
+            ("7:30-8:00", self._period_df([150.0, 151.0])),
+            ("8:00-8:30", self._period_df([148.0, 152.0])),
+        ]
+        fig = pace_hr_line_chart(series, "Week")
+        self.assertEqual(len(fig.data), 2)
+        self.assertEqual(fig.data[0].name, "7:30-8:00")
+        self.assertEqual(fig.data[1].name, "8:00-8:30")
+        for scatter in fig.data:
+            self.assertNotEqual(getattr(scatter, "yaxis", "y"), "y2")
+            self.assertNotEqual(scatter.name, "Aerobic Efficiency")
+        self.assertFalse(hasattr(fig.layout, "yaxis2") and fig.layout.yaxis2)
+        self.assertEqual(fig.layout.yaxis.title.text, "Average HR (bpm)")
+
+    def test_fitness_page_keeps_standalone_efficiency_chart(self):
+        fitness = (
+            Path(__file__).resolve().parents[2]
+            / "dashboard"
+            / "pages"
+            / "fitness.py"
+        ).read_text()
+        self.assertIn("pace_hr_line_chart(hr_series, grain)", fitness)
+        self.assertNotIn(
+            "pace_hr_line_chart(hr_series, grain, efficiency_periods)",
+            fitness,
+        )
+        self.assertIn("aerobic_efficiency_line_chart(efficiency_periods, grain)", fitness)
+
+    def test_fitness_pace_multiselect_css_uses_teal_chips_and_readable_width(self):
+        """Pace chips teal; Pace Range ~90% (Show By 75%); wrap, hug single chip."""
+        from dashboard.theme import INK, PACE_MULTISELECT_CHIP
+
+        self.assertIn(".st-key-insights_pace_bins", GLOBAL_CSS)
+        self.assertIn("[data-tag]", GLOBAL_CSS)
+        self.assertIn(f"background: {PACE_MULTISELECT_CHIP} !important", GLOBAL_CSS)
+        self.assertIn(f"background-color: {PACE_MULTISELECT_CHIP} !important", GLOBAL_CSS)
+        self.assertEqual(PACE_MULTISELECT_CHIP.lower(), "#b7ddd8")
+        chip_block = GLOBAL_CSS.split(".st-key-insights_pace_bins [data-tag]")[1][:800]
+        self.assertIn(f"color: {INK} !important", chip_block)
+        self.assertIn("text-overflow: clip !important", chip_block)
+        self.assertIn("min-width: 0 !important", chip_block)
+        # Show By stays compact 75%; Pace Range slightly wider for “Choose options”.
+        self.assertIn(
+            '[data-testid="stColumn"]:has(.controls-panel--compact) [data-testid="stMultiSelect"]',
+            GLOBAL_CSS,
+        )
+        self.assertIn("max-width: 75% !important", GLOBAL_CSS)
+        self.assertIn("width: 75% !important", GLOBAL_CSS)
+        self.assertIn(
+            ".st-key-insights_pace_bins [data-testid=\"stMultiSelect\"]",
+            GLOBAL_CSS,
+        )
+        self.assertIn("max-width: 90% !important", GLOBAL_CSS)
+        self.assertIn("width: 90% !important", GLOBAL_CSS)
+        self.assertIn(".fitness-pace-bins-anchor", GLOBAL_CSS)
+        self.assertNotIn("min-width: 11.5rem !important", GLOBAL_CSS)
+        self.assertNotIn("max-width: 14.5rem", GLOBAL_CSS)
+        self.assertIn("box-sizing: border-box !important", GLOBAL_CSS)
+        self.assertIn("max-height: none !important", GLOBAL_CSS)
+        self.assertIn("flex-wrap: wrap !important", GLOBAL_CSS)
+        self.assertIn("overflow-x: hidden", GLOBAL_CSS)
+        # Single chip: collapse filter input so it does not leave a blank second row.
+        self.assertIn(
+            '[data-testid="stMultiSelectTagsContainer"]:has([data-tag]) input',
+            GLOBAL_CSS,
+        )
+        self.assertIn("align-content: flex-start !important", GLOBAL_CSS)
+        # SHOWING must not be vertically clipped by the Avg HR column.
+        avg_hr_overflow = GLOBAL_CSS.split(
+            "[data-testid=\"stColumn\"]:has(.insights-controls-panel)"
+        )
+        self.assertTrue(
+            any(
+                "nth-child(2)" in block
+                and "overflow-x: clip" in block
+                and "overflow-y: visible" in block
+                for block in avg_hr_overflow
+            ),
+            "Avg HR column should use overflow-x:clip / overflow-y:visible",
+        )
+
+
+class FitnessAerobicEfficiencyChartTests(unittest.TestCase):
+    """Elevation-adjusted aerobic-efficiency line chart on Fitness."""
+
+    def _period_df(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "period_key": ["2026-10", "2026-11", "2026-12"],
+                "period_label": ["Mar 2, 26", "Mar 9, 26", "Mar 16, 26"],
+                "period_tooltip": [
+                    "Mar 2, 2026 - Mar 8, 2026",
+                    "Mar 9, 2026 - Mar 15, 2026",
+                    "Mar 16, 2026 - Mar 22, 2026",
+                ],
+                "residual": [0.002, np.nan, -0.001],
+                "efficiency": [0.050, np.nan, 0.048],
+                "elev_ft_per_mile": [40.0, np.nan, 80.0],
+                "in_progress": [False, False, True],
+            }
+        )
+
+    def test_line_trace_gaps_missing_periods(self):
+        fig = aerobic_efficiency_line_chart(self._period_df(), "Week")
+        self.assertEqual(len(fig.data), 1)
+        scatter = fig.data[0]
+        self.assertEqual(scatter.type, "scatter")
+        self.assertEqual(scatter.mode, "lines+markers")
+        self.assertFalse(scatter.connectgaps)
+        y_vals = list(scatter.y)
+        self.assertEqual(len(y_vals), 3)
+        self.assertAlmostEqual(float(y_vals[0]), 0.002)
+        self.assertTrue(y_vals[1] is None or (isinstance(y_vals[1], float) and np.isnan(y_vals[1])))
+        self.assertAlmostEqual(float(y_vals[2]), -0.001)
+        self.assertEqual(scatter.line.color, ELEVATION_BAR)
+        # Plotly title is blank; HTML title row supplies the heading + ⓘ.
+        self.assertEqual(fig.layout.title.text, "")
+        self.assertEqual(
+            aerobic_efficiency_title("Week"),
+            "Weekly Aerobic Efficiency",
+        )
+        self.assertNotIn("elevation-adjusted", aerobic_efficiency_title("Week"))
+        self.assertEqual(
+            fig.layout.yaxis.title.text,
+            "Aerobic Efficiency",
+        )
+        self.assertNotIn("elevation", (fig.layout.yaxis.title.text or "").lower())
+        self.assertEqual(
+            fig.layout.yaxis.title.standoff,
+            AEROBIC_EFFICIENCY_Y_TITLE_STANDOFF,
+        )
+        self.assertEqual(AEROBIC_EFFICIENCY_Y_TITLE_STANDOFF, 32)
+        self.assertEqual(FITNESS_MARGIN_L, 80)
+        self.assertEqual(FITNESS_MARGIN_R, 168)
+        self.assertEqual(fig.layout.margin.l, PACE_HR_MARGIN["l"])
+        self.assertEqual(fig.layout.margin.r, PACE_HR_MARGIN["r"])
+        self.assertEqual(fig.layout.margin.l, HR_ZONES_MARGIN["l"])
+        self.assertEqual(fig.layout.margin.r, HR_ZONES_MARGIN["r"])
+        self.assertEqual(fig.layout.margin.l, AEROBIC_EFFICIENCY_MARGIN["l"])
+        self.assertEqual(fig.layout.margin.r, AEROBIC_EFFICIENCY_MARGIN["r"])
+        self.assertEqual(fig.layout.margin.l, FITNESS_MARGIN_L)
+        self.assertEqual(fig.layout.margin.r, FITNESS_MARGIN_R)
+        self.assertEqual(tuple(fig.layout.xaxis.domain), tuple(FITNESS_XAXIS_DOMAIN))
+        self.assertFalse(fig.layout.xaxis.automargin)
+        self.assertFalse(fig.layout.yaxis.automargin)
+        self.assertFalse(fig.layout.margin.autoexpand)
+
+    def test_fitness_charts_share_shortest_plot_margins(self):
+        """Avg HR legend column sets the shortest plot; Efficiency + Zones match."""
+        pace_series = [
+            (
+                "7:30-8:00",
+                pd.DataFrame(
+                    {
+                        "period_key": ["2026-10", "2026-11"],
+                        "period_label": ["Mar 2, 26", "Mar 9, 26"],
+                        "period_tooltip": ["March 2, 2026", "March 9, 2026"],
+                        "avg_hr": [150.0, 151.0],
+                        "in_progress": [False, True],
+                    }
+                ),
+            )
+        ]
+        zone_df = pd.DataFrame(
+            {
+                "period_key": ["2026-10", "2026-11"],
+                "period_label": ["Mar 2, 26", "Mar 9, 26"],
+                "period_tooltip": [
+                    "Mar 2, 2026 - Mar 8, 2026",
+                    "Mar 9, 2026 - Mar 15, 2026",
+                ],
+                "zone_1_pct": [20.0, 25.0],
+                "zone_2_pct": [50.0, 45.0],
+                "zone_3_pct": [20.0, 20.0],
+                "zone_4_pct": [10.0, 10.0],
+                "zone_5_pct": [0.0, 0.0],
+                "in_progress": [False, True],
+            }
+        )
+        figs = [
+            pace_hr_line_chart(pace_series, "Week"),
+            aerobic_efficiency_line_chart(self._period_df(), "Week"),
+            hr_zones_stacked_area_chart(zone_df, "Week"),
+        ]
+        margins = {(fig.layout.margin.l, fig.layout.margin.r) for fig in figs}
+        self.assertEqual(margins, {(FITNESS_MARGIN_L, FITNESS_MARGIN_R)})
+        domains = {tuple(fig.layout.xaxis.domain) for fig in figs}
+        self.assertEqual(domains, {tuple(FITNESS_XAXIS_DOMAIN)})
+        for fig in figs:
+            self.assertFalse(fig.layout.xaxis.automargin)
+            self.assertFalse(fig.layout.yaxis.automargin)
+            self.assertFalse(fig.layout.margin.autoexpand)
+
+    def test_week_hover_uses_iso_week_range(self):
+        fig = aerobic_efficiency_line_chart(self._period_df(), "Week")
+        scatter = fig.data[0]
+        custom = [list(row) for row in scatter.customdata]
+        self.assertEqual(custom[0][0], "Mar 2, 2026 - Mar 8, 2026")
+        self.assertEqual(custom[1][0], "Mar 9, 2026 - Mar 15, 2026")
+        self.assertIn("<b>%{customdata[0]}</b>", scatter.hovertemplate)
+        self.assertIn("Adj. efficiency", scatter.hovertemplate)
+        self.assertIn("mph/bpm", scatter.hovertemplate)
+        self.assertIn("ft/mi", scatter.hovertemplate)
+        self.assertEqual(list(scatter.x), ["Mar 2, 26", "Mar 9, 26", "Mar 16, 26"])
+
+    def test_fitness_page_wires_aerobic_efficiency_chart(self):
+        fitness = (
+            Path(__file__).resolve().parents[2]
+            / "dashboard"
+            / "pages"
+            / "fitness.py"
+        ).read_text()
+        self.assertIn("aerobic_efficiency_line_chart", fitness)
+        self.assertIn("aggregate_aerobic_efficiency_by_period", fitness)
+        self.assertIn('id="chart-aerobic-efficiency"', fitness)
+        self.assertIn("aerobic_efficiency_info_html", fitness)
+        # Panel must be its own markdown block — not inside the zero-height page-anchor.
+        self.assertNotIn(
+            'id="chart-aerobic-efficiency" class="page-anchor insights-chart"></div>"\n'
+            "    + aerobic_efficiency_info_html()",
+            fitness,
+        )
+        self.assertIn("aerobic_efficiency_info_html(aerobic_efficiency_title(grain))", fitness)
+        self.assertIn(".aerobic-efficiency-chart-title", GLOBAL_CSS)
+        self.assertIn(".aerobic-efficiency-info .kpi-info", GLOBAL_CSS)
+        # ⓘ flush at plot right edge / gutter start — not centered in 168px deadspan.
+        self.assertIn(
+            "left: calc(100% - var(--fitness-plot-margin-r));",
+            GLOBAL_CSS,
+        )
+        self.assertNotIn(
+            "right: calc(var(--fitness-plot-margin-r) / 2 - 0.475rem);",
+            GLOBAL_CSS,
+        )
+        # Tooltip opens to the right of ⓘ into/past the gutter (readable width).
+        tip_block = GLOBAL_CSS.split(
+            ".aerobic-efficiency-info .kpi-tooltip {", 1
+        )[1].split("}", 1)[0]
+        self.assertIn("left: calc(100% + 0.35rem);", tip_block)
+        self.assertIn("transform: none;", tip_block)
+        self.assertIn("width: min(20rem, 72vw);", tip_block)
+        self.assertNotIn("fitness-plot-margin-r) - 1.25rem", tip_block)
+        self.assertNotIn("translateX(50%)", tip_block)
+        self.assertNotIn(".aerobic-efficiency-side-panel", GLOBAL_CSS)
+        self.assertIn("--fitness-plot-margin-r:", GLOBAL_CSS)
+        self.assertLess(fitness.find("chart-pace-hr"), fitness.find("chart-aerobic-efficiency"))
+        self.assertLess(
+            fitness.find("chart-aerobic-efficiency"),
+            fitness.find("chart-hr-zones"),
+        )
+        self.assertIn("#chart-aerobic-efficiency", GLOBAL_CSS)
+        self.assertIn("--chart-aerobic-efficiency-margin-top:", GLOBAL_CSS)
+        self.assertEqual(CHART_AEROBIC_EFFICIENCY_MARGIN_TOP, "1.85rem")
+        self.assertIn(
+            "[data-testid=\"stElementContainer\"]:has(.aerobic-efficiency-info)",
+            GLOBAL_CSS,
+        )
+        self.assertIn("margin-bottom: -2.15rem !important", GLOBAL_CSS)
+        ui = (
+            Path(__file__).resolve().parents[2] / "dashboard" / "ui.py"
+        ).read_text()
+        insights_nav = ui[
+            ui.index("def render_insights_section_nav") : ui.index(
+                "def render_metrics_section_nav"
+            )
+        ]
+        self.assertIn("chart-aerobic-efficiency", insights_nav)
+        self.assertIn("aerobic_efficiency_title", insights_nav)
+        self.assertLess(
+            insights_nav.find("chart-pace-hr"),
+            insights_nav.find("chart-aerobic-efficiency"),
+        )
+        self.assertLess(
+            insights_nav.find("chart-aerobic-efficiency"),
+            insights_nav.find("chart-hr-zones"),
+        )
+        html = aerobic_efficiency_info_html("Weekly Aerobic Efficiency")
+        self.assertIn("kpi-info", html)
+        self.assertIn("kpi-tooltip", html)
+        self.assertIn("aerobic-efficiency-info", html)
+        self.assertIn("aerobic-efficiency-chart-title", html)
+        self.assertNotIn("aerobic-efficiency-side-panel", html)
+        self.assertIn("Weekly Aerobic Efficiency", html)
+        self.assertLess(
+            html.index("Weekly Aerobic Efficiency"),
+            html.index("kpi-info"),
+        )
+        self.assertIn("ⓘ", html)
+        self.assertIn("3600", html)
+        self.assertIn("mph per bpm", html)
+        self.assertIn("ft/mi", html)
+        self.assertIn("residual", html.lower())
+        self.assertIn("non-race", html.lower())
+        self.assertIn("Show By", html)
+        self.assertIn("more efficient than expected", html)
 
 
 if __name__ == "__main__":

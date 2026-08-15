@@ -1,6 +1,8 @@
 """Tests for dashboard.data."""
 
+import tempfile
 import unittest
+from pathlib import Path
 
 import pandas as pd
 
@@ -304,7 +306,7 @@ class MetricsSectionNavTests(unittest.TestCase):
         self.assertEqual(page_titles, [
             "Metrics",
             "Training",
-            "Training Insights",
+            "Fitness",
             "Race Results",
         ])
         self.assertNotIn("Inspect", labels)
@@ -324,7 +326,7 @@ class MetricsSectionNavTests(unittest.TestCase):
         self.assertEqual(kinds[:page_count], [
             ("page", "Metrics"),
             ("page", "Training"),
-            ("page", "Training Insights"),
+            ("page", "Fitness"),
             ("page", "Race Results"),
         ])
         self.assertEqual(
@@ -376,6 +378,8 @@ class MetricsSectionNavTests(unittest.TestCase):
         # New React Aria select (not BaseWeb-only polish).
         self.assertIn('[data-testid="stSelectbox"]', GLOBAL_CSS)
         self.assertIn('[data-testid="stSelectboxVirtualDropdown"]', GLOBAL_CSS)
+        self.assertIn('[data-testid="stMultiSelect"]', GLOBAL_CSS)
+        self.assertIn('[data-testid="stMultiSelectVirtualDropdown"]', GLOBAL_CSS)
         self.assertIn("div:has(> input)", GLOBAL_CSS)
         polish = GLOBAL_CSS.split("Selectbox polish")[1][:1200]
         self.assertIn(f"background: {CARD} !important", polish)
@@ -997,6 +1001,96 @@ class AnnotateRacePeriodsTests(unittest.TestCase):
         week_11 = result.loc[result["period_key"] == "2026-11"].iloc[0]
         self.assertEqual(week_11["race_type"], "Other")
         self.assertEqual(week_11["race_hover"], "Trail Classic<br>12.4 mi")
+
+
+class PeriodTooltipLabelTests(unittest.TestCase):
+    """Hover date strings for Day / Week / Month / Year period keys."""
+
+    def test_format_week_range_short_abbreviated_mon_sun(self):
+        from dashboard.data import format_week_range_short
+
+        monday = pd.Timestamp("2026-01-05", tz="UTC")
+        self.assertEqual(
+            format_week_range_short(monday),
+            "Jan 5, 2026 - Jan 11, 2026",
+        )
+
+    def test_format_week_range_short_spans_year(self):
+        from dashboard.data import format_week_range_short
+
+        monday = pd.Timestamp("2025-12-29", tz="UTC")
+        self.assertEqual(
+            format_week_range_short(monday),
+            "Dec 29, 2025 - Jan 4, 2026",
+        )
+
+    def test_week_tooltip_is_iso_week_range(self):
+        from dashboard.data import period_tooltip_label
+
+        self.assertEqual(
+            period_tooltip_label("2026-02", "Week"),
+            "Jan 5, 2026 - Jan 11, 2026",
+        )
+        self.assertEqual(
+            period_tooltip_label("2026-01", "Week"),
+            "Dec 29, 2025 - Jan 4, 2026",
+        )
+
+    def test_day_month_year_tooltips_keep_existing_formats(self):
+        from dashboard.data import period_tooltip_label
+
+        self.assertEqual(
+            period_tooltip_label("2026-01-05", "Day"),
+            "January 5, 2026",
+        )
+        self.assertEqual(period_tooltip_label("2026-01", "Month"), "January 2026")
+        self.assertEqual(period_tooltip_label("2026", "Year"), "2026")
+
+
+class LoadRunsParsingTests(unittest.TestCase):
+    """Fitness fields parsed from the run analysis CSV."""
+
+    def test_parses_efficiency_fields_and_race_flag(self):
+        from dashboard.data import load_runs
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            pd.DataFrame(
+                [
+                    {
+                        "activity_id": "1",
+                        "name": "Easy run",
+                        "type": "Run",
+                        "date": "2026-03-10T08:00:00Z",
+                        "distance_miles": "6.2",
+                        "elevation_gain_ft": "210.5",
+                        "avg_pace_sec": "480",
+                        "avg_hr": "148.2",
+                        "race": "False",
+                    },
+                    {
+                        "activity_id": "2",
+                        "name": "5k",
+                        "type": "Run",
+                        "date": "2026-03-12T08:00:00Z",
+                        "distance_miles": "3.1",
+                        "elevation_gain_ft": "40",
+                        "avg_pace_sec": "360",
+                        "avg_hr": "172",
+                        "race": "True",
+                    },
+                ]
+            ).to_csv(data_dir / "strava_run_analysis.csv", index=False)
+            runs = load_runs(data_dir)
+
+        self.assertEqual(len(runs), 2)
+        self.assertAlmostEqual(float(runs.iloc[0]["avg_hr"]), 148.2)
+        self.assertAlmostEqual(float(runs.iloc[0]["avg_pace_sec"]), 480.0)
+        self.assertAlmostEqual(float(runs.iloc[0]["elevation_gain_ft"]), 210.5)
+        self.assertAlmostEqual(float(runs.iloc[0]["distance_miles"]), 6.2)
+        self.assertFalse(bool(runs.iloc[0]["race"]))
+        self.assertTrue(bool(runs.iloc[1]["race"]))
+        self.assertEqual(str(runs["race"].dtype), "bool")
 
 
 if __name__ == "__main__":

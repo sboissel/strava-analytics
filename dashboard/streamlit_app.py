@@ -17,7 +17,7 @@ st.set_page_config(
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
 training = st.Page("pages/training.py", title="Training")
-insights = st.Page("pages/training_insights.py", title="Training Insights")
+fitness = st.Page("pages/fitness.py", title="Fitness")
 races = st.Page("pages/race_results.py", title="Race Results")
 metrics = st.Page("pages/metrics.py", title="Metrics", default=True)
 
@@ -32,7 +32,7 @@ st.markdown(
 )
 
 pg = st.navigation(
-    [metrics, training, insights, races],
+    [metrics, training, fitness, races],
     position="hidden",
 )
 pg.run()

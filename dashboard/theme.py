@@ -16,6 +16,8 @@ EASY = "#5B9BD5"
 HARD = "#E67E22"
 MILES = "#3A4A55"
 TARGET = "#152028"
+# Fitness Pace Range multiselect chips — light teal (not Streamlit primary red).
+PACE_MULTISELECT_CHIP = "#B7DDD8"
 
 # Traffic-light KPI/chart bins (best → worst). Separate from EASY/HARD series colors.
 TRAFFIC_GREEN = "#2dc937"  # bright green
@@ -224,8 +226,11 @@ RACE_STRIP_SCROLL_MARGIN_TOP = "3.75rem"
 # Compact strip width: past the last marker, not into the Training legend column.
 RACE_STRIP_END_PAD_PX = 12
 TRAINING_PLOT_MARGIN_R_PX = 168
-CHART_PACE_HR_MARGIN_TOP = "2.75rem"          # Insights: HR line
-CHART_MILEAGE_HEATMAP_MARGIN_TOP = "3.25rem"  # Insights: heatmap
+CHART_PACE_HR_MARGIN_TOP = "2.75rem"          # Fitness: HR line
+CHART_HR_ZONES_MARGIN_TOP = "1.85rem"         # Fitness: HR zone stack
+CHART_AEROBIC_EFFICIENCY_MARGIN_TOP = "1.85rem"  # Fitness: elevation-adjusted efficiency
+# Shared Fitness right gutter (pace/zone legends + efficiency ⓘ tooltip).
+FITNESS_PLOT_MARGIN_R_PX = TRAINING_PLOT_MARGIN_R_PX
 CHART_RACE_RESULTS_MARGIN_TOP = LAYOUT_GAP      # Race Results: scatter
 CHART_RACE_TABLE_MARGIN_TOP = "0.75rem"         # Race Results: table
 # Subtle athletic purple for Total Elevation achievement badge.
@@ -244,10 +249,12 @@ GLOBAL_CSS = f"""
     --race-strip-scroll-margin-top: {RACE_STRIP_SCROLL_MARGIN_TOP};
     --training-plot-margin-l: 78px;
     --training-plot-margin-r: {TRAINING_PLOT_MARGIN_R_PX}px;
+    --fitness-plot-margin-r: {FITNESS_PLOT_MARGIN_R_PX}px;
     --race-strip-end-pad: {RACE_STRIP_END_PAD_PX}px;
     --race-strip-bg: {RACE_STRIP_BG};
     --chart-pace-hr-margin-top: {CHART_PACE_HR_MARGIN_TOP};
-    --chart-mileage-heatmap-margin-top: {CHART_MILEAGE_HEATMAP_MARGIN_TOP};
+    --chart-hr-zones-margin-top: {CHART_HR_ZONES_MARGIN_TOP};
+    --chart-aerobic-efficiency-margin-top: {CHART_AEROBIC_EFFICIENCY_MARGIN_TOP};
     --chart-race-results-margin-top: {CHART_RACE_RESULTS_MARGIN_TOP};
     --chart-race-table-margin-top: {CHART_RACE_TABLE_MARGIN_TOP};
     background:
@@ -519,7 +526,8 @@ GLOBAL_CSS = f"""
   #chart-mileage,
   #chart-elevation,
   #chart-pace-hr,
-  #chart-mileage-heatmap,
+  #chart-hr-zones,
+  #chart-aerobic-efficiency,
   #chart-race-results,
   #race-results-table {{
     scroll-margin-top: 1.25rem;
@@ -845,17 +853,198 @@ GLOBAL_CSS = f"""
     margin-top: var(--chart-elevation-margin-top) !important;
     margin-bottom: 0 !important;
   }}
-  /* Insights: pace vs HR chart */
+  /* Fitness: pace vs HR chart */
   [data-testid="stElementContainer"]:has(#chart-pace-hr)
     + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
     margin-top: var(--chart-pace-hr-margin-top) !important;
     margin-bottom: 0 !important;
   }}
-  /* Insights: mileage heatmap chart */
-  [data-testid="stElementContainer"]:has(#chart-mileage-heatmap)
-    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
-    margin-top: var(--chart-mileage-heatmap-margin-top) !important;
+  /* Fitness: HR zone 100% stacked area — last-week donut overlays the shared
+     right deadspan under the Zone legend (beside the stack, not below it). */
+  [data-testid="stElementContainer"]:has(#chart-hr-zones)
+    + [data-testid="stElementContainer"]:has(.hr-zones-pie-gutter) {{
+    position: relative;
+    z-index: 8;
+    display: block;
+    width: 100%;
+    height: 0 !important;
+    min-height: 0 !important;
+    margin-top: var(--chart-hr-zones-margin-top) !important;
     margin-bottom: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    pointer-events: none;
+  }}
+  [data-testid="stElementContainer"]:has(.hr-zones-pie-gutter)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(.hr-zones-pie-gutter)
+    [data-testid="stMarkdown"] {{
+    overflow: visible !important;
+    width: 100% !important;
+  }}
+  [data-testid="stElementContainer"]:has(.hr-zones-pie-gutter)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }}
+  .hr-zones-pie-gutter {{
+    position: relative;
+    width: 100%;
+    height: 0;
+    z-index: 8;
+    pointer-events: none;
+  }}
+  .hr-zones-pie-panel {{
+    position: absolute;
+    top: 10.75rem;
+    right: 0;
+    width: var(--fitness-plot-margin-r);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0 0.35rem 0.25rem;
+    pointer-events: none;
+    z-index: 9;
+  }}
+  .hr-zones-pie-caption {{
+    font-family: {FONT_BODY};
+    font-size: 0.68rem;
+    line-height: 1.25;
+    text-align: center;
+    color: {MUTED};
+  }}
+  .hr-zones-pie-donut {{
+    position: relative;
+    width: 6.75rem;
+    height: 6.75rem;
+    flex-shrink: 0;
+    pointer-events: auto;
+  }}
+  .hr-zones-pie-donut svg {{
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    overflow: visible;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+    -webkit-mask: radial-gradient(circle, transparent 28%, #000 29%);
+    mask: radial-gradient(circle, transparent 28%, #000 29%);
+  }}
+  .hr-zones-pie-slice {{
+    cursor: default;
+    outline: none;
+  }}
+  .hr-zones-pie-slice:focus-visible {{
+    filter: brightness(1.08);
+  }}
+  .hr-zones-pie-donut .hr-zones-pie-tip {{
+    left: 50%;
+    right: auto;
+    bottom: calc(100% + 0.35rem);
+    top: auto;
+    transform: translateX(-50%);
+    /* Wider than the ~168px gutter so zone / % / time lines read cleanly. */
+    width: min(12rem, 72vw);
+    z-index: 60;
+  }}
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="1"]:hover) .hr-zones-pie-tip[data-zone="1"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="1"]:focus) .hr-zones-pie-tip[data-zone="1"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="1"]:focus-visible) .hr-zones-pie-tip[data-zone="1"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="2"]:hover) .hr-zones-pie-tip[data-zone="2"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="2"]:focus) .hr-zones-pie-tip[data-zone="2"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="2"]:focus-visible) .hr-zones-pie-tip[data-zone="2"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="3"]:hover) .hr-zones-pie-tip[data-zone="3"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="3"]:focus) .hr-zones-pie-tip[data-zone="3"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="3"]:focus-visible) .hr-zones-pie-tip[data-zone="3"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="4"]:hover) .hr-zones-pie-tip[data-zone="4"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="4"]:focus) .hr-zones-pie-tip[data-zone="4"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="4"]:focus-visible) .hr-zones-pie-tip[data-zone="4"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="5"]:hover) .hr-zones-pie-tip[data-zone="5"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="5"]:focus) .hr-zones-pie-tip[data-zone="5"],
+  .hr-zones-pie-donut:has(.hr-zones-pie-slice[data-zone="5"]:focus-visible) .hr-zones-pie-tip[data-zone="5"] {{
+    visibility: visible;
+    opacity: 1;
+  }}
+  .hr-zones-pie-empty {{
+    width: 6.75rem;
+    height: 6.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-family: {FONT_BODY};
+    font-size: 0.68rem;
+    line-height: 1.25;
+    color: {MUTED};
+  }}
+  /* Fitness: aerobic efficiency — HTML title overlays the empty Plotly title
+     band; ⓘ sits flush at the start of the shared right deadspan (plot right
+     edge / gutter left), not centered in FITNESS_MARGIN_R. Hover/focus shows
+     definition via .kpi-tooltip opening to the right of the icon (into / past
+     the gutter, not over the plot). In-flow + negative margin so Streamlit
+     does not clip the overlay (not inside the zero-height page-anchor). */
+  [data-testid="stElementContainer"]:has(.aerobic-efficiency-info) {{
+    position: relative;
+    z-index: 8;
+    display: block;
+    width: 100%;
+    margin-top: var(--chart-aerobic-efficiency-margin-top) !important;
+    margin-bottom: -2.15rem !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    pointer-events: none;
+  }}
+  [data-testid="stElementContainer"]:has(.aerobic-efficiency-info)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(.aerobic-efficiency-info)
+    [data-testid="stMarkdown"] {{
+    overflow: visible !important;
+    width: 100% !important;
+  }}
+  [data-testid="stElementContainer"]:has(.aerobic-efficiency-info)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }}
+  .aerobic-efficiency-info {{
+    position: relative;
+    width: 100%;
+    min-height: 1.6rem;
+    z-index: 8;
+    pointer-events: none;
+  }}
+  .aerobic-efficiency-chart-title {{
+    position: relative;
+    top: 0.4rem;
+    display: inline-block;
+    font-family: {FONT_BODY};
+    font-size: {CHART_TITLE_SIZE_PX}px;
+    font-weight: {CHART_TITLE_FONT_WEIGHT};
+    color: {INK};
+    line-height: 1.2;
+    max-width: calc(100% - var(--fitness-plot-margin-r) - 0.75rem);
+  }}
+  .aerobic-efficiency-info .kpi-info {{
+    position: absolute;
+    top: 0.4rem;
+    /* Left edge of ⓘ = start of right gutter (plot’s right edge). */
+    left: calc(100% - var(--fitness-plot-margin-r));
+    right: auto;
+    pointer-events: auto;
+    z-index: 9;
+  }}
+  .aerobic-efficiency-info .kpi-tooltip {{
+    /* Open to the right of ⓘ into/past the gutter — do not cover the plot. */
+    left: calc(100% + 0.35rem);
+    right: auto;
+    bottom: auto;
+    top: 0;
+    transform: none;
+    /* ~20rem so definition paragraphs are readable (not clipped to gutter). */
+    width: min(20rem, 72vw);
+    z-index: 60;
   }}
   /* Race Results: scatter chart */
   [data-testid="stElementContainer"]:has(#chart-race-results)
@@ -956,12 +1145,16 @@ GLOBAL_CSS = f"""
     padding-bottom: 0 !important;
   }}
   [data-testid="stColumn"]:has(.controls-panel) [data-testid="stSelectbox"],
-  [data-testid="column"]:has(.controls-panel) [data-testid="stSelectbox"] {{
+  [data-testid="column"]:has(.controls-panel) [data-testid="stSelectbox"],
+  [data-testid="stColumn"]:has(.controls-panel) [data-testid="stMultiSelect"],
+  [data-testid="column"]:has(.controls-panel) [data-testid="stMultiSelect"] {{
     margin-bottom: 0 !important;
   }}
   /* Streamlit 1.61+ select control (React Aria) — not BaseWeb. */
   [data-testid="stColumn"]:has(.controls-panel) [data-testid="stSelectbox"] div:has(> input),
   [data-testid="column"]:has(.controls-panel) [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="stColumn"]:has(.controls-panel) [data-testid="stMultiSelect"] div:has(> input),
+  [data-testid="column"]:has(.controls-panel) [data-testid="stMultiSelect"] div:has(> input),
   [data-testid="stColumn"]:has(.controls-panel) div[data-baseweb="select"] > div,
   [data-testid="column"]:has(.controls-panel) div[data-baseweb="select"] > div {{
     background: {SURFACE} !important;
@@ -975,6 +1168,8 @@ GLOBAL_CSS = f"""
   }}
   [data-testid="stColumn"]:has(.controls-panel) [data-testid="stSelectbox"] div:has(> input):focus-within,
   [data-testid="column"]:has(.controls-panel) [data-testid="stSelectbox"] div:has(> input):focus-within,
+  [data-testid="stColumn"]:has(.controls-panel) [data-testid="stMultiSelect"] div:has(> input):focus-within,
+  [data-testid="column"]:has(.controls-panel) [data-testid="stMultiSelect"] div:has(> input):focus-within,
   [data-testid="stColumn"]:has(.controls-panel) div[data-baseweb="select"] > div:focus-within,
   [data-testid="column"]:has(.controls-panel) div[data-baseweb="select"] > div:focus-within {{
     border-color: rgba(91, 155, 213, 0.45) !important;
@@ -982,6 +1177,8 @@ GLOBAL_CSS = f"""
   }}
   [data-testid="stColumn"]:has(.controls-panel) [data-testid="stSelectbox"] input,
   [data-testid="column"]:has(.controls-panel) [data-testid="stSelectbox"] input,
+  [data-testid="stColumn"]:has(.controls-panel) [data-testid="stMultiSelect"] input,
+  [data-testid="column"]:has(.controls-panel) [data-testid="stMultiSelect"] input,
   [data-testid="stColumn"]:has(.controls-panel) div[data-baseweb="select"] span,
   [data-testid="column"]:has(.controls-panel) div[data-baseweb="select"] span {{
     font-size: 0.9rem !important;
@@ -989,11 +1186,16 @@ GLOBAL_CSS = f"""
     color: {INK} !important;
     -webkit-text-fill-color: {INK} !important;
   }}
-  /* Compact controls panels (Insights + Race Results): narrow selectboxes. */
+  /* Compact controls panels (Insights + Race Results): narrow selectboxes /
+     multiselects (same 75% width as Show By). */
   [data-testid="stColumn"]:has(.controls-panel--compact) [data-testid="stSelectbox"],
   [data-testid="column"]:has(.controls-panel--compact) [data-testid="stSelectbox"],
   [data-testid="stColumn"]:has(.controls-panel--compact) [data-testid="stSelectbox"] div:has(> input),
   [data-testid="column"]:has(.controls-panel--compact) [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="stColumn"]:has(.controls-panel--compact) [data-testid="stMultiSelect"],
+  [data-testid="column"]:has(.controls-panel--compact) [data-testid="stMultiSelect"],
+  [data-testid="stColumn"]:has(.controls-panel--compact) [data-testid="stMultiSelect"] div:has(> input),
+  [data-testid="column"]:has(.controls-panel--compact) [data-testid="stMultiSelect"] div:has(> input),
   [data-testid="stColumn"]:has(.controls-panel--compact) div[data-baseweb="select"] > div,
   [data-testid="column"]:has(.controls-panel--compact) div[data-baseweb="select"] > div,
   [data-testid="stElementContainer"]:has(.controls-select-narrow)
@@ -1001,9 +1203,132 @@ GLOBAL_CSS = f"""
   [data-testid="stElementContainer"]:has(.controls-select-narrow)
     + [data-testid="stElementContainer"] [data-testid="stSelectbox"] div:has(> input),
   [data-testid="stElementContainer"]:has(.controls-select-narrow)
+    + [data-testid="stElementContainer"] [data-testid="stMultiSelect"],
+  [data-testid="stElementContainer"]:has(.controls-select-narrow)
+    + [data-testid="stElementContainer"] [data-testid="stMultiSelect"] div:has(> input),
+  [data-testid="stElementContainer"]:has(.controls-select-narrow)
     + [data-testid="stElementContainer"] div[data-baseweb="select"] > div {{
     max-width: 75% !important;
     width: 75% !important;
+  }}
+  /* Fitness Pace Range: wider than Show By’s 75% so “Choose options” + chips
+     fit; ~90% stays inside the card (avoid 100% / min-width floors that spilled).
+     Chips wrap and grow height. Streamlit tags use theme.primary (coral/red)
+     — force soft teal + ink. */
+  .st-key-insights_pace_bins {{
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }}
+  /* Beat shared compact 75% (higher specificity). Keep min-width: 0. */
+  [data-testid="stColumn"]:has(.controls-panel--compact) .st-key-insights_pace_bins [data-testid="stMultiSelect"],
+  [data-testid="column"]:has(.controls-panel--compact) .st-key-insights_pace_bins [data-testid="stMultiSelect"],
+  [data-testid="stColumn"]:has(.controls-panel--compact) .st-key-insights_pace_bins [data-testid="stMultiSelect"] div:has(> input),
+  [data-testid="column"]:has(.controls-panel--compact) .st-key-insights_pace_bins [data-testid="stMultiSelect"] div:has(> input),
+  [data-testid="stColumn"]:has(.controls-panel--compact) .st-key-insights_pace_bins div[data-baseweb="select"] > div,
+  [data-testid="column"]:has(.controls-panel--compact) .st-key-insights_pace_bins div[data-baseweb="select"] > div,
+  [data-testid="stElementContainer"]:has(.fitness-pace-bins-anchor)
+    + [data-testid="stElementContainer"] [data-testid="stMultiSelect"],
+  [data-testid="stElementContainer"]:has(.fitness-pace-bins-anchor)
+    + [data-testid="stElementContainer"] [data-testid="stMultiSelect"] div:has(> input),
+  [data-testid="stElementContainer"]:has(.fitness-pace-bins-anchor)
+    + [data-testid="stElementContainer"] div[data-baseweb="select"] > div {{
+    max-width: 90% !important;
+    width: 90% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }}
+  .st-key-insights_pace_bins [data-testid="stMultiSelect"] > div,
+  .st-key-insights_pace_bins div[data-baseweb="select"],
+  .st-key-insights_pace_bins [data-testid="stMultiSelectTagsContainer"] {{
+    box-sizing: border-box !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    flex-shrink: 1 !important;
+  }}
+  .st-key-insights_pace_bins [data-testid="stMultiSelect"] div:has(> input),
+  .st-key-insights_pace_bins div[data-baseweb="select"] > div {{
+    height: auto !important;
+    max-height: none !important;
+    min-height: 38px !important;
+    align-items: center !important;
+    overflow: hidden !important;
+  }}
+  .st-key-insights_pace_bins [data-testid="stMultiSelectTagsContainer"] {{
+    flex-wrap: wrap !important;
+    flex-grow: 1 !important;
+    flex-shrink: 1 !important;
+    flex-basis: 0 !important;
+    align-content: flex-start !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+    max-height: none !important;
+    height: auto !important;
+    padding-bottom: 0 !important;
+  }}
+  /* Streamlit’s filter input sits in the tags flex row; with one chip it often
+     wraps to a blank second row (tall empty white box). Collapse it when any
+     chip is present so single-selection height hugs the chip; multi still wraps. */
+  .st-key-insights_pace_bins [data-testid="stMultiSelectTagsContainer"]:has([data-tag]) input {{
+    flex: 0 0 0 !important;
+    min-width: 0 !important;
+    width: 0 !important;
+    max-width: 0 !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    overflow: hidden !important;
+  }}
+  .st-key-insights_pace_bins [data-tag] {{
+    background: {PACE_MULTISELECT_CHIP} !important;
+    background-color: {PACE_MULTISELECT_CHIP} !important;
+    color: {INK} !important;
+    -webkit-text-fill-color: {INK} !important;
+    min-width: 0 !important;
+    flex-shrink: 1 !important;
+    max-width: 100% !important;
+    padding-top: 0.1rem !important;
+    padding-bottom: 0.1rem !important;
+    padding-left: 0.35rem !important;
+    padding-right: 0.28rem !important;
+    overflow: hidden !important;
+    text-overflow: clip !important;
+  }}
+  .st-key-insights_pace_bins [data-tag] span {{
+    /* No Streamlit ellipsis; keep full bin text when it fits the control. */
+    max-width: none !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+    font-size: 0.82rem !important;
+  }}
+  .st-key-insights_pace_bins [data-tag] span,
+  .st-key-insights_pace_bins [data-tag] button,
+  .st-key-insights_pace_bins [data-tag] svg {{
+    color: {INK} !important;
+    -webkit-text-fill-color: {INK} !important;
+    fill: {INK} !important;
+  }}
+  /* Avg HR column: allow shrink so max-content grid cannot inflate the card.
+     Avoid overflow:hidden — it clipped SHOWING under Pace Range while LATEST
+     ACTIVITY (left) stayed visible. Use clip/visible pairing so horizontal
+     spill is cut without forcing a vertical scrollport. */
+  [data-testid="stColumn"]:has(.insights-controls-panel)
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2),
+  [data-testid="stColumn"]:has(.insights-controls-panel)
+    [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2),
+  [data-testid="column"]:has(.insights-controls-panel)
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2),
+  [data-testid="column"]:has(.insights-controls-panel)
+    [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) {{
+    min-width: 0 !important;
+    max-width: 100%;
+    overflow-x: clip;
+    overflow-y: visible;
   }}
   .controls-select-narrow {{
     display: none;
@@ -1036,6 +1361,10 @@ GLOBAL_CSS = f"""
     width: fit-content !important;
     max-width: 28rem;
     flex: 0 0 auto !important;
+    /* Prefer clip over hidden so overflow-y can stay visible (CSS overflow
+       pairing); avoids clipping SHOWING / LATEST ACTIVITY at the card bottom. */
+    overflow-x: clip;
+    overflow-y: visible;
   }}
   [data-testid="stColumn"]:has(.race-controls-panel),
   [data-testid="column"]:has(.race-controls-panel) {{
@@ -1045,7 +1374,7 @@ GLOBAL_CSS = f"""
   [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"],
   [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] {{
     display: grid !important;
-    grid-template-columns: max-content max-content !important;
+    grid-template-columns: minmax(0, max-content) minmax(0, max-content) !important;
     width: max-content !important;
     max-width: 100%;
     align-items: stretch !important;
@@ -1057,6 +1386,7 @@ GLOBAL_CSS = f"""
   [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
     width: auto !important;
     min-width: 10.5rem;
+    max-width: 100%;
     flex: unset !important;
     align-self: stretch !important;
   }}
@@ -1767,6 +2097,7 @@ GLOBAL_CSS = f"""
      black pill on our light page CSS. Force light chrome + readable ink on
      the control and the virtual dropdown popover. Keep BaseWeb fallback. */
   [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="stMultiSelect"] div:has(> input),
   div[data-baseweb="select"] > div {{
     background: {CARD} !important;
     background-color: {CARD} !important;
@@ -1774,12 +2105,14 @@ GLOBAL_CSS = f"""
     border-radius: 12px !important;
     color: {INK} !important;
   }}
-  [data-testid="stSelectbox"] input {{
+  [data-testid="stSelectbox"] input,
+  [data-testid="stMultiSelect"] input {{
     color: {INK} !important;
     -webkit-text-fill-color: {INK} !important;
     background: transparent !important;
   }}
-  [data-testid="stSelectboxVirtualDropdown"] {{
+  [data-testid="stSelectboxVirtualDropdown"],
+  [data-testid="stMultiSelectVirtualDropdown"] {{
     background: {CARD} !important;
     background-color: {CARD} !important;
     color: {INK} !important;
@@ -1789,7 +2122,10 @@ GLOBAL_CSS = f"""
   /* Ink on options only — leave option background alone so hover/focus still tint. */
   [data-testid="stSelectboxVirtualDropdown"] [data-option-value],
   [data-testid="stSelectboxVirtualDropdown"] [role="option"],
-  [data-testid="stSelectboxVirtualDropdown"] li {{
+  [data-testid="stSelectboxVirtualDropdown"] li,
+  [data-testid="stMultiSelectVirtualDropdown"] [data-option-value],
+  [data-testid="stMultiSelectVirtualDropdown"] [role="option"],
+  [data-testid="stMultiSelectVirtualDropdown"] li {{
     color: {INK} !important;
   }}
   label[data-testid="stWidgetLabel"] p {{

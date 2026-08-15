@@ -6,8 +6,10 @@ runOnSave = true
 
 # Force light widget chrome. Streamlit 1.61 selectboxes use theme.secondaryBg;
 # a dark OS/theme makes them black against this app's light GLOBAL_CSS page.
+# primaryColor drives multiselect selected tags (default Streamlit red).
 [theme]
 base = "light"
+primaryColor = "#509B8F"
 backgroundColor = "#E8EEF2"
 secondaryBackgroundColor = "#FFFFFF"
 textColor = "#152028"
