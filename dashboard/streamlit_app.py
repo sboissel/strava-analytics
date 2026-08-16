@@ -8,10 +8,22 @@ import _bootstrap  # noqa: F401
 
 from theme import GLOBAL_CSS
 
+
+def _is_embed_mode() -> bool:
+    """Return True when the app is loaded inside an iframe embed."""
+    try:
+        embed = st.query_params.get("embed", "")
+        if isinstance(embed, list):
+            embed = embed[0] if embed else ""
+        return str(embed).lower() in ("true", "1", "yes")
+    except Exception:
+        return False
+
+
 st.set_page_config(
     page_title="Runner's Dashboard",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed" if _is_embed_mode() else "expanded",
 )
 
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
