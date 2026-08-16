@@ -48,9 +48,9 @@ PYTHONPATH=src python -m strava_analytics.pipeline
 
 The script will refresh the access token, fetch activities, and rewrite the CSV outputs in the data directory.
 
-## Weekly GitLab sync
+## Daily GitLab sync
 
-A scheduled GitLab CI job runs the pipeline every Sunday night and commits updated files under [`data/`](data) back to `main`.
+A scheduled GitLab CI job runs the pipeline every night and commits updated files under [`data/`](data) back to `main`.
 
 ### 1. CI/CD variables
 
@@ -70,7 +70,7 @@ Create the push token under **Settings → Access tokens** (role: Maintainer, sc
 In GitLab → **Build → Pipeline schedules**:
 
 1. Create a schedule targeting `main`.
-2. Cron: `0 23 * * 0` (Sunday 23:00), timezone `Europe/Paris`.
+2. Cron: `0 23 * * *` (daily at 23:00), timezone `Europe/Paris`.
 3. Save, then use **Play** once to verify after the variables are set.
 
 The `sync` job runs only for scheduled pipelines; the `test` job still runs on normal pushes.
@@ -105,7 +105,7 @@ Hosted at [strava-analytics-sboissel.streamlit.app](https://strava-analytics-sbo
 | Python | 3.11 |
 | Secrets | None required (reads committed CSVs in `data/`) |
 
-Data updates when the GitLab weekly sync commits to `main` and the GitLab→GitHub mirror pushes. See [DEPLOY.md](DEPLOY.md).
+Data updates when the GitLab daily sync commits to `main` and the GitLab→GitHub mirror pushes. See [DEPLOY.md](DEPLOY.md).
 
 ## Running the tests
 

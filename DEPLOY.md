@@ -7,9 +7,9 @@ This repository lives on **GitLab** as the source of truth. A GitLab push mirror
 | GitLab (source) | `https://gitlab.com/sandrineboissel/strava-analytics` |
 | GitHub (mirror) | `https://github.com/sboissel/strava-analytics` |
 
-GitLab CI (`.gitlab-ci.yml`) runs tests on push and a weekly scheduled sync that commits updated `data/` files back to `main`. Pushing to GitLab (including those CI commits) is enough for the mirror to update GitHub.
+GitLab CI (`.gitlab-ci.yml`) runs tests on push and a daily scheduled sync that commits updated `data/` files back to `main`. Pushing to GitLab (including those CI commits) is enough for the mirror to update GitHub.
 
-See the **Weekly GitLab sync** section in [README.md](README.md) for CI variables and the Sunday pipeline schedule.
+See the **Daily GitLab sync** section in [README.md](README.md) for CI variables and the nightly pipeline schedule.
 
 ## 1. Create the GitHub repository
 
@@ -59,4 +59,4 @@ The dashboard can run publicly from the GitHub mirror without Strava API secrets
 4. Leave **Secrets** empty.
 5. Deploy and confirm **Metrics** (default), **Training**, **Fitness**, and **Performance** load.
 
-Requirements are installed from root [`requirements.txt`](requirements.txt) (includes `streamlit` and `plotly`). After the Sunday GitLab sync and mirror push, Streamlit Cloud redeploys with updated `data/` files.
+Requirements are installed from root [`requirements.txt`](requirements.txt) (includes `streamlit` and `plotly`). After the daily GitLab sync and mirror push, Streamlit Cloud redeploys with updated `data/` files.

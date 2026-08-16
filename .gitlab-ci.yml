@@ -39,5 +39,15 @@ sync:
       git config user.email "gitlab-ci@${CI_SERVER_HOST}"
       git config user.name "GitLab CI"
       git add data/
-      git commit -m "chore: weekly Strava data sync"
-      git push "https://oauth2:${CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "HEAD:${CI_DEFAULT_BRANCH}"
+      git commit -m "chore: daily Strava data sync"
+      # Schedule may start from an older SHA while main moved (e.g. a merge).
+      # Rebase the data commit onto current default branch before pushing.
+      REMOTE_URL="https://oauth2:${CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+      git fetch "${REMOTE_URL}" "${CI_DEFAULT_BRANCH}"
+      if ! git rebase "FETCH_HEAD"; then
+        echo "Rebase conflict in data/; preferring sync output."
+        git checkout --theirs -- data/ || true
+        git add data/
+        GIT_EDITOR=true git rebase --continue
+      fi
+      git push "${REMOTE_URL}" "HEAD:${CI_DEFAULT_BRANCH}"
