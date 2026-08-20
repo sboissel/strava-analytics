@@ -1,4 +1,5 @@
 activity_id,name,type,gear_id,date,distance_miles,moving_time_min,elapsed_time_min,elevation_gain_ft,avg_pace,avg_pace_sec,max_pace,max_pace_sec,avg_hr,max_hr,%_easy,mt_min_easy,mt_min_hard,hr_zone_1_sec,hr_zone_2_sec,hr_zone_3_sec,hr_zone_4_sec,hr_zone_5_sec,race,race_distance
+19819295693,Morning Run,Run,g33031356,2026-08-20T06:15:05Z,3.72,00:40:56,00:44:50,475.72,10:59,659,06:54,414,127.5,161,89.3,35.6,4.3,341.0,1798.0,232.0,25.0,0.0,False,
 19804683942,Morning Run,Run,g33031350,2026-08-19T06:20:31Z,3.67,00:41:23,00:41:23,459.32,11:17,677.0,07:34,454.0,126.2,143.0,100.0,41.4,0.0,486.0,1997.0,0.0,0.0,0.0,False,
 19734859105,First run tumble - had to cut it short,Run,g33031360,2026-08-14T05:16:07Z,6.61,01:20:32,01:35:29,938.32,12:10,730.0,09:00,540.0,134.6,149.0,93.3,74.5,5.4,67.0,4403.0,322.0,0.0,0.0,False,
 19715888570,Post eclipse,Run,g33031373,2026-08-12T18:50:35Z,3.49,00:38:14,00:45:30,410.1,10:57,657.0,06:36,396.0,141.6,167.0,57.6,21.7,16.0,44.0,1256.0,746.0,212.0,0.0,False,
