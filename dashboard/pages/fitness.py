@@ -15,8 +15,17 @@ from charts import (
     pace_hr_line_chart,
     pace_hr_title,
     pace_hr_trend_subtitle,
+    race_weeks_chart,
 )
-from data import PERIOD_CONFIG, PeriodGrain, latest_activity_label, load_runs
+from data import (
+    PERIOD_CONFIG,
+    PeriodGrain,
+    aggregate_period_metrics,
+    annotate_race_periods,
+    latest_activity_label,
+    load_runs,
+    merge_race_period_annotations,
+)
 from insights_data import (
     aggregate_aerobic_efficiency_by_period,
     aggregate_fitness_form_fatigue_by_period,
@@ -24,12 +33,27 @@ from insights_data import (
     load_pace_runs,
 )
 from pace_bins import DEFAULT_PACE_BIN_KEY, PACE_BIN_OPTIONS
+from race_data import load_race_results
 from ui import (
     aerobic_efficiency_info_html,
     fitness_freshness_info_html,
     pace_hr_title_html,
+    race_weeks_legend_html,
     render_insights_section_nav,
 )
+
+
+def _race_week_strip(period_metrics, grain: str) -> None:
+    """Render the top in-flow race-week strip (legend + markers)."""
+    with st.container(key="race_week_strip", gap=None):
+        st.markdown(race_weeks_legend_html(), unsafe_allow_html=True)
+        st.plotly_chart(
+            race_weeks_chart(period_metrics, grain, plot="fitness"),
+            use_container_width=True,
+            config=PLOTLY_CONFIG,
+            key="fitness_race_weeks",
+        )
+
 
 runs = load_runs()
 pace_runs = load_pace_runs()
@@ -133,12 +157,29 @@ with panel_col:
 render_insights_section_nav(grain, [label for label, _ in ordered_bins])
 
 as_of = runs["date"].max() if not runs.empty else None
+period_metrics = aggregate_period_metrics(runs, grain, as_of=as_of)
+period_metrics = annotate_race_periods(period_metrics, load_race_results(), grain)
 hr_series = [
-    (label, aggregate_pace_hr_by_period(pace_runs, grain, key, as_of=as_of))
+    (
+        label,
+        merge_race_period_annotations(
+            aggregate_pace_hr_by_period(pace_runs, grain, key, as_of=as_of),
+            period_metrics,
+        ),
+    )
     for label, key in ordered_bins
 ]
-freshness_periods = aggregate_fitness_form_fatigue_by_period(runs, grain, as_of=as_of)
-efficiency_periods = aggregate_aerobic_efficiency_by_period(runs, grain, as_of=as_of)
+freshness_periods = merge_race_period_annotations(
+    aggregate_fitness_form_fatigue_by_period(runs, grain, as_of=as_of),
+    period_metrics,
+)
+efficiency_periods = merge_race_period_annotations(
+    aggregate_aerobic_efficiency_by_period(runs, grain, as_of=as_of),
+    period_metrics,
+)
+
+st.markdown('<div id="chart-race-weeks" class="page-anchor"></div>', unsafe_allow_html=True)
+_race_week_strip(period_metrics, grain)
 
 st.markdown(
     '<div id="chart-pace-hr" class="page-anchor insights-chart"></div>',
@@ -154,7 +195,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.plotly_chart(
-    pace_hr_line_chart(hr_series, grain),
+    pace_hr_line_chart(hr_series, grain, period_df=period_metrics),
     use_container_width=True,
     config=PLOTLY_CONFIG,
 )

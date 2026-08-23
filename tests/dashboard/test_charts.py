@@ -32,6 +32,7 @@ from dashboard.charts import (
     FITNESS_XAXIS_DOMAIN,
     RACE_CHART_DIAMOND_SIZE,
     RACE_CHART_DIAMOND_Y_PAD_FRAC,
+    RACE_LINE_CHART_DIAMOND_Y_PAD_FRAC,
     RACE_STRIP_DIAMOND_COLOR,
     RACE_STRIP_DIAMOND_SIZE,
     RACE_STRIP_HEIGHT,
@@ -796,6 +797,7 @@ class TrainingChartThemeTests(unittest.TestCase):
             )
         ]
         self.assertIn("chart-pace-hr", insights_nav)
+        self.assertIn("chart-race-weeks", insights_nav)
         self.assertNotIn("chart-hr-zones", insights_nav)
         self.assertIn("chart-fitness-freshness", insights_nav)
         self.assertNotIn("chart-mileage-heatmap", insights_nav)
@@ -1110,6 +1112,7 @@ class FitnessHrZoneChartTests(unittest.TestCase):
             )
         ]
         self.assertIn("chart-pace-hr", insights_nav)
+        self.assertIn("chart-race-weeks", insights_nav)
         self.assertNotIn("chart-hr-zones", insights_nav)
 
 
@@ -1137,26 +1140,35 @@ class FitnessPaceHrChartTests(unittest.TestCase):
         return 0.299 * r + 0.587 * g + 0.114 * b
 
     def test_week_hover_uses_iso_week_range(self):
-        """Unified hover header is the abbreviated ISO week Mon–Sun range."""
+        """Hover body uses the abbreviated ISO week Mon–Sun range on period labels."""
         fig = pace_hr_line_chart(
             [("8:00-8:30", self._period_df())],
             "Week",
         )
         self.assertEqual(len(fig.data), 1)
         scatter = fig.data[0]
-        expected = ["Mar 2, 2026 - Mar 8, 2026", "Mar 9, 2026 - Mar 15, 2026"]
-        self.assertEqual(list(scatter.x), expected)
-        self.assertEqual(list(fig.layout.xaxis.ticktext), ["Mar 2, 26", "Mar 9, 26"])
+        expected_x = ["Mar 2, 26", "Mar 9, 26"]
+        expected_tooltips = [
+            "Mar 2, 2026 - Mar 8, 2026",
+            "Mar 9, 2026 - Mar 15, 2026",
+        ]
+        self.assertEqual(list(scatter.x), expected_x)
+        self.assertEqual(list(fig.layout.xaxis.ticktext), expected_x)
+        self.assertEqual(tuple(fig.layout.xaxis.range), (-0.5, 1.5))
         self.assertEqual(fig.layout.hovermode, "x unified")
         self.assertIn("Avg HR:", scatter.hovertemplate)
         self.assertIn("4-week avg:", scatter.hovertemplate)
-        self.assertIn("%{customdata", scatter.hovertemplate)
+        self.assertIn("%{customdata[0]}", scatter.hovertemplate)
+        self.assertIn("%{customdata[1]", scatter.hovertemplate)
         self.assertNotIn("Trend", scatter.hovertemplate)
         self.assertNotIn("%{fullData.name}", scatter.hovertemplate)
         self.assertNotIn("8:00-8:30", scatter.hovertemplate)
         self.assertEqual(scatter.hoverlabel.namelength, 0)
         self.assertEqual(fig.layout.hoverlabel.namelength, 0)
-        self.assertEqual(list(scatter.customdata), [148.0, 152.0])
+        self.assertEqual(
+            [list(row) for row in scatter.customdata],
+            [[tip, hr] for tip, hr in zip(expected_tooltips, [148.0, 152.0])],
+        )
         self.assertEqual(scatter.name, "8:00-8:30")
         self.assertEqual(scatter.mode, "lines")
 
@@ -1222,7 +1234,10 @@ class FitnessPaceHrChartTests(unittest.TestCase):
         self.assertIn("4-week avg:", trend.hovertemplate)
         self.assertNotIn("Trend", trend.hovertemplate)
         self.assertEqual(fig.layout.title.text, "")
-        self.assertEqual(list(trend.customdata), [140.0, 150.0, 160.0, 170.0])
+        self.assertEqual(
+            [list(row) for row in trend.customdata],
+            [[f"week {i}", hr] for i, hr in zip(range(1, 5), hr, strict=True)],
+        )
         # Trailing mean with min_periods=1: first = 140, second = 145, …
         expected = [140.0, 145.0, 150.0, 155.0]
         self.assertEqual([float(y) for y in trend.y], expected)
@@ -1353,7 +1368,11 @@ class FitnessPaceHrChartTests(unittest.TestCase):
         self.assertIn('key="insights_pace_bins"', fitness)
         self.assertIn("default=[default_label]", fitness)
         self.assertIn("DEFAULT_PACE_BIN_KEY", fitness)
-        self.assertIn("pace_hr_line_chart(hr_series, grain)", fitness)
+        self.assertIn("pace_hr_line_chart(hr_series, grain, period_df=period_metrics)", fitness)
+        self.assertIn("race_weeks_chart(period_metrics, grain, plot=\"fitness\")", fitness)
+        self.assertIn("_race_week_strip(period_metrics, grain)", fitness)
+        self.assertIn("annotate_race_periods", fitness)
+        self.assertIn("merge_race_period_annotations", fitness)
         self.assertIn("pace_hr_title_html", fitness)
         self.assertIn("pace_hr_trend_subtitle(grain)", fitness)
         self.assertNotIn('key="insights_pace_bin"', fitness)
@@ -1382,7 +1401,11 @@ class FitnessPaceHrChartTests(unittest.TestCase):
             / "pages"
             / "fitness.py"
         ).read_text()
-        self.assertIn("pace_hr_line_chart(hr_series, grain)", fitness)
+        self.assertIn("pace_hr_line_chart(hr_series, grain, period_df=period_metrics)", fitness)
+        self.assertIn("race_weeks_chart(period_metrics, grain, plot=\"fitness\")", fitness)
+        self.assertIn("_race_week_strip(period_metrics, grain)", fitness)
+        self.assertIn("annotate_race_periods", fitness)
+        self.assertIn("merge_race_period_annotations", fitness)
         self.assertNotIn(
             "pace_hr_line_chart(hr_series, grain, efficiency_periods)",
             fitness,
@@ -1550,11 +1573,15 @@ class FitnessAerobicEfficiencyChartTests(unittest.TestCase):
                 "7:30-8:00",
                 pd.DataFrame(
                     {
-                        "period_key": ["2026-10", "2026-11"],
-                        "period_label": ["Mar 2, 26", "Mar 9, 26"],
-                        "period_tooltip": ["March 2, 2026", "March 9, 2026"],
-                        "avg_hr": [150.0, 151.0],
-                        "in_progress": [False, True],
+                        "period_key": ["2026-10", "2026-11", "2026-12"],
+                        "period_label": ["Mar 2, 26", "Mar 9, 26", "Mar 16, 26"],
+                        "period_tooltip": [
+                            "Mar 2, 2026 - Mar 8, 2026",
+                            "Mar 9, 2026 - Mar 15, 2026",
+                            "Mar 16, 2026 - Mar 22, 2026",
+                        ],
+                        "avg_hr": [150.0, 151.0, 152.0],
+                        "in_progress": [False, False, True],
                     }
                 ),
             )
@@ -1579,17 +1606,18 @@ class FitnessAerobicEfficiencyChartTests(unittest.TestCase):
             fitness_form_fatigue_line_chart(
                 pd.DataFrame(
                     {
-                        "period_key": ["2026-10", "2026-11"],
-                        "period_label": ["Mar 2, 26", "Mar 9, 26"],
+                        "period_key": ["2026-10", "2026-11", "2026-12"],
+                        "period_label": ["Mar 2, 26", "Mar 9, 26", "Mar 16, 26"],
                         "period_tooltip": [
                             "Mar 2, 2026 - Mar 8, 2026",
                             "Mar 9, 2026 - Mar 15, 2026",
+                            "Mar 16, 2026 - Mar 22, 2026",
                         ],
-                        "fitness": [40.0, 42.0],
-                        "fatigue": [35.0, 38.0],
-                        "form": [5.0, 4.0],
-                        "load": [100.0, 110.0],
-                        "in_progress": [False, True],
+                        "fitness": [40.0, 42.0, 43.0],
+                        "fatigue": [35.0, 38.0, 39.0],
+                        "form": [5.0, 4.0, 4.0],
+                        "load": [100.0, 110.0, 105.0],
+                        "in_progress": [False, False, True],
                     }
                 ),
                 "Week",
@@ -1601,6 +1629,8 @@ class FitnessAerobicEfficiencyChartTests(unittest.TestCase):
         self.assertEqual(margins, {(FITNESS_MARGIN_L, FITNESS_MARGIN_R)})
         domains = {tuple(fig.layout.xaxis.domain) for fig in fitness_figs}
         self.assertEqual(domains, {tuple(FITNESS_XAXIS_DOMAIN)})
+        ranges = {tuple(fig.layout.xaxis.range) for fig in fitness_figs}
+        self.assertEqual(ranges, {(-0.5, 2.5)})
         # Rotated Y titles share one standoff so the three left edges line up.
         standoffs = {fig.layout.yaxis.title.standoff for fig in fitness_figs}
         self.assertEqual(standoffs, {FITNESS_Y_TITLE_STANDOFF})
@@ -1623,6 +1653,70 @@ class FitnessAerobicEfficiencyChartTests(unittest.TestCase):
         self.assertIn("mph/bpm", scatter.hovertemplate)
         self.assertIn("ft/mi", scatter.hovertemplate)
         self.assertEqual(list(scatter.x), ["Mar 2, 26", "Mar 9, 26", "Mar 16, 26"])
+
+    def test_fitness_line_charts_lift_race_diamonds_by_axis_span(self):
+        """AE + F&F diamonds sit above markers using the visible y-axis span."""
+        race_period = pd.DataFrame(
+            {
+                "period_key": ["2026-10", "2026-11"],
+                "period_label": ["Mar 2, 26", "Mar 9, 26"],
+                "period_tooltip": [
+                    "Mar 2, 2026 - Mar 8, 2026",
+                    "Mar 9, 2026 - Mar 15, 2026",
+                ],
+                "residual": [0.010, 0.020],
+                "efficiency": [0.050, 0.052],
+                "elev_ft_per_mile": [40.0, 42.0],
+                "fitness": [40.0, 42.0],
+                "fatigue": [35.0, 38.0],
+                "form": [5.0, 4.0],
+                "load": [100.0, 110.0],
+                "in_progress": [False, True],
+                "is_race_period": [False, True],
+                "race_names": ["", "Spring 5k"],
+                "race_type": ["", "5k"],
+                "race_hover": ["", "Spring 5k<br>5k"],
+            }
+        )
+        ae = aerobic_efficiency_line_chart(race_period, "Week")
+        ae_diamond = _race_diamond_traces(ae)[0]
+        self.assertGreater(ae_diamond.y[0], 0.020)
+        self.assertLessEqual(ae_diamond.y[0], ae.layout.yaxis.range[1])
+        self.assertGreater(
+            ae_diamond.y[0] - 0.020,
+            0.020 * RACE_CHART_DIAMOND_Y_PAD_FRAC,
+        )
+
+        ff = fitness_form_fatigue_line_chart(race_period, "Week")
+        ff_diamond = _race_diamond_traces(ff)[0]
+        ff_top = max(race_period[["fitness", "fatigue", "form"]].iloc[1].astype(float))
+        self.assertGreater(ff_diamond.y[0], ff_top)
+        self.assertLessEqual(ff_diamond.y[0], ff.layout.yaxis.range[1])
+
+    def test_fitness_freshness_keeps_peak_race_diamond_in_view(self):
+        """Race at the chart peak stays inside the y-axis after diamond lift."""
+        period_df = pd.DataFrame(
+            {
+                "period_key": ["2026-10", "2026-11", "2026-12"],
+                "period_label": ["Mar 2, 26", "Mar 9, 26", "Mar 16, 26"],
+                "period_tooltip": ["w1", "w2", "w3"],
+                "fitness": [95.0, 80.0, 70.0],
+                "fatigue": [90.0, 75.0, 65.0],
+                "form": [5.0, 5.0, 5.0],
+                "load": [100.0, 90.0, 80.0],
+                "in_progress": [False, False, True],
+                "is_race_period": [True, False, False],
+                "race_names": ["Peak 5k", "", ""],
+                "race_type": ["5k", "", ""],
+                "race_hover": ["Peak 5k<br>5k", "", ""],
+            }
+        )
+        fig = fitness_form_fatigue_line_chart(period_df, "Week")
+        diamond = _race_diamond_traces(fig)[0]
+        y_lo, y_hi = fig.layout.yaxis.range
+        self.assertEqual(list(diamond.x), ["Mar 2, 26"])
+        self.assertGreaterEqual(diamond.y[0], y_lo)
+        self.assertLessEqual(diamond.y[0], y_hi)
 
     def test_rolling_trend_companion_matches_pace_hr_window(self):
         """Dashed Trend uses the same Show By rolling window as Avg HR by Pace."""
@@ -1777,21 +1871,32 @@ class FitnessFreshnessChartTests(unittest.TestCase):
 
     def test_three_series_colors_and_shared_margins(self):
         fig = fitness_form_fatigue_line_chart(self._period_df(), "Week")
-        self.assertEqual(len(fig.data), 3)
+        plot_traces = [t for t in fig.data if t.mode == "lines+markers"]
+        legend_traces = [
+            t for t in fig.data if t.mode == "lines" and t.showlegend and t.hoverinfo == "skip"
+        ]
+        self.assertEqual(len(plot_traces), 3)
+        self.assertEqual(len(legend_traces), 3)
         # Draw order: Form shade behind, then Fitness / Fatigue lines on top.
-        self.assertEqual([t.name for t in fig.data], ["Form", "Fitness", "Fatigue"])
-        form_trace = fig.data[0]
+        self.assertEqual([t.name for t in plot_traces], ["Form", "Fitness", "Fatigue"])
+        form_trace = plot_traces[0]
         self.assertEqual(form_trace.line.color, FORM_TSB_COLOR)
         self.assertEqual(form_trace.fill, "tozeroy")
         self.assertEqual(
             form_trace.fillcolor,
             f"rgba(80, 155, 143, {FORM_TSB_FILL_OPACITY})",
         )
-        self.assertEqual(form_trace.legendrank, 3)
-        self.assertEqual(fig.data[1].line.color, FITNESS_CTL_COLOR)
-        self.assertEqual(fig.data[1].legendrank, 1)
-        self.assertEqual(fig.data[2].line.color, FATIGUE_ATL_COLOR)
-        self.assertEqual(fig.data[2].legendrank, 2)
+        self.assertFalse(form_trace.showlegend)
+        self.assertEqual(plot_traces[1].line.color, FITNESS_CTL_COLOR)
+        self.assertFalse(plot_traces[1].showlegend)
+        self.assertEqual(plot_traces[2].line.color, FATIGUE_ATL_COLOR)
+        self.assertFalse(plot_traces[2].showlegend)
+        self.assertEqual([t.name for t in legend_traces], ["Fitness", "Fatigue", "Form"])
+        self.assertEqual([t.legendrank for t in legend_traces], [1, 2, 3])
+        for proxy in legend_traces:
+            self.assertEqual(proxy.mode, "lines")
+            self.assertTrue(proxy.showlegend)
+            self.assertEqual(proxy.hoverinfo, "skip")
         self.assertEqual(fig.layout.margin.l, FITNESS_FRESHNESS_MARGIN["l"])
         self.assertEqual(fig.layout.margin.r, FITNESS_FRESHNESS_MARGIN["r"])
         self.assertEqual(fig.layout.margin.l, FITNESS_MARGIN_L)

@@ -767,6 +767,50 @@ def annotate_race_periods(
     return out
 
 
+RACE_PERIOD_ANNOTATION_COLUMNS = (
+    "is_race_period",
+    "race_names",
+    "race_type",
+    "race_hover",
+)
+
+
+def merge_race_period_annotations(
+    period_df: pd.DataFrame,
+    annotated: pd.DataFrame,
+) -> pd.DataFrame:
+    """Copy race-period columns from ``annotate_race_periods`` onto another frame.
+
+    Parameters
+    ----------
+    period_df : pandas.DataFrame
+        Period rows keyed by ``period_key`` (e.g. pace HR or efficiency).
+    annotated : pandas.DataFrame
+        Output of ``annotate_race_periods`` for the same grain/window.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``period_df`` with race annotation columns merged by ``period_key``.
+    """
+    out = period_df.copy()
+    if annotated.empty or out.empty:
+        for col in RACE_PERIOD_ANNOTATION_COLUMNS:
+            if col not in out.columns:
+                out[col] = False if col == "is_race_period" else ""
+        return out
+
+    cols = [col for col in RACE_PERIOD_ANNOTATION_COLUMNS if col in annotated.columns]
+    payload = annotated[["period_key", *cols]]
+    out = out.drop(columns=[col for col in cols if col in out.columns], errors="ignore")
+    out = out.merge(payload, on="period_key", how="left")
+    out["is_race_period"] = out["is_race_period"].fillna(False).astype(bool)
+    for col in ("race_names", "race_type", "race_hover"):
+        if col in out.columns:
+            out[col] = out[col].fillna("").astype(str)
+    return out
+
+
 def easy_hard_ratio_label(df: pd.DataFrame) -> tuple[str, float | None]:
     """Return easy:hard display string and easy percentage for coloring.
 

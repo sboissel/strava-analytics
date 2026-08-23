@@ -70,6 +70,9 @@ RACE_STRIP_DIAMOND_COLOR = "#E3C677"
 RACE_CHART_DIAMOND_SIZE = 10
 # Lift diamonds above bar tops by this fraction of the chart's max bar height.
 RACE_CHART_DIAMOND_Y_PAD_FRAC = 0.05
+# Fitness line charts: lift by a fraction of the visible y-axis span so diamonds
+# clear the line+marker points (residuals / load can be much smaller than bar tops).
+RACE_LINE_CHART_DIAMOND_Y_PAD_FRAC = 0.14
 # Training 80:20 series (theme EASY/HARD also color Achievements chrome).
 # Earthy strip: peach Easy, terracotta Hard (not theme blue/orange).
 TRAINING_EASY = "#E8A66C"
@@ -541,16 +544,38 @@ def _fitness_xaxis(
     grain: str,
     *,
     hover_labels: list[str] | None = None,
+    show_tick_labels: bool = True,
 ) -> dict:
     """Period x-axis locked so Fitness figures share the same plot domain."""
     axis = _period_xaxis(labels, grain, hover_labels=hover_labels)
+    n_labels = len(labels)
     axis.update(
         automargin=False,
         fixedrange=True,
         constrain="domain",
         domain=list(FITNESS_XAXIS_DOMAIN),
+        anchor="y",
+        showticklabels=show_tick_labels,
     )
+    if n_labels:
+        # Category bars/markers share integer centers; lock the same slot range
+        # so the race-week strip cannot drift vs the Fitness charts below.
+        axis["range"] = [-0.5, n_labels - 0.5]
+    if not show_tick_labels:
+        axis["ticks"] = ""
+        axis["tickangle"] = 0
     return axis
+
+
+def _fitness_strip_margin(grain: str, label_count: int) -> dict:
+    """Race-week strip margins aligned to the Fitness plot box."""
+    return dict(
+        l=FITNESS_MARGIN_L,
+        r=FITNESS_MARGIN_R,
+        t=RACE_STRIP_MARGIN_T,
+        b=RACE_STRIP_MARGIN_B,
+        autoexpand=False,
+    )
 
 
 def _heatmap_margin(*, x_tickangle: int) -> dict:
@@ -626,32 +651,79 @@ def _race_period_hover_details(period_df: pd.DataFrame) -> list[str]:
     return details
 
 
-def _add_race_week_diamonds(
-    fig: go.Figure,
+def _race_line_y_tops(*columns: pd.Series) -> list[float]:
+    """Per-period max y among aligned series (for line-chart diamond placement)."""
+    if not columns:
+        return []
+    frame = pd.concat([col.astype(float) for col in columns], axis=1)
+    return frame.max(axis=1, skipna=True).fillna(0.0).tolist()
+
+
+def _race_diamond_y_positions(
     period_df: pd.DataFrame,
     y_tops: pd.Series | list[float],
-) -> None:
-    """Overlay gold diamonds slightly above race-period bar tops (no dashed vlines).
-
-    ``y_tops`` must align with ``period_df`` rows (stacked total for 80:20,
-    bar height for mileage/elevation). Diamonds sit at ``bar_top + pad`` where
-    ``pad = max(y_tops) * RACE_CHART_DIAMOND_Y_PAD_FRAC`` so they clear the bar
-    without floating too high. Uses the same categorical x as the top race-week
-    strip. Hover shows race name + type (or miles for Other); no legend entry.
-    """
+    *,
+    y_axis_range: tuple[float, float] | None = None,
+) -> tuple[list[str], list[float], list[str]]:
+    """Return race-period diamond x labels, y positions, and hover bodies."""
     if period_df.empty or "is_race_period" not in period_df.columns:
-        return
+        return [], [], []
     is_race = period_df["is_race_period"].fillna(False).astype(bool)
     if not bool(is_race.any()):
-        return
+        return [], [], []
 
     ys = pd.Series(y_tops, index=period_df.index, dtype=float)
-    y_max = float(ys.fillna(0.0).max()) if len(ys) else 0.0
-    pad = y_max * RACE_CHART_DIAMOND_Y_PAD_FRAC
+    if y_axis_range is not None:
+        y_lo, y_hi = y_axis_range
+        pad = max(float(y_hi) - float(y_lo), 1e-9) * RACE_LINE_CHART_DIAMOND_Y_PAD_FRAC
+    else:
+        y_max = float(ys.fillna(0.0).max()) if len(ys) else 0.0
+        pad = y_max * RACE_CHART_DIAMOND_Y_PAD_FRAC
     race = period_df.loc[is_race]
     labels = race["period_label"].astype(str).tolist()
     y_vals = (ys.loc[is_race].fillna(0.0).astype(float) + pad).tolist()
     hover = _race_period_hover_details(race)
+    return labels, y_vals, hover
+
+
+def _extend_y_range_for_race_diamonds(
+    y_min: float,
+    y_max: float,
+    period_df: pd.DataFrame,
+    y_tops: pd.Series | list[float],
+) -> tuple[float, float]:
+    """Ensure a line chart's y-axis top clears race diamonds placed above markers."""
+    _, y_vals, _ = _race_diamond_y_positions(
+        period_df, y_tops, y_axis_range=(y_min, y_max)
+    )
+    if not y_vals:
+        return y_min, y_max
+    span = max(float(y_max) - float(y_min), 1e-9)
+    headroom = span * 0.02
+    return y_min, max(float(y_max), max(y_vals) + headroom)
+
+
+def _add_race_week_diamonds(
+    fig: go.Figure,
+    period_df: pd.DataFrame,
+    y_tops: pd.Series | list[float],
+    *,
+    y_axis_range: tuple[float, float] | None = None,
+) -> None:
+    """Overlay gold diamonds slightly above race-period bar tops (no dashed vlines).
+
+    ``y_tops`` must align with ``period_df`` rows (stacked total for 80:20,
+    bar height for mileage/elevation, line high-water mark for Fitness lines).
+    Diamonds sit at ``top + pad`` where ``pad`` is a fraction of either the
+    chart y-axis span (``y_axis_range``) or ``max(y_tops)`` for bar charts.
+    Uses the same categorical x as the top race-week strip. Hover shows race
+    name + type (or miles for Other); no legend entry.
+    """
+    labels, y_vals, hover = _race_diamond_y_positions(
+        period_df, y_tops, y_axis_range=y_axis_range
+    )
+    if not labels:
+        return
 
     fig.add_trace(
         go.Scatter(
@@ -874,7 +946,7 @@ def _race_strip_types(period_df: pd.DataFrame) -> pd.Series:
     return period_df["race_type"].fillna("").astype(str)
 
 
-def _race_strip_label_gutter() -> dict:
+def _race_strip_label_gutter(*, margin_l: int = TRAINING_MARGIN_L) -> dict:
     """Transparent fill for the left label column (paper pixels, not plot)."""
     return dict(
         type="rect",
@@ -883,13 +955,21 @@ def _race_strip_label_gutter() -> dict:
         xsizemode="pixel",
         xanchor=0,
         x0=0,
-        x1=TRAINING_MARGIN_L,
+        x1=margin_l,
         y0=0,
         y1=1,
         fillcolor=RACE_STRIP_BG,
         line=dict(width=0),
         layer="below",
     )
+
+
+def _race_strip_bg_shapes(n_labels: int, *, margin_l: int = TRAINING_MARGIN_L) -> list[dict]:
+    """Transparent strip shapes: label gutter + timeline; not full paper width."""
+    shapes = [_race_strip_label_gutter(margin_l=margin_l)]
+    if n_labels:
+        shapes.append(_race_strip_compact_bg(n_labels))
+    return shapes
 
 
 def _race_strip_compact_bg(n_labels: int) -> dict:
@@ -912,16 +992,13 @@ def _race_strip_compact_bg(n_labels: int) -> dict:
     )
 
 
-def _race_strip_bg_shapes(n_labels: int) -> list[dict]:
-    """Transparent strip shapes: label gutter + timeline; not full paper width."""
-    shapes = [_race_strip_label_gutter()]
-    if n_labels:
-        shapes.append(_race_strip_compact_bg(n_labels))
-    return shapes
-
-
-def race_weeks_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
-    """Build a compact race-period marker strip aligned to the Training x-axis.
+def race_weeks_chart(
+    period_df: pd.DataFrame,
+    grain: str,
+    *,
+    plot: Literal["training", "fitness"] = "training",
+) -> go.Figure:
+    """Build a compact race-period marker strip aligned to the page x-axis.
 
     Non-race periods are small cool-gray squares. Race periods are larger
     muted-gold diamonds (one race color for every type). Hover shows each race
@@ -934,6 +1011,8 @@ def race_weeks_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
         ``race_type``, and ``race_hover``.
     grain : str
         Period grain label used for axis formatting.
+    plot : {"training", "fitness"}, optional
+        Margin and x-axis profile for the charts below the strip.
 
     Returns
     -------
@@ -942,12 +1021,19 @@ def race_weeks_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
     """
     fig = go.Figure()
     labels = [] if period_df.empty else period_df["period_label"].tolist()
-    strip_margin = _training_margin(
-        grain,
-        len(labels),
-        top=RACE_STRIP_MARGIN_T,
-        bottom=RACE_STRIP_MARGIN_B,
-    )
+    fitness_plot = plot == "fitness"
+    margin_l = FITNESS_MARGIN_L if fitness_plot else TRAINING_MARGIN_L
+    if fitness_plot:
+        strip_margin = _fitness_strip_margin(grain, len(labels))
+        xaxis_fn = _fitness_xaxis
+    else:
+        strip_margin = _training_margin(
+            grain,
+            len(labels),
+            top=RACE_STRIP_MARGIN_T,
+            bottom=RACE_STRIP_MARGIN_B,
+        )
+        xaxis_fn = _training_xaxis
     strip_layout = {
         **CHART_LAYOUT,
         "height": RACE_STRIP_HEIGHT,
@@ -959,22 +1045,38 @@ def race_weeks_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
         "plot_bgcolor": RACE_STRIP_PAPER_BG,
         "paper_bgcolor": RACE_STRIP_PAPER_BG,
         "hovermode": "closest",
-        "barmode": "overlay",
-        "bargap": TRAINING_BARGAP,
-        "bargroupgap": 0,
-        "shapes": _race_strip_bg_shapes(len(labels)),
+        "shapes": _race_strip_bg_shapes(len(labels), margin_l=margin_l),
     }
-    yaxis = _training_yaxis(
-        range=[0, 1],
-        showticklabels=False,
-        showgrid=False,
-        ticks="",
-        title=dict(text=""),
-        zeroline=False,
+    if not fitness_plot:
+        strip_layout.update(
+            barmode="overlay",
+            bargap=TRAINING_BARGAP,
+            bargroupgap=0,
+        )
+    yaxis = (
+        dict(
+            automargin=False,
+            fixedrange=True,
+            zeroline=False,
+            range=[0, 1],
+            showticklabels=False,
+            showgrid=False,
+            ticks="",
+            title=dict(text=""),
+        )
+        if fitness_plot
+        else _training_yaxis(
+            range=[0, 1],
+            showticklabels=False,
+            showgrid=False,
+            ticks="",
+            title=dict(text=""),
+            zeroline=False,
+        )
     )
     if period_df.empty:
         fig.update_layout(
-            xaxis=_training_xaxis(labels, grain, show_tick_labels=False),
+            xaxis=xaxis_fn(labels, grain, show_tick_labels=False),
             yaxis=yaxis,
             **strip_layout,
         )
@@ -1002,17 +1104,18 @@ def race_weeks_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
         RACE_STRIP_DIAMOND_SIZE if flag else RACE_STRIP_SQUARE_SIZE for flag in is_race
     ]
     opacities = _bar_opacities(period_df)
-    fig.add_trace(
-        go.Bar(
-            x=labels,
-            y=[1.0] * len(period_df),
-            offsetgroup=TRAINING_OFFSETGROUP,
-            alignmentgroup=TRAINING_OFFSETGROUP,
-            marker=dict(color="rgba(0,0,0,0)", line=dict(width=0)),
-            hoverinfo="skip",
-            showlegend=False,
+    if not fitness_plot:
+        fig.add_trace(
+            go.Bar(
+                x=labels,
+                y=[1.0] * len(period_df),
+                offsetgroup=TRAINING_OFFSETGROUP,
+                alignmentgroup=TRAINING_OFFSETGROUP,
+                marker=dict(color="rgba(0,0,0,0)", line=dict(width=0)),
+                hoverinfo="skip",
+                showlegend=False,
+            )
         )
-    )
     fig.add_trace(
         go.Scatter(
             x=labels,
@@ -1033,7 +1136,7 @@ def race_weeks_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
     )
     fig.update_layout(
         yaxis=yaxis,
-        xaxis=_training_xaxis(labels, grain, show_tick_labels=False),
+        xaxis=xaxis_fn(labels, grain, show_tick_labels=False),
         hoverlabel=_hoverlabel(),
         **strip_layout,
     )
@@ -1348,6 +1451,8 @@ def _grain_period_unit(grain: str) -> str:
 def pace_hr_line_chart(
     series: Sequence[tuple[str, pd.DataFrame]],
     grain: str,
+    *,
+    period_df: pd.DataFrame | None = None,
 ) -> go.Figure:
     """Build an average heart-rate trend chart for selected pace bins.
 
@@ -1369,6 +1474,9 @@ def pace_hr_line_chart(
         ordered fastest to slowest.
     grain : str
         Period grain label used for axis formatting and trend window.
+    period_df : pandas.DataFrame, optional
+        Period index with ``is_race_period`` for gold race-week diamonds.
+        Defaults to the first non-empty series frame when omitted.
 
     Returns
     -------
@@ -1387,10 +1495,11 @@ def pace_hr_line_chart(
     axis_df = frames[0]
     labels = axis_df["period_label"].tolist()
     tooltips = _period_tooltips(axis_df)
-    hover_x = tooltips if tooltips else labels
+    race_df = period_df if period_df is not None else axis_df
 
     colors = pace_hr_series_colors(pace_labels)
     all_hr: list[pd.Series] = []
+    all_trends: list[pd.Series] = []
     trend_window = pace_hr_trend_window(grain)
     grain_unit = _grain_period_unit(grain)
     multi_pace = sum(
@@ -1400,35 +1509,38 @@ def pace_hr_line_chart(
         and not period_df.empty
         and "avg_hr" in period_df.columns
     ) > 1
-    # Unified x header is the period; body is point Avg HR + rolling mean.
-    # Omit Plotly's default series name (namelength=0); pace only when multi-bin.
+    # Period label on x matches sibling Fitness charts; tooltip in hover body.
     trend_label = f"{trend_window}-{grain_unit} avg"
 
-    for (pace_label, period_df), color in zip(series, colors):
-        if period_df.empty or "avg_hr" not in period_df.columns:
+    for (pace_label, bin_df), color in zip(series, colors):
+        if bin_df.empty or "avg_hr" not in bin_df.columns:
             continue
-        avg_hr = period_df["avg_hr"]
+        avg_hr = bin_df["avg_hr"]
         trend = _pace_hr_rolling_mean(avg_hr, trend_window)
-        all_hr.append(trend)
-        trace_tooltips = _period_tooltips(period_df)
-        trace_x = trace_tooltips if trace_tooltips else period_df["period_label"].tolist()
+        all_hr.append(avg_hr)
+        all_trends.append(trend)
+        trace_tooltips = _period_tooltips(bin_df)
         pace_suffix = f"<br>{pace_label}" if multi_pace else ""
         hovertemplate = (
-            f"Avg HR: %{{customdata:.0f}} bpm<br>"
+            "<b>%{customdata[0]}</b><br>"
+            "Avg HR: %{customdata[1]:.0f} bpm<br>"
             f"{trend_label}: %{{y:.0f}} bpm"
             f"{pace_suffix}"
             "<extra></extra>"
         )
         fig.add_trace(
             go.Scatter(
-                x=trace_x,
+                x=labels,
                 y=_nan_to_none(trend),
                 mode="lines",
                 name=pace_label,
                 legendgroup=pace_label,
                 line=dict(color=color, width=PACE_HR_TREND_LINE_WIDTH),
                 connectgaps=False,
-                customdata=_nan_to_none(avg_hr),
+                customdata=[
+                    [tip, None if pd.isna(hr) else float(hr)]
+                    for tip, hr in zip(trace_tooltips, avg_hr, strict=True)
+                ],
                 hovertemplate=hovertemplate,
                 hoverlabel=dict(namelength=0),
             )
@@ -1456,7 +1568,7 @@ def pace_hr_line_chart(
             automargin=False,
             fixedrange=True,
         ),
-        xaxis=_fitness_xaxis(labels, grain, hover_labels=hover_x or None),
+        xaxis=_fitness_xaxis(labels, grain),
         hovermode="x unified",
         hoverlabel={**_hoverlabel(), "namelength": 0},
         **{
@@ -1465,6 +1577,12 @@ def pace_hr_line_chart(
             "margin": _pace_hr_margin(grain, len(labels)),
         },
     )
+    if all_trends:
+        _add_race_week_diamonds(
+            fig,
+            race_df,
+            _race_line_y_tops(*all_trends),
+        )
     return fig
 
 
@@ -1743,6 +1861,11 @@ def aerobic_efficiency_line_chart(period_df: pd.DataFrame, grain: str) -> go.Fig
     y_min, y_max = _efficiency_axis_range(
         pd.concat([residuals, trend], ignore_index=True)
     )
+    line_tops = _race_line_y_tops(residuals, trend)
+    diamond_axis = (y_min, y_max)
+    y_min, y_max = _extend_y_range_for_race_diamonds(
+        y_min, y_max, period_df, line_tops
+    )
     fig.update_layout(
         title=_title(""),
         showlegend=True,
@@ -1764,6 +1887,12 @@ def aerobic_efficiency_line_chart(period_df: pd.DataFrame, grain: str) -> go.Fig
             "height": AEROBIC_EFFICIENCY_HEIGHT,
             "margin": _aerobic_efficiency_margin(grain, len(labels)),
         },
+    )
+    _add_race_week_diamonds(
+        fig,
+        period_df,
+        line_tops,
+        y_axis_range=diamond_axis,
     )
     return fig
 
@@ -1810,6 +1939,8 @@ def fitness_form_fatigue_line_chart(period_df: pd.DataFrame, grain: str) -> go.F
     Plotly title stays empty so the plot domain matches Fitness siblings. Form
     is drawn first as a ``tozeroy`` fill (behind), then Fitness and Fatigue as
     lines on top; legend order stays Fitness / Fatigue / Form via ``legendrank``.
+    Plot traces use lines+markers; the legend uses line-only proxies (same
+    pattern as Aerobic Efficiency).
 
     Parameters
     ----------
@@ -1868,6 +1999,8 @@ def fitness_form_fatigue_line_chart(period_df: pd.DataFrame, grain: str) -> go.F
             y=_nan_to_none(form),
             mode="lines+markers",
             name="Form",
+            legendgroup="Form",
+            showlegend=False,
             line=dict(color=FORM_TSB_COLOR, width=2),
             marker=dict(color=FORM_TSB_COLOR, size=7, opacity=opacities),
             fill="tozeroy",
@@ -1904,6 +2037,8 @@ def fitness_form_fatigue_line_chart(period_df: pd.DataFrame, grain: str) -> go.F
                 y=_nan_to_none(values),
                 mode="lines+markers",
                 name=name,
+                legendgroup=name,
+                showlegend=False,
                 line=dict(color=color, width=2),
                 marker=dict(color=color, size=7, opacity=opacities),
                 connectgaps=False,
@@ -1913,7 +2048,40 @@ def fitness_form_fatigue_line_chart(period_df: pd.DataFrame, grain: str) -> go.F
             )
         )
 
+    for name, _values, color, legendrank in line_specs:
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="lines",
+                name=name,
+                legendgroup=name,
+                showlegend=True,
+                line=dict(color=color, width=2),
+                hoverinfo="skip",
+                legendrank=legendrank,
+            )
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="lines",
+            name="Form",
+            legendgroup="Form",
+            showlegend=True,
+            line=dict(color=FORM_TSB_COLOR, width=2),
+            hoverinfo="skip",
+            legendrank=3,
+        )
+    )
+
     y_min, y_max = _fitness_freshness_axis_range(fitness, fatigue, form)
+    line_tops = _race_line_y_tops(fitness, fatigue, form)
+    diamond_axis = (y_min, y_max)
+    y_min, y_max = _extend_y_range_for_race_diamonds(
+        y_min, y_max, period_df, line_tops
+    )
     fig.update_layout(
         title=_title(""),
         showlegend=True,
@@ -1935,6 +2103,12 @@ def fitness_form_fatigue_line_chart(period_df: pd.DataFrame, grain: str) -> go.F
             "height": FITNESS_FRESHNESS_HEIGHT,
             "margin": _fitness_freshness_margin(grain, len(labels)),
         },
+    )
+    _add_race_week_diamonds(
+        fig,
+        period_df,
+        line_tops,
+        y_axis_range=diamond_axis,
     )
     return fig
 

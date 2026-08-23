@@ -564,6 +564,14 @@ GLOBAL_CSS = f"""
   #chart-hr-zones {{
     scroll-margin-top: var(--race-strip-scroll-margin-top);
   }}
+  /* Fitness: first chart after the shared race-week strip. */
+  [data-testid="stMain"]:has(#chart-pace-hr) #chart-pace-hr {{
+    scroll-margin-top: calc(var(--race-strip-scroll-margin-top) + 4.5rem);
+  }}
+  [data-testid="stMain"]:has(#chart-pace-hr) #chart-aerobic-efficiency,
+  [data-testid="stMain"]:has(#chart-pace-hr) #chart-fitness-freshness {{
+    scroll-margin-top: var(--race-strip-scroll-margin-top);
+  }}
   #key-indicators {{
     scroll-margin-top: 1.25rem;
   }}
@@ -719,6 +727,9 @@ GLOBAL_CSS = f"""
     pointer-events: none;
     z-index: 0;
   }}
+  [data-testid="stMain"]:has(#chart-pace-hr) .st-key-race_week_strip::before {{
+    width: calc(100% - var(--fitness-plot-margin-r) + var(--race-strip-end-pad));
+  }}
   .st-key-race_week_strip [data-testid="stVerticalBlockBorderWrapper"],
   .st-key-race_week_strip [data-testid="stVerticalBlock"],
   .st-key-race_week_strip [data-testid="stLayoutWrapper"] {{
@@ -738,6 +749,11 @@ GLOBAL_CSS = f"""
     /* Above compliance HTML title band (z-index 8) so the ⓘ tooltip is readable. */
     z-index: 12;
     pointer-events: none;
+  }}
+  [data-testid="stMain"]:has(#chart-pace-hr)
+    .st-key-race_week_strip
+    [data-testid="stElementContainer"]:has(.race-week-legend) {{
+    width: var(--fitness-plot-margin-l);
   }}
   .race-week-legend {{
     pointer-events: auto;
@@ -953,6 +969,10 @@ GLOBAL_CSS = f"""
     padding: 0 !important;
     overflow: visible !important;
     pointer-events: none;
+  }}
+  [data-testid="stMain"]:has(#chart-pace-hr)
+    [data-testid="stElementContainer"]:has(.pace-hr-info) {{
+    margin-top: var(--chart-compliance-margin-top) !important;
   }}
   [data-testid="stElementContainer"]:has(.pace-hr-info)
     [data-testid="stMarkdownContainer"],

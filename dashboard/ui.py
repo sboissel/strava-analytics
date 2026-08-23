@@ -1287,6 +1287,7 @@ def render_insights_section_nav(
     """
     render_section_nav(
         [
+            ("chart-race-weeks", RACE_EVENTS_TITLE),
             ("chart-pace-hr", pace_hr_title(hr_grain, pace_labels)),
             ("chart-aerobic-efficiency", aerobic_efficiency_title(hr_grain)),
             ("chart-fitness-freshness", fitness_freshness_title(hr_grain)),
