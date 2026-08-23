@@ -25,7 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fitness & Freshness**: legend shows lines only (markers remain on the plot).
 - **Metrics**: Easy:Hard Last Week and 30 Days gauge colors turn green at **≥80%** easy (80:20 target); band thresholds are 80 / 70 / 60 / 50.
 
-## [1.3.0] — 2026-08-15
+### Fixed
+
+**Dashboard**
+
+- **Streamlit Cloud**: Fitness page import error when the repo-root `data/` CSV directory shadowed `dashboard/data.py` on `sys.path`.
 
 ### Added
 
