@@ -38,6 +38,7 @@ from theme import (
     SHOE_MILEAGE_GOAL,
     WEEKLY_MILES_GOAL,
     eh_color,
+    EH_BAND_THRESHOLDS,
     longest_run_color,
     miles_color,
     miles_legend_labels,
@@ -472,6 +473,7 @@ def eh_kpi_tooltip(period: str) -> str:
         "week": "the last full Mon–Sun week",
         "month": "the last 30 days",
     }[period]
+    green, lime, yellow, orange = EH_BAND_THRESHOLDS
     return (
         "<strong>Definition</strong>"
         f"Easy:hard time ratio from heart-rate zones for {period_desc}."
@@ -480,11 +482,11 @@ def eh_kpi_tooltip(period: str) -> str:
         "~80% easy (80:20)"
         "<br><br>"
         "<strong>Target Bands</strong>"
-        f"{band_dot(TRAFFIC_GREEN)}≥85% easy"
-        f"<br>{band_dot(TRAFFIC_LIME)}≥75%"
-        f"<br>{band_dot(TRAFFIC_YELLOW)}≥65%"
-        f"<br>{band_dot(TRAFFIC_ORANGE)}≥55%"
-        f"<br>{band_dot(TRAFFIC_RED)}below 55%"
+        f"{band_dot(TRAFFIC_GREEN)}≥{green}% easy"
+        f"<br>{band_dot(TRAFFIC_LIME)}≥{lime}%"
+        f"<br>{band_dot(TRAFFIC_YELLOW)}≥{yellow}%"
+        f"<br>{band_dot(TRAFFIC_ORANGE)}≥{orange}%"
+        f"<br>{band_dot(TRAFFIC_RED)}below {orange}%"
     )
 
 

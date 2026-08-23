@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fitness**: Average HR, Aerobic Efficiency, and Fitness & Freshness share a locked category x-axis range so period ticks line up across the stack.
 - **Fitness**: race diamonds on Aerobic Efficiency and Fitness & Freshness sit farther above line markers; the y-axis extends when a race falls at a chart peak so diamonds stay in view.
 - **Fitness & Freshness**: legend shows lines only (markers remain on the plot).
+- **Metrics**: Easy:Hard Last Week and 30 Days gauge colors turn green at **≥80%** easy (80:20 target); band thresholds are 80 / 70 / 60 / 50.
 
 ## [1.3.0] — 2026-08-15
 
