@@ -107,6 +107,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+cards_html = fastest_race_cards_html(all_races)
+if cards_html:
+    st.markdown(cards_html, unsafe_allow_html=True)
+
 panel_col, _ = st.columns([1.35, 1.65], gap="medium")
 date_min, date_max = race_date_bounds(all_races)
 
@@ -215,10 +219,6 @@ render_race_section_nav(chart_label=chart_label)
 
 table_df = race_table_rows(filtered)
 selected_activity_id = _selected_activity_id(table_df)
-
-cards_html = fastest_race_cards_html(all_races)
-if cards_html:
-    st.markdown(cards_html, unsafe_allow_html=True)
 
 st.markdown(
     '<div id="chart-race-results" class="page-anchor"></div>',

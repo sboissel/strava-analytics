@@ -242,8 +242,7 @@ FITNESS_PLOT_MARGIN_R_PX = 168
 FITNESS_PLOT_MARGIN_L_PX = 80
 # Plotly puts the Fitness legends at paper x = 1 + this fraction of plot width.
 FITNESS_LEGEND_GUTTER_X_FRAC = 0.02
-CHART_RACE_RESULTS_MARGIN_TOP = LAYOUT_GAP      # Performance: scatter (or PB strip)
-CHART_RACE_PB_TO_SCATTER_GAP = "2.75rem"        # Performance: Personal Records → chart title
+CHART_RACE_RESULTS_MARGIN_TOP = LAYOUT_GAP      # Performance: scatter
 CHART_RACE_TABLE_MARGIN_TOP = "0.75rem"         # Performance: table section (above title)
 CHART_RACE_TABLE_TITLE_GAP = "0.75rem"          # Performance: Race History title → table
 # Subtle athletic purple for Total Elevation achievement badge.
@@ -271,7 +270,6 @@ GLOBAL_CSS = f"""
     --chart-aerobic-efficiency-margin-top: {CHART_AEROBIC_EFFICIENCY_MARGIN_TOP};
     --chart-fitness-freshness-margin-top: {CHART_FITNESS_FRESHNESS_MARGIN_TOP};
     --chart-race-results-margin-top: {CHART_RACE_RESULTS_MARGIN_TOP};
-    --chart-race-pb-to-scatter-gap: {CHART_RACE_PB_TO_SCATTER_GAP};
     --chart-race-table-margin-top: {CHART_RACE_TABLE_MARGIN_TOP};
     --chart-race-table-title-gap: {CHART_RACE_TABLE_TITLE_GAP};
     background:
@@ -664,6 +662,11 @@ GLOBAL_CSS = f"""
   /* Metrics: achievements sit under the page summary (no controls row). */
   [data-testid="stElementContainer"]:has(.panel-summary)
     + [data-testid="stElementContainer"]:has(#achievements) {{
+    margin-top: 0 !important;
+  }}
+  /* Performance: Personal Records sit under the page summary, above Controls. */
+  [data-testid="stElementContainer"]:has(.panel-summary)
+    + [data-testid="stElementContainer"]:has(#fastest-races) {{
     margin-top: 0 !important;
   }}
   #shoe-mileage {{
@@ -1302,10 +1305,10 @@ GLOBAL_CSS = f"""
     width: min(20rem, 72vw);
     z-index: 60;
   }}
-  /* Performance: Personal Records strip above the scatter */
+  /* Performance: Personal Records strip under page summary */
   [data-testid="stElementContainer"]:has(#fastest-races) {{
-    margin-top: var(--chart-race-results-margin-top) !important;
-    margin-bottom: 0 !important;
+    margin-top: var(--layout-gap) !important;
+    margin-bottom: calc(var(--layout-gap) * 1.5) !important;
   }}
   /* Performance: scatter chart — full-bleed like Race History table */
   [data-testid="stElementContainer"]:has(#chart-race-results)
@@ -1314,12 +1317,6 @@ GLOBAL_CSS = f"""
     margin-bottom: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
-  }}
-  /* Personal Records → Finish Times / Pace title: extra air under the card strip. */
-  [data-testid="stElementContainer"]:has(#fastest-races)
-    ~ [data-testid="stElementContainer"]:has(#chart-race-results)
-    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
-    margin-top: var(--chart-race-pb-to-scatter-gap) !important;
   }}
   [data-testid="stElementContainer"]:has(#chart-race-results)
     + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"])
