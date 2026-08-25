@@ -678,6 +678,9 @@ GLOBAL_CSS = f"""
   }}
   #fastest-races {{
     scroll-margin-top: 1.25rem;
+    /* Override .panel height:100% — on Streamlit Cloud that can shrink the
+       layout box below the card grid so Controls overlaps the strip. */
+    height: auto;
   }}
   /* Main page stack: spacing is explicit via --layout-gap (not Streamlit gap). */
   .block-container > div[data-testid="stVerticalBlock"] {{
@@ -1308,7 +1311,27 @@ GLOBAL_CSS = f"""
   /* Performance: Personal Records strip under page summary */
   [data-testid="stElementContainer"]:has(#fastest-races) {{
     margin-top: var(--layout-gap) !important;
-    margin-bottom: calc(var(--layout-gap) * 1.5) !important;
+    margin-bottom: 0 !important;
+    /* Keep layout height tied to the PR panel (Cloud can clip otherwise). */
+    overflow: visible !important;
+  }}
+  [data-testid="stElementContainer"]:has(#fastest-races)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(#fastest-races)
+    [data-testid="stMarkdown"] {{
+    overflow: visible !important;
+  }}
+  /* In-flow spacer between PR cards and Controls (Cloud-safe; avoids depending
+     on margin-bottom collapsing against the columns row). */
+  .performance-pr-gap {{
+    height: calc(var(--layout-gap) * 1.5);
+    margin: 0;
+    padding: 0;
+  }}
+  [data-testid="stElementContainer"]:has(.performance-pr-gap) {{
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: calc(var(--layout-gap) * 1.5);
   }}
   /* Performance: scatter chart — full-bleed like Race History table */
   [data-testid="stElementContainer"]:has(#chart-race-results)

@@ -110,6 +110,10 @@ st.markdown(
 cards_html = fastest_race_cards_html(all_races)
 if cards_html:
     st.markdown(cards_html, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="performance-pr-gap" aria-hidden="true"></div>',
+        unsafe_allow_html=True,
+    )
 
 panel_col, _ = st.columns([1.35, 1.65], gap="medium")
 date_min, date_max = race_date_bounds(all_races)
