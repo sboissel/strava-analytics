@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] — 2026-08-26
+
+### Fixed
+
+**Dashboard**
+
+- **Streamlit Cloud**: Performance (and other) pages failed with `ImportError` on `from race_data import …` when Streamlit reset `sys.path` after the entrypoint while caching `_bootstrap`; pages now re-apply dashboard/`src` path setup on every load.
+
 ## [1.5.0] — 2026-08-26
 
 ### Added

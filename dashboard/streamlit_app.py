@@ -6,6 +6,8 @@ import streamlit as st
 
 import _bootstrap  # noqa: F401
 
+_bootstrap.ensure_sys_path()
+
 from theme import GLOBAL_CSS
 
 

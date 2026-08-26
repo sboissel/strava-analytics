@@ -23,6 +23,17 @@ def _prepend_sys_path(path: Path) -> None:
     sys.path.insert(0, path_str)
 
 
-# Dashboard first (``data``, ``charts``, …), then ``src`` (``strava_analytics``).
-_prepend_sys_path(SRC_ROOT)
-_prepend_sys_path(DASHBOARD_ROOT)
+def ensure_sys_path() -> None:
+    """Idempotently put ``dashboard/`` then ``src/`` at the front of ``sys.path``.
+
+    Call this from page modules as well as the entrypoint. Streamlit may reset
+    ``sys.path`` between ``streamlit_app.py`` and ``pages/*.py`` while leaving
+    ``_bootstrap`` cached in ``sys.modules``, so import side effects alone are
+    not enough.
+    """
+    # Dashboard first (``data``, ``race_data``, …), then ``src``.
+    _prepend_sys_path(SRC_ROOT)
+    _prepend_sys_path(DASHBOARD_ROOT)
+
+
+ensure_sys_path()
