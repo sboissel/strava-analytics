@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
 
 import streamlit as st
 
-# Streamlit may put ``pages/`` first and/or reset ``sys.path`` after the
-# entrypoint; ensure ``dashboard/`` is importable before bare module imports.
+# Load bootstrap by absolute path so a stale/wrong ``_bootstrap`` in
+# ``sys.modules`` cannot win; then refresh stale ``race_data`` if needed.
 _DASHBOARD_ROOT = Path(__file__).resolve().parents[1]
-if str(_DASHBOARD_ROOT) not in sys.path:
-    sys.path.insert(0, str(_DASHBOARD_ROOT))
-
-import _bootstrap  # noqa: F401
-
-_bootstrap.ensure_sys_path()
+_bs_spec = importlib.util.spec_from_file_location(
+    "_sa_dashboard_bootstrap",
+    _DASHBOARD_ROOT / "_bootstrap.py",
+)
+assert _bs_spec is not None and _bs_spec.loader is not None
+_bootstrap = importlib.util.module_from_spec(_bs_spec)
+sys.modules["_sa_dashboard_bootstrap"] = _bootstrap
+sys.modules["_bootstrap"] = _bootstrap
+_bs_spec.loader.exec_module(_bootstrap)
+_bootstrap.bootstrap()
 
 from data import (
     KPI_DETAIL_OPTIONS,

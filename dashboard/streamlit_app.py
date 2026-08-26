@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
+from pathlib import Path
+
 import streamlit as st
 
-import _bootstrap  # noqa: F401
-
-_bootstrap.ensure_sys_path()
+# Load by absolute path so a stale/wrong ``_bootstrap`` in ``sys.modules``
+# (Streamlit Cloud mixed deploys) cannot win over ``dashboard/_bootstrap.py``.
+_DASHBOARD_ROOT = Path(__file__).resolve().parent
+_bs_spec = importlib.util.spec_from_file_location(
+    "_sa_dashboard_bootstrap",
+    _DASHBOARD_ROOT / "_bootstrap.py",
+)
+assert _bs_spec is not None and _bs_spec.loader is not None
+_bootstrap = importlib.util.module_from_spec(_bs_spec)
+sys.modules["_sa_dashboard_bootstrap"] = _bootstrap
+sys.modules["_bootstrap"] = _bootstrap
+_bs_spec.loader.exec_module(_bootstrap)
+_bootstrap.bootstrap()
 
 from theme import GLOBAL_CSS
 
