@@ -245,6 +245,7 @@ FITNESS_LEGEND_GUTTER_X_FRAC = 0.02
 CHART_RACE_RESULTS_MARGIN_TOP = LAYOUT_GAP      # Performance: scatter
 CHART_RACE_TABLE_MARGIN_TOP = "0.75rem"         # Performance: table section (above title)
 CHART_RACE_TABLE_TITLE_GAP = "0.75rem"          # Performance: Race History title → table
+CHART_RACE_BUILDUP_MARGIN_TOP = LAYOUT_GAP      # Performance: Race Build-up section
 # Subtle athletic purple for Total Elevation achievement badge.
 ELEVATION_PURPLE = "#6F5F8D"
 
@@ -272,6 +273,11 @@ GLOBAL_CSS = f"""
     --chart-race-results-margin-top: {CHART_RACE_RESULTS_MARGIN_TOP};
     --chart-race-table-margin-top: {CHART_RACE_TABLE_MARGIN_TOP};
     --chart-race-table-title-gap: {CHART_RACE_TABLE_TITLE_GAP};
+    --chart-race-buildup-margin-top: {CHART_RACE_BUILDUP_MARGIN_TOP};
+    /* Race Build-Up: shared label | A | mid | B column rhythm. */
+    --race-buildup-label-w: 11.5rem;
+    --race-buildup-mid-w: 3.5rem;
+    --race-buildup-inline-pad: 0.5rem;
     background:
       radial-gradient(1200px 500px at 10% -10%, #d5e6df 0%, transparent 55%),
       radial-gradient(900px 420px at 100% 0%, #d9e3ec 0%, transparent 50%),
@@ -545,6 +551,7 @@ GLOBAL_CSS = f"""
   #chart-aerobic-efficiency,
   #chart-fitness-freshness,
   #chart-race-results,
+  #chart-race-buildup,
   #race-results-table {{
     scroll-margin-top: 1.25rem;
     height: 0;
@@ -1353,6 +1360,499 @@ GLOBAL_CSS = f"""
     width: 100% !important;
     max-width: 100% !important;
   }}
+  /* Performance: Race Build-up section */
+  [data-testid="stElementContainer"]:has(#chart-race-buildup)
+    + [data-testid="stElementContainer"]:has(.chart-section-title) {{
+    margin-top: var(--chart-race-buildup-margin-top) !important;
+  }}
+  /* Section title stays left; race stats header (.race-buildup-summary) is centered. */
+  [data-testid="stElementContainer"]:has(#chart-race-buildup)
+    + [data-testid="stElementContainer"]:has(.chart-section-title)
+    .chart-section-title {{
+    text-align: left !important;
+  }}
+  [data-testid="stElementContainer"]:has(.performance-buildup-summary) {{
+    margin-top: 0.35rem !important;
+    margin-bottom: var(--layout-gap) !important;
+  }}
+  .race-buildup-summary {{
+    margin: 0 0 0.35rem 0;
+    max-width: none;
+    width: 100%;
+    padding: 0 var(--race-buildup-inline-pad);
+    box-sizing: border-box;
+    text-align: center;
+  }}
+  /* Shared compare rhythm: row title | Race A | mid (Δ) | Race B. */
+  .race-buildup-compare-row {{
+    display: grid;
+    grid-template-columns:
+      var(--race-buildup-label-w)
+      minmax(0, 1fr)
+      var(--race-buildup-mid-w)
+      minmax(0, 1fr);
+    align-items: center;
+    justify-items: stretch;
+    column-gap: 0;
+    width: 100%;
+    box-sizing: border-box;
+  }}
+  .race-buildup-label-gutter,
+  .race-buildup-mid-gutter {{
+    min-width: 0;
+    width: 100%;
+  }}
+  .race-buildup-summary-title {{
+    font-family: {FONT_BODY};
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: {MUTED};
+    margin: 0 0 1.35rem 0;
+    text-align: center;
+    grid-column: 2 / -1;
+  }}
+  /* Persistent Race A | Race B labels at top of the full compare stack. */
+  .race-buildup-col-headers {{
+    margin: 0 0 0.95rem 0;
+    justify-items: stretch;
+  }}
+  .race-buildup-col-header {{
+    font-family: {FONT_BODY};
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: {INK};
+    padding: 0 0.35rem;
+    box-sizing: border-box;
+    text-align: center;
+  }}
+  .race-buildup-summary-grid {{
+    margin: 0;
+    justify-items: stretch;
+    align-items: start;
+  }}
+  .race-buildup-side {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    min-width: 0;
+    width: 100%;
+    padding: 0 0.35rem;
+    box-sizing: border-box;
+    text-align: center;
+  }}
+  .race-buildup-name {{
+    font-family: {FONT_BODY};
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: {INK};
+    line-height: 1.3;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: center;
+    gap: 0.35rem 0.4rem;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    width: 100%;
+    text-align: center;
+  }}
+  .race-buildup-name-text {{
+    min-width: 0;
+    max-width: 100%;
+  }}
+  .race-buildup-pr {{
+    flex: 0 0 auto;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: {MILES};
+    border: 1px solid rgba(80, 155, 143, 0.35);
+    border-radius: 999px;
+    padding: 0.08rem 0.4rem;
+  }}
+  .race-buildup-date,
+  .race-buildup-time,
+  .race-buildup-pace {{
+    width: 100%;
+    text-align: center;
+  }}
+  .race-buildup-date {{
+    font-size: 0.88rem;
+    color: {MUTED};
+    margin-top: 0.2rem;
+  }}
+  .race-buildup-time {{
+    font-family: {FONT_BODY};
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: {INK};
+    margin-top: 0.35rem;
+    line-height: 1.1;
+  }}
+  .race-buildup-pace {{
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: {MUTED};
+    margin-top: 0.2rem;
+  }}
+  [data-testid="stElementContainer"]:has(.race-buildup-summary) {{
+    margin-top: 1.75rem !important;
+    margin-bottom: 0.35rem !important;
+  }}
+  /* Shared Race A | Race B section chrome (charts heading, EH, pies, metrics). */
+  .race-buildup-section-heading,
+  .race-buildup-eh-values,
+  .race-buildup-hr-pies,
+  .race-buildup-delta,
+  .race-buildup-mileage-row {{
+    margin-left: 0;
+    margin-right: 0;
+    max-width: none;
+    width: 100%;
+    padding: 0 var(--race-buildup-inline-pad);
+    box-sizing: border-box;
+  }}
+  /* Training comparison title + exclude note: centered over A|B columns. */
+  .race-buildup-section-heading {{
+    margin-top: 1.65rem;
+    margin-bottom: 0.35rem;
+    align-items: start;
+  }}
+  .race-buildup-section-heading-main {{
+    grid-column: 2 / -1;
+    text-align: center;
+  }}
+  .race-buildup-section-title {{
+    font-family: {FONT_BODY};
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: {MUTED};
+    margin: 0;
+    text-align: center;
+  }}
+  .race-buildup-section-sub {{
+    font-size: 0.82rem;
+    color: {MUTED};
+    margin: 0.2rem 0 0 0;
+    text-align: center;
+  }}
+  /* Inline row titles (Weekly mileage, EH, HR zones, metrics). */
+  .race-buildup-row-title,
+  .race-buildup-eh-title,
+  .race-buildup-hr-pies-title,
+  .race-buildup-metric-title {{
+    font-family: {FONT_BODY};
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: {MUTED};
+    margin: 0;
+    text-align: left;
+    padding-right: 0.65rem;
+    box-sizing: border-box;
+    align-self: center;
+  }}
+  [data-testid="stElementContainer"]:has(.race-buildup-section-heading) {{
+    margin-top: 0.5rem !important;
+    margin-bottom: 0.15rem !important;
+  }}
+  .race-buildup-delta {{
+    margin-top: 0.85rem;
+    margin-bottom: 0.35rem;
+  }}
+  .race-buildup-metric-list {{
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }}
+  .race-buildup-metric-block {{
+    min-width: 0;
+  }}
+  .race-buildup-metric-value {{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    justify-self: stretch;
+    width: 100%;
+    min-width: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: {INK};
+    line-height: 1.2;
+    text-align: center;
+  }}
+  /* Δ on dashed separator between Race A and Race B values. */
+  .race-buildup-metric-mid {{
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 1.4rem;
+  }}
+  .race-buildup-metric-mid::before {{
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: -0.15rem;
+    bottom: -0.15rem;
+    width: 0;
+    border-left: 1px dashed rgba(21, 32, 40, 0.28);
+    transform: translateX(-50%);
+    pointer-events: none;
+  }}
+  .race-buildup-delta-delta {{
+    position: relative;
+    z-index: 1;
+    display: inline-block;
+    padding: 0 0.35rem;
+    background: {BG};
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.82rem;
+    color: {INK};
+  }}
+  .race-buildup-eh-values {{
+    margin-top: 0.85rem;
+    margin-bottom: 0.35rem;
+  }}
+  .race-buildup-eh-title {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.28rem;
+    width: 100%;
+  }}
+  .race-buildup-eh-item {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    justify-self: stretch;
+    gap: 0.15rem;
+    min-width: 0;
+    width: 100%;
+    text-align: center;
+  }}
+  .race-buildup-eh-value {{
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: {INK};
+    line-height: 1.2;
+    text-align: center;
+  }}
+  .race-buildup-eh-value.race-buildup-eh-insufficient {{
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: {MUTED};
+    max-width: 9rem;
+  }}
+  [data-testid="stElementContainer"]:has(.race-buildup-eh-values),
+  [data-testid="stElementContainer"]:has(.race-buildup-delta) {{
+    margin-top: 0.35rem !important;
+    margin-bottom: 0.35rem !important;
+    overflow: visible !important;
+  }}
+  .race-buildup-hr-pies {{
+    margin-top: 0.85rem;
+    margin-bottom: 0.35rem;
+    align-items: start;
+  }}
+  .race-buildup-hr-pie-side {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    justify-self: stretch;
+    gap: 0.45rem;
+    min-width: 0;
+    width: 100%;
+    text-align: center;
+  }}
+  .race-buildup-hr-pie-donut {{
+    position: relative;
+    width: 7rem;
+    height: 7rem;
+  }}
+  .race-buildup-hr-pie-donut svg {{
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: 50%;
+    overflow: hidden;
+  }}
+  .race-buildup-hr-pie-donut .race-buildup-hr-pie-tip {{
+    left: 50%;
+    right: auto;
+    bottom: calc(100% + 0.35rem);
+    top: auto;
+    transform: translateX(-50%);
+    width: min(12rem, 72vw);
+    z-index: 60;
+  }}
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="1"]:hover) .race-buildup-hr-pie-tip[data-zone="1"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="1"]:focus) .race-buildup-hr-pie-tip[data-zone="1"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="1"]:focus-visible) .race-buildup-hr-pie-tip[data-zone="1"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="2"]:hover) .race-buildup-hr-pie-tip[data-zone="2"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="2"]:focus) .race-buildup-hr-pie-tip[data-zone="2"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="2"]:focus-visible) .race-buildup-hr-pie-tip[data-zone="2"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="3"]:hover) .race-buildup-hr-pie-tip[data-zone="3"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="3"]:focus) .race-buildup-hr-pie-tip[data-zone="3"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="3"]:focus-visible) .race-buildup-hr-pie-tip[data-zone="3"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="4"]:hover) .race-buildup-hr-pie-tip[data-zone="4"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="4"]:focus) .race-buildup-hr-pie-tip[data-zone="4"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="4"]:focus-visible) .race-buildup-hr-pie-tip[data-zone="4"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="5"]:hover) .race-buildup-hr-pie-tip[data-zone="5"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="5"]:focus) .race-buildup-hr-pie-tip[data-zone="5"],
+  .race-buildup-hr-pie-donut:has(.race-buildup-hr-pie-slice[data-zone="5"]:focus-visible) .race-buildup-hr-pie-tip[data-zone="5"] {{
+    visibility: visible;
+    opacity: 1;
+  }}
+  .race-buildup-hr-pie-empty {{
+    width: 8.5rem;
+    height: 8.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: {MUTED};
+    border: 1px dashed rgba(21, 32, 40, 0.18);
+    border-radius: 50%;
+    box-sizing: border-box;
+    padding: 0.65rem;
+    margin: 0 auto;
+  }}
+  .race-buildup-hr-pie-empty.race-buildup-hr-insufficient {{
+    font-weight: 400;
+  }}
+  /* Keep A/B value cells centered; force markdown wrappers full-width. */
+  [data-testid="stElementContainer"]:has(.race-buildup-summary)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(.race-buildup-eh-values)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(.race-buildup-delta)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(.race-buildup-hr-pies)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(.race-buildup-section-heading)
+    [data-testid="stMarkdownContainer"] {{
+    width: 100% !important;
+    max-width: none !important;
+  }}
+  [data-testid="stElementContainer"]:has(.race-buildup-delta)
+    [data-testid="stMarkdownContainer"]
+    .race-buildup-metric-value,
+  [data-testid="stElementContainer"]:has(.race-buildup-eh-values)
+    [data-testid="stMarkdownContainer"]
+    .race-buildup-eh-item,
+  [data-testid="stElementContainer"]:has(.race-buildup-eh-values)
+    [data-testid="stMarkdownContainer"]
+    .race-buildup-eh-value,
+  [data-testid="stElementContainer"]:has(.race-buildup-hr-pies)
+    [data-testid="stMarkdownContainer"]
+    .race-buildup-hr-pie-side,
+  [data-testid="stElementContainer"]:has(.race-buildup-summary)
+    [data-testid="stMarkdownContainer"]
+    .race-buildup-side,
+  [data-testid="stElementContainer"]:has(.race-buildup-summary)
+    [data-testid="stMarkdownContainer"]
+    .race-buildup-date,
+  [data-testid="stElementContainer"]:has(.race-buildup-summary)
+    [data-testid="stMarkdownContainer"]
+    .race-buildup-time,
+  [data-testid="stElementContainer"]:has(.race-buildup-summary)
+    [data-testid="stMarkdownContainer"]
+    .race-buildup-pace,
+  [data-testid="stElementContainer"]:has(.race-buildup-summary)
+    [data-testid="stMarkdownContainer"]
+    .race-buildup-col-header {{
+    text-align: center !important;
+  }}
+  [data-testid="stElementContainer"]:has(.race-buildup-hr-pies) {{
+    margin-top: 0.5rem !important;
+    margin-bottom: 0.35rem !important;
+    overflow: visible !important;
+  }}
+  /* Weekly mileage charts: same CSS grid tracks as HTML compare-rows. */
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label) {{
+    display: grid !important;
+    grid-template-columns:
+      var(--race-buildup-label-w)
+      minmax(0, 1fr)
+      var(--race-buildup-mid-w)
+      minmax(0, 1fr) !important;
+    gap: 0 !important;
+    column-gap: 0 !important;
+    row-gap: 0 !important;
+    align-items: center !important;
+    padding: 0 var(--race-buildup-inline-pad) !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+  }}
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    > [data-testid="stColumn"],
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    > [data-testid="column"] {{
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    flex: none !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+  }}
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    > [data-testid="stColumn"] > div,
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    > [data-testid="column"] > div {{
+    width: 100% !important;
+    max-width: none !important;
+  }}
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    [data-testid="stVerticalBlock"],
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    [data-testid="stElementContainer"],
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    [data-testid="stPlotlyChart"],
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    .stPlotlyChart,
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    .js-plotly-plot,
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    .plot-container,
+  [data-testid="stHorizontalBlock"]:has(.race-buildup-mileage-label)
+    .svg-container {{
+    width: 100% !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+  }}
+  [data-testid="stElementContainer"]:has(.race-buildup-mileage-label) {{
+    margin-top: 0.35rem !important;
+    margin-bottom: 0 !important;
+  }}
+  @media (max-width: 720px) {{
+    .stApp {{
+      --race-buildup-label-w: 7.5rem;
+      --race-buildup-mid-w: 2.5rem;
+    }}
+  }}
   /* Performance: table section */
   [data-testid="stElementContainer"]:has(#race-results-table)
     + [data-testid="stElementContainer"]:has(.chart-section-title) {{
@@ -1680,6 +2180,62 @@ GLOBAL_CSS = f"""
   [data-testid="stColumn"]:has(.race-controls-panel),
   [data-testid="column"]:has(.race-controls-panel) {{
     max-width: 24rem;
+  }}
+  /* Build-up: wider panel so Race A / Race B can sit side by side. */
+  [data-testid="stColumn"]:has(.race-buildup-controls),
+  [data-testid="column"]:has(.race-buildup-controls) {{
+    max-width: 42rem;
+  }}
+  [data-testid="stColumn"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]
+    [data-testid="stSelectbox"],
+  [data-testid="stColumn"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="column"]
+    [data-testid="stSelectbox"],
+  [data-testid="column"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]
+    [data-testid="stSelectbox"],
+  [data-testid="column"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="column"]
+    [data-testid="stSelectbox"],
+  [data-testid="stColumn"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]
+    [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="stColumn"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="column"]
+    [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="column"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]
+    [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="column"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="column"]
+    [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="stColumn"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]
+    div[data-baseweb="select"] > div,
+  [data-testid="stColumn"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="column"]
+    div[data-baseweb="select"] > div,
+  [data-testid="column"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]
+    div[data-baseweb="select"] > div,
+  [data-testid="column"]:has(.race-buildup-controls)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="column"]
+    div[data-baseweb="select"] > div {{
+    width: 100% !important;
+    max-width: 100% !important;
   }}
   /* Fitness Controls: same card language as the rest of the page, tuned so the
      filter card reads as chrome next to the charts — soft top-lit surface,

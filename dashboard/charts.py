@@ -52,6 +52,12 @@ def _plotly_font_family() -> str:
 TRAINING_MARGIN_L = 78
 TRAINING_MARGIN_R = TRAINING_PLOT_MARGIN_R_PX
 TRAINING_MARGIN_T = 52
+# Race Build-Up side-by-side mileage: tighter L/R so plot boxes sit nearer
+# the A/B column centers (shared with EH / pies / metrics).
+RACE_BUILDUP_MARGIN_L = 48
+RACE_BUILDUP_MARGIN_R = 16
+RACE_BUILDUP_MARGIN_T = 28
+RACE_BUILDUP_MARGIN_B = 56
 # Extra top margin on 80:20: HTML title + ⓘ band, then Easy / Moderate/Hard key.
 # Larger than TRAINING_MARGIN_T so the legend clears the overlaid title row.
 COMPLIANCE_MARGIN_T = 96
@@ -318,6 +324,17 @@ def _training_margin(
         r=TRAINING_MARGIN_R,
         t=TRAINING_MARGIN_T if top is None else top,
         b=base["b"] if bottom is None else bottom,
+        autoexpand=False,
+    )
+
+
+def _race_buildup_mileage_margin() -> dict:
+    """Compact L/R margins so dual mileage charts align with A/B columns."""
+    return dict(
+        l=RACE_BUILDUP_MARGIN_L,
+        r=RACE_BUILDUP_MARGIN_R,
+        t=RACE_BUILDUP_MARGIN_T,
+        b=RACE_BUILDUP_MARGIN_B,
         autoexpand=False,
     )
 
@@ -744,12 +761,18 @@ def _add_race_week_diamonds(
     )
 
 
-def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
+def compliance_chart(
+    period_df: pd.DataFrame,
+    grain: str,
+    *,
+    title: str | None = None,
+) -> go.Figure:
     """Build a 100% stacked easy vs hard mileage compliance chart.
 
-    Heading comes from ``compliance_info_html`` (title + inline ⓘ); blank Plotly
-    title plus ``COMPLIANCE_MARGIN_T`` leave room for the Easy / Moderate/Hard
-    key under that HTML title band (no overlap).
+    Heading normally comes from ``compliance_info_html`` (title + inline ⓘ);
+    blank Plotly title plus ``COMPLIANCE_MARGIN_T`` leave room for the Easy /
+    Moderate/Hard key under that HTML title band (no overlap). Pass ``title``
+    to draw a Plotly title instead (e.g. Performance race build-up compare).
 
     Parameters
     ----------
@@ -757,6 +780,9 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
         Aggregated period metrics from ``aggregate_period_metrics``.
     grain : str
         Period grain label used for axis formatting.
+    title : str, optional
+        Plotly chart title. Defaults to an empty title for the Training HTML
+        title band.
 
     Returns
     -------
@@ -765,12 +791,17 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
     """
     fig = go.Figure()
     labels = [] if period_df.empty else period_df["period_label"].tolist()
+    chart_title = "" if title is None else title
+    margin_top = COMPLIANCE_MARGIN_T if title is None else None
     if period_df.empty:
         fig.update_layout(
-            title=_title(""),
+            title=_title(chart_title),
             xaxis=_training_xaxis(labels, grain),
             yaxis=_training_yaxis(),
-            **{**CHART_LAYOUT, "margin": _training_margin(grain, 0, top=COMPLIANCE_MARGIN_T)},
+            **{
+                **CHART_LAYOUT,
+                "margin": _training_margin(grain, 0, top=margin_top),
+            },
         )
         return fig
 
@@ -829,7 +860,7 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
         annotation_bgcolor="rgba(255,255,255,0.35)",
     )
     fig.update_layout(
-        title=_title(""),
+        title=_title(chart_title),
         barmode="stack",
         showlegend=True,
         legend=LEGEND_UNDER_TITLE,
@@ -845,7 +876,7 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
         hoverlabel=_hoverlabel(),
         **{
             **CHART_LAYOUT,
-            "margin": _training_margin(grain, len(labels), top=COMPLIANCE_MARGIN_T),
+            "margin": _training_margin(grain, len(labels), top=margin_top),
         },
     )
     stack_tops = period_df["easy_frac"].fillna(0.0) + period_df["hard_frac"].fillna(0.0)
@@ -853,7 +884,46 @@ def compliance_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
     return fig
 
 
-def mileage_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
+def _weeks_from_race_offsets(n: int) -> list[int]:
+    """Return ``-n … -1`` offsets for ``n`` pre-race weeks (oldest first)."""
+    n = max(int(n), 0)
+    return list(range(-n, 0))
+
+
+def _weeks_from_race_tick_labels(n: int) -> list[str]:
+    """Compact x-axis ticks: ``-8``, ``-7``, …, ``-1``."""
+    return [str(offset) for offset in _weeks_from_race_offsets(n)]
+
+
+def _weeks_from_race_hover_label(offset: int) -> str:
+    """Readable hover for a weeks-from-race offset (e.g. ``8 weeks out``)."""
+    weeks = abs(int(offset))
+    if weeks == 1:
+        return "1 week out"
+    return f"{weeks} weeks out"
+
+
+def _relative_weeks_bar_customdata(period_df: pd.DataFrame) -> list[list[str]]:
+    """Bar hover: weeks-out label plus optional calendar date tooltip."""
+    n = len(period_df)
+    offsets = _weeks_from_race_offsets(n)
+    date_tips = _period_tooltips(period_df) if n else []
+    customdata: list[list[str]] = []
+    for offset, tip in zip(offsets, date_tips):
+        date_html = f"<br>{tip}" if tip else ""
+        customdata.append([_weeks_from_race_hover_label(offset), date_html])
+    return customdata
+
+
+def mileage_chart(
+    period_df: pd.DataFrame,
+    grain: str,
+    *,
+    title: str | None = None,
+    y_max: float | None = None,
+    show_goal: bool = True,
+    relative_weeks_from_race: bool = False,
+) -> go.Figure:
     """Build a total mileage bar chart with a solid ``MILEAGE_BAR`` fill.
 
     The calendar mileage heatmap (Training expander)
@@ -867,26 +937,56 @@ def mileage_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
         Aggregated period metrics from ``aggregate_period_metrics``.
     grain : str
         Period grain label used for goal scaling and axis formatting.
+    title : str, optional
+        Chart title override. Defaults to ``mileage_title(grain)``.
+    y_max : float, optional
+        Fixed y-axis maximum for side-by-side compares. Defaults to an
+        auto range from totals and (when shown) the mileage goal.
+    show_goal : bool, optional
+        When True (default), draw the scaled mileage goal line and include
+        it in the auto y-axis range. Race Build-Up compares pass False.
+    relative_weeks_from_race : bool, optional
+        When True, x-axis uses weeks-from-race countdown ticks (``-n`` … ``-1``)
+        with title ``Weeks from race``, and race-week diamonds are omitted.
+        Intended for Race Build-Up pre-race windows (race week already excluded).
 
     Returns
     -------
     plotly.graph_objects.Figure
-        Bar chart with a scaled mileage goal line.
+        Bar chart, optionally with a scaled mileage goal line.
     """
-    title = mileage_title(grain)
+    chart_title = mileage_title(grain) if title is None else title
     fig = go.Figure()
-    labels = [] if period_df.empty else period_df["period_label"].tolist()
+    n = 0 if period_df.empty else len(period_df)
+    if relative_weeks_from_race:
+        labels = _weeks_from_race_tick_labels(n)
+        chart_margin = _race_buildup_mileage_margin()
+    else:
+        labels = [] if period_df.empty else period_df["period_label"].tolist()
+        chart_margin = None
     if period_df.empty:
+        xaxis = _training_xaxis(labels, grain)
+        if relative_weeks_from_race:
+            xaxis.update(
+                title=dict(text="Weeks from race", font=dict(size=12, color=MUTED)),
+                tickangle=0,
+            )
         fig.update_layout(
-            title=_title(title),
-            xaxis=_training_xaxis(labels, grain),
+            title=_title(chart_title),
+            xaxis=xaxis,
             yaxis=_training_yaxis(),
             showlegend=False,
-            **{**CHART_LAYOUT, "margin": _training_margin(grain, 0)},
+            **{
+                **CHART_LAYOUT,
+                "margin": chart_margin or _training_margin(grain, 0),
+            },
         )
         return fig
 
-    customdata = _bar_period_customdata(period_df, grain)
+    if relative_weeks_from_race:
+        customdata = _relative_weeks_bar_customdata(period_df)
+    else:
+        customdata = _bar_period_customdata(period_df, grain)
     totals = period_df["total_miles"].fillna(0.0)
     mile_values = totals.tolist()
     goal = miles_goal(grain)
@@ -910,32 +1010,48 @@ def mileage_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
             showlegend=False,
         )
     )
-    fig.add_hline(
-        y=goal,
-        line_width=1,
-        line_color=TRAINING_GOAL_LINE,
-        annotation_text=f"Goal: {_format_miles_goal(goal)} miles",
-        annotation_font=dict(size=12, color=MUTED),
-        annotation_position="top left",
-        annotation_bgcolor="rgba(255,255,255,0.35)",
-    )
-    y_max = max(float(totals.max()), goal) * 1.18
-    y_max = max(y_max, 5)
+    if show_goal:
+        fig.add_hline(
+            y=goal,
+            line_width=1,
+            line_color=TRAINING_GOAL_LINE,
+            annotation_text=f"Goal: {_format_miles_goal(goal)} miles",
+            annotation_font=dict(size=12, color=MUTED),
+            annotation_position="top left",
+            annotation_bgcolor="rgba(255,255,255,0.35)",
+        )
+    if y_max is None:
+        peak = float(totals.max())
+        if show_goal:
+            peak = max(peak, goal)
+        axis_max = max(peak * 1.18, 5)
+    else:
+        axis_max = max(float(y_max), 5)
+    xaxis = _training_xaxis(labels, grain)
+    if relative_weeks_from_race:
+        xaxis.update(
+            title=dict(text="Weeks from race", font=dict(size=12, color=MUTED)),
+            tickangle=0,
+        )
     fig.update_layout(
-        title=_title(title),
+        title=_title(chart_title),
         showlegend=False,
         yaxis=_training_yaxis(
             title=dict(text="Total Miles", font=dict(size=12, color=MUTED)),
-            range=[0, y_max],
+            range=[0, axis_max],
             gridcolor="rgba(21,32,40,0.08)",
         ),
-        xaxis=_training_xaxis(labels, grain),
+        xaxis=xaxis,
         bargap=TRAINING_BARGAP,
         bargroupgap=0,
         hoverlabel=_hoverlabel(),
-        **{**CHART_LAYOUT, "margin": _training_margin(grain, len(labels))},
+        **{
+            **CHART_LAYOUT,
+            "margin": chart_margin or _training_margin(grain, len(labels)),
+        },
     )
-    _add_race_week_diamonds(fig, period_df, totals)
+    if not relative_weeks_from_race:
+        _add_race_week_diamonds(fig, period_df, totals)
     return fig
 
 
@@ -1616,6 +1732,9 @@ def _nan_to_none(values: pd.Series) -> list[float | None]:
 def hr_zones_stacked_area_chart(
     period_df: pd.DataFrame,
     grain: str,
+    *,
+    title: str | None = None,
+    compact: bool = False,
 ) -> go.Figure:
     """Build a 100% stacked area chart of HR-zone time by period.
 
@@ -1631,20 +1750,35 @@ def hr_zones_stacked_area_chart(
         Period aggregates from ``aggregate_hr_zones_by_period``.
     grain : str
         Period grain label used for axis formatting.
+    title : str, optional
+        Chart title override. Defaults to ``hr_zones_title(grain)``.
+    compact : bool, optional
+        When True, use Training-width margins and a horizontal legend under
+        the title (for side-by-side Performance compare).
 
     Returns
     -------
     plotly.graph_objects.Figure
         Stacked area chart with y-axis 0–100%.
     """
-    title = hr_zones_title(grain)
+    chart_title = hr_zones_title(grain) if title is None else title
     fig = go.Figure()
     labels = [] if period_df.empty else period_df["period_label"].tolist()
     tooltips = [] if period_df.empty else _period_tooltips(period_df)
     hover_x = tooltips if tooltips else labels
+    if compact:
+        xaxis = _training_xaxis(labels, grain)
+        margin = _training_margin(grain, len(labels))
+        legend = LEGEND_UNDER_TITLE
+        trace_x = labels
+    else:
+        xaxis = _fitness_xaxis(labels, grain, hover_labels=hover_x or None)
+        margin = _hr_zones_margin(grain, len(labels))
+        legend = LEGEND_OUTSIDE_RIGHT
+        trace_x = hover_x
     axis_layout = dict(
-        title=_title(title),
-        legend=LEGEND_OUTSIDE_RIGHT,
+        title=_title(chart_title),
+        legend=legend,
         yaxis=dict(
             title=dict(text="Percent of HR time", font=dict(size=12, color=MUTED)),
             range=[0, 100],
@@ -1654,13 +1788,13 @@ def hr_zones_stacked_area_chart(
             automargin=False,
             fixedrange=True,
         ),
-        xaxis=_fitness_xaxis(labels, grain, hover_labels=hover_x or None),
+        xaxis=xaxis,
         hovermode="x unified",
         hoverlabel=_hoverlabel(),
         **{
             **CHART_LAYOUT,
             "height": HR_ZONES_HEIGHT,
-            "margin": _hr_zones_margin(grain, len(labels)),
+            "margin": margin,
         },
     )
     if period_df.empty:
@@ -1675,7 +1809,7 @@ def hr_zones_stacked_area_chart(
             y_vals = [None] * len(period_df)
         fig.add_trace(
             go.Scatter(
-                x=hover_x,
+                x=trace_x,
                 y=y_vals,
                 name=f"Zone {idx}",
                 mode="lines",

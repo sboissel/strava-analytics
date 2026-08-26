@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-08-26
+
+### Added
+
+**Dashboard**
+
+- **Performance**: Race Build-Up Comparison — side-by-side pre-race training for two races of the same type (weekly mileage, HR-zone shares, easy:hard mix, and summary metrics with deltas).
+- **Performance**: type-aware build-up windows, HR coverage gates for zone charts, and shared mileage axis scaling for fair compare.
+
+### Changed
+
+**Dashboard**
+
+- Theme and UI helpers for build-up panels, delta tables, and HR pie summaries on Performance.
+- Ignore regenerated pipeline `data/` CSVs in git (local/pipeline output).
+
 ## [1.4.0] — 2026-08-22
 
 ### Added

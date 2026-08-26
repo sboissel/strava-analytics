@@ -359,6 +359,55 @@ class TrainingChartTests(unittest.TestCase):
         self.assertEqual(goal_lines[0].line.color, TRAINING_GOAL_LINE)
         self.assertEqual(TRAINING_GOAL_LINE, "#2E4552")
 
+    def test_mileage_chart_hides_goal_when_requested(self):
+        fig = mileage_chart(_training_period_df(), "Week", show_goal=False)
+        goal_lines = [
+            shape
+            for shape in fig.layout.shapes or ()
+            if getattr(shape, "type", None) == "line"
+            and getattr(shape, "y0", None) == getattr(shape, "y1", None)
+        ]
+        self.assertFalse(goal_lines)
+        annotations = [
+            ann
+            for ann in fig.layout.annotations or ()
+            if "Goal" in (getattr(ann, "text", None) or "")
+        ]
+        self.assertFalse(annotations)
+
+    def test_mileage_chart_relative_weeks_from_race_axis(self):
+        """Build-up charts use -n…-1 ticks and omit race diamonds."""
+        from dashboard.charts import (
+            RACE_BUILDUP_MARGIN_B,
+            RACE_BUILDUP_MARGIN_L,
+            RACE_BUILDUP_MARGIN_R,
+            RACE_BUILDUP_MARGIN_T,
+        )
+
+        period_df = _training_period_df()
+        fig = mileage_chart(
+            period_df,
+            "Week",
+            title="",
+            show_goal=False,
+            relative_weeks_from_race=True,
+        )
+        bar = fig.data[0]
+        self.assertEqual(list(bar.x), ["-2", "-1"])
+        self.assertEqual(fig.layout.xaxis.title.text, "Weeks from race")
+        self.assertEqual(bar.customdata[0][0], "2 weeks out")
+        self.assertEqual(bar.customdata[1][0], "1 week out")
+        self.assertFalse(_race_diamond_traces(fig))
+        self.assertEqual(fig.layout.margin.l, RACE_BUILDUP_MARGIN_L)
+        self.assertEqual(fig.layout.margin.r, RACE_BUILDUP_MARGIN_R)
+        self.assertEqual(fig.layout.margin.t, RACE_BUILDUP_MARGIN_T)
+        self.assertEqual(fig.layout.margin.b, RACE_BUILDUP_MARGIN_B)
+        # Default path still shows diamonds for race periods.
+        default = mileage_chart(period_df, "Week", show_goal=False)
+        self.assertTrue(_race_diamond_traces(default))
+        self.assertEqual(list(default.data[0].x), ["Mar 2, 26", "Mar 9, 26"])
+        self.assertEqual(default.layout.margin.l, TRAINING_MARGIN_L)
+
     def test_mileage_heatmap_uses_mileage_bar_palette(self):
         """Training calendar heatmap shares MILEAGE_COLORSCALE."""
         matrix = np.array([[5.0, 10.0], [15.0, 20.0]])

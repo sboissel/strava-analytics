@@ -10,6 +10,9 @@ env/
 # Local pyenv pin (CI/Streamlit use 3.11 from config)
 .python-version
 
+# Pipeline CSV output (regenerate locally via strava_analytics.pipeline)
+data/
+
 # Secrets and local env
 .env
 .env.*

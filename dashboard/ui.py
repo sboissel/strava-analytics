@@ -21,7 +21,13 @@ from charts import (
     pace_hr_title,
 )
 from data import format_full_date
-from race_data import fastest_races_by_type
+from race_data import (
+    easy_hard_ratio_from_pct,
+    fastest_races_by_type,
+    format_pace_min_per_mile,
+    race_buildup_comparison_title,
+    race_compare_short_name,
+)
 from strava_analytics.activities import format_time
 from theme import (
     TRAFFIC_GREEN,
@@ -473,10 +479,30 @@ def eh_kpi_tooltip(period: str) -> str:
         "week": "the last full Mon–Sun week",
         "month": "the last 30 days",
     }[period]
+    return _eh_kpi_tooltip_body(
+        f"Easy:hard time ratio from heart-rate zones for {period_desc}."
+    )
+
+
+def race_buildup_eh_kpi_tooltip(weeks: int) -> str:
+    """Return tooltip HTML for race build-up easy:hard values.
+
+    Definition only — no target / target-band guidance (unlike Metrics KPIs).
+    """
+    n = max(0, int(weeks))
+    week_word = "week" if n == 1 else "weeks"
+    return (
+        "<strong>Definition</strong>"
+        "Easy:hard share from heart-rate zones over the "
+        f"{n} pre-race {week_word} (race week excluded)."
+    )
+
+
+def _eh_kpi_tooltip_body(definition: str) -> str:
     green, lime, yellow, orange = EH_BAND_THRESHOLDS
     return (
         "<strong>Definition</strong>"
-        f"Easy:hard time ratio from heart-rate zones for {period_desc}."
+        f"{definition}"
         "<br><br>"
         "<strong>Target</strong>"
         "~80% easy (80:20)"
@@ -1387,6 +1413,364 @@ def fastest_race_cards_html(races) -> str:
     )
 
 
+def _race_buildup_side_html(
+    row,
+    *,
+    avg_pace_min: float | None = None,
+) -> str:
+    """One race column for the build-up comparison summary.
+
+    Finish time stays the race result; pace under it is training-period
+    average pace (pre-race window, race week excluded).
+    """
+    name = race_compare_short_name(row)
+    date_raw = row.get("date")
+    try:
+        date_label = format_full_date(date_raw) if date_raw is not None else "—"
+    except (TypeError, ValueError):
+        date_label = "—"
+    time_label = str(row.get("elapsed_time_min") or "—").strip() or "—"
+    pace_label = format_pace_min_per_mile(avg_pace_min)
+    pr_badge = (
+        '<span class="race-buildup-pr">PR</span>' if bool(row.get("is_pr")) else ""
+    )
+    return (
+        '<div class="race-buildup-side">'
+        f'<div class="race-buildup-name" title="{html.escape(str(row.get("name") or name))}">'
+        f'<span class="race-buildup-name-text">{html.escape(name)}</span>'
+        f"{pr_badge}</div>"
+        f'<div class="race-buildup-date">{html.escape(date_label)}</div>'
+        f'<div class="race-buildup-time">{html.escape(time_label)}</div>'
+        f'<div class="race-buildup-pace">{html.escape(pace_label)}</div>'
+        "</div>"
+    )
+
+
+def race_buildup_summary_html(
+    race_type: str,
+    race_a,
+    race_b,
+    *,
+    avg_pace_min_a: float | None = None,
+    avg_pace_min_b: float | None = None,
+) -> str:
+    """Render the two-race header above Performance build-up charts.
+
+    Column labels (Race A | Race B) sit above the comparison title, aligned
+    with the A/B data columns (not the row-title gutter). Pace under each
+    finish time is training-period average pace (not race result pace).
+
+    Parameters
+    ----------
+    race_type : str
+        Selected race type (e.g. ``"Half"``).
+    race_a, race_b :
+        Race rows (Series-like) for the left and right charts.
+    avg_pace_min_a, avg_pace_min_b :
+        Distance-weighted average pace (min/mi) over each race's pre-race
+        training window.
+
+    Returns
+    -------
+    str
+        HTML markup for column labels, comparison title, and race facts.
+    """
+    title = race_buildup_comparison_title(race_type)
+    gutter = '<div class="race-buildup-label-gutter" aria-hidden="true"></div>'
+    mid = '<div class="race-buildup-mid-gutter" aria-hidden="true"></div>'
+    return (
+        '<div class="race-buildup-summary">'
+        '<div class="race-buildup-col-headers race-buildup-compare-row" '
+        'role="row" aria-label="Column labels">'
+        f"{gutter}"
+        '<div class="race-buildup-col-header" role="columnheader">Race A</div>'
+        f"{mid}"
+        '<div class="race-buildup-col-header" role="columnheader">Race B</div>'
+        "</div>"
+        '<div class="race-buildup-compare-row">'
+        f"{gutter}"
+        f'<div class="race-buildup-summary-title">{html.escape(title)}</div>'
+        "</div>"
+        '<div class="race-buildup-summary-grid race-buildup-compare-row">'
+        f"{gutter}"
+        f"{_race_buildup_side_html(race_a, avg_pace_min=avg_pace_min_a)}"
+        f"{mid}"
+        f"{_race_buildup_side_html(race_b, avg_pace_min=avg_pace_min_b)}"
+        "</div>"
+        "</div>"
+    )
+
+
+def race_buildup_section_heading_html(
+    title: str,
+    *,
+    subtitle: str | None = None,
+) -> str:
+    """Centered training-comparison heading (optional subtitle below title)."""
+    sub = (
+        f'<div class="race-buildup-section-sub">{html.escape(subtitle)}</div>'
+        if subtitle
+        else ""
+    )
+    return (
+        '<div class="race-buildup-section-heading race-buildup-compare-row">'
+        '<div class="race-buildup-label-gutter" aria-hidden="true"></div>'
+        '<div class="race-buildup-section-heading-main">'
+        f'<div class="race-buildup-section-title">{html.escape(title)}</div>'
+        f"{sub}"
+        "</div>"
+        "</div>"
+    )
+
+
+def race_buildup_row_heading_html(title: str) -> str:
+    """Inline row title for the Weekly mileage chart gutter."""
+    return (
+        '<div class="race-buildup-mileage-label">'
+        f'<div class="race-buildup-row-title">{html.escape(title)}</div>'
+        "</div>"
+    )
+
+
+def race_buildup_eh_values_html(
+    *,
+    weeks: int,
+    easy_pct_a: float | None = None,
+    easy_pct_b: float | None = None,
+    insufficient_a: bool = False,
+    insufficient_b: bool = False,
+    label_a: str = "Race A",
+    label_b: str = "Race B",
+) -> str:
+    """Easy:hard ratios with the row title inline beside Race A | Race B.
+
+    When ``insufficient_a`` / ``insufficient_b`` is True (HR coverage ≤ 10% of
+    training miles), that column shows “Insufficient HR data” instead of a
+    ratio. ``label_a`` / ``label_b`` are accepted for call-site compatibility
+    but are not rendered — column identity comes from the Race A | Race B
+    header row.
+    """
+    _ = (label_a, label_b)
+    tooltip = race_buildup_eh_kpi_tooltip(weeks)
+    mid = '<div class="race-buildup-mid-gutter" aria-hidden="true"></div>'
+    return (
+        '<div class="race-buildup-eh-values race-buildup-compare-row" '
+        'aria-label="Easy to hard ratio">'
+        '<div class="race-buildup-eh-title">'
+        "<span>% easy : % hard</span>"
+        '<span class="kpi-info" tabindex="0" role="button" '
+        'aria-label="About easy to hard ratio">'
+        '<span aria-hidden="true">ⓘ</span>'
+        f'<span class="kpi-tooltip" role="tooltip">{tooltip}</span>'
+        "</span>"
+        "</div>"
+        f"{_race_buildup_eh_value(easy_pct_a, insufficient=insufficient_a)}"
+        f"{mid}"
+        f"{_race_buildup_eh_value(easy_pct_b, insufficient=insufficient_b)}"
+        "</div>"
+    )
+
+
+def _race_buildup_eh_value(
+    easy_pct: float | None,
+    *,
+    insufficient: bool = False,
+) -> str:
+    """Plain easy:hard ratio value (no per-cell race name)."""
+    if insufficient:
+        return (
+            '<div class="race-buildup-eh-item">'
+            '<div class="race-buildup-eh-value race-buildup-eh-insufficient" '
+            'role="status">Insufficient HR data</div>'
+            "</div>"
+        )
+    value, _pct = easy_hard_ratio_from_pct(easy_pct)
+    return (
+        '<div class="race-buildup-eh-item">'
+        f'<div class="race-buildup-eh-value">{html.escape(value)}</div>'
+        "</div>"
+    )
+
+
+def race_buildup_delta_table_html(
+    rows: Sequence[Mapping[str, str]],
+    *,
+    weeks: int | None = None,
+) -> str:
+    """Render training metrics as inline title | Race A | Δ | Race B rows.
+
+    Shared compare-row grid keeps metric titles aligned with EH / HR / mileage
+    labels. ``weeks`` is accepted for call-site compatibility; the
+    ``Excludes race week`` note lives on the training-comparison heading.
+
+    Parameters
+    ----------
+    rows :
+        Rows from ``race_buildup_compare_rows`` with ``metric``, ``race_a``,
+        ``race_b``, and ``delta`` keys.
+    weeks :
+        Unused; kept so older call sites that pass ``weeks=`` still work.
+
+    Returns
+    -------
+    str
+        HTML for stacked metric value rows.
+    """
+    _ = weeks
+    blocks: list[str] = []
+    for row in rows:
+        blocks.append(
+            '<div class="race-buildup-metric-block race-buildup-compare-row">'
+            f'<div class="race-buildup-metric-title">'
+            f'{html.escape(row["metric"])}</div>'
+            f'<div class="race-buildup-metric-value">'
+            f'{html.escape(row["race_a"])}</div>'
+            '<div class="race-buildup-metric-mid" aria-label="Delta">'
+            f'<span class="race-buildup-delta-delta">'
+            f'{html.escape(row["delta"])}</span>'
+            "</div>"
+            f'<div class="race-buildup-metric-value">'
+            f'{html.escape(row["race_b"])}</div>'
+            "</div>"
+        )
+    return (
+        '<div class="race-buildup-delta">'
+        f'<div class="race-buildup-metric-list">{"".join(blocks)}</div>'
+        "</div>"
+    )
+
+
+def _race_buildup_hr_pie_donut(
+    shares: Mapping[str, float] | None,
+    *,
+    insufficient: bool = False,
+) -> str:
+    """One mileage-weighted HR-zone donut for build-up compare."""
+    if insufficient:
+        # Single bold label inside the dashed circle (no caption below).
+        body = (
+            '<div class="race-buildup-hr-pie-empty race-buildup-hr-insufficient" '
+            'role="status">Insufficient HR data</div>'
+        )
+        return (
+            '<div class="race-buildup-hr-pie-side">'
+            f"{body}"
+            "</div>"
+        )
+
+    values: list[float] = []
+    miles: list[float | None] = []
+    if shares is not None:
+        for idx in range(1, len(HR_ZONE_COLORS) + 1):
+            if f"zone_{idx}_pct" not in shares:
+                values = []
+                miles = []
+                break
+            values.append(_parse_zone_float(shares.get(f"zone_{idx}_pct")))
+            mile_key = f"zone_{idx}_miles"
+            if mile_key in shares:
+                miles.append(_parse_zone_float(shares.get(mile_key)))
+            else:
+                miles.append(None)
+
+    total = sum(values)
+    if not values or total <= 0:
+        body = (
+            '<div class="race-buildup-hr-pie-empty" role="img" '
+            'aria-label="No HR zone data">No HR data</div>'
+        )
+    else:
+        paths: list[str] = []
+        tips: list[str] = []
+        aria_parts: list[str] = []
+        cursor = 0.0
+        for idx, (color, pct, zone_miles) in enumerate(
+            zip(HR_ZONE_COLORS, values, miles, strict=True), start=1
+        ):
+            start_frac = cursor / total
+            cursor += pct
+            end_frac = cursor / total
+            pct_label = f"{pct:.0f}%"
+            if zone_miles is None:
+                miles_label = "—"
+            else:
+                miles_label = f"{zone_miles:.1f} mi"
+            tip_plain = f"Zone {idx}: {pct_label} · {miles_label}"
+            aria_parts.append(tip_plain)
+            tip_html = (
+                f"<strong>Zone {idx}</strong>"
+                f"{html.escape(pct_label)} of mileage"
+                f"<br>{html.escape(miles_label)}"
+            )
+            tips.append(
+                f'<span class="kpi-tooltip race-buildup-hr-pie-tip" data-zone="{idx}" '
+                f'role="tooltip">{tip_html}</span>'
+            )
+            path_d = _hr_zone_pie_slice_path(start_frac, end_frac)
+            if not path_d:
+                continue
+            paths.append(
+                f'<path class="hr-zones-pie-slice race-buildup-hr-pie-slice" '
+                f'data-zone="{idx}" tabindex="0" role="listitem" '
+                f'aria-label="{html.escape(tip_plain)}" '
+                f'fill="{color}" d="{path_d}" />'
+            )
+        aria = html.escape(", ".join(aria_parts))
+        body = (
+            f'<div class="race-buildup-hr-pie-donut" role="list" aria-label="{aria}">'
+            '<svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">'
+            f'{"".join(paths)}'
+            "</svg>"
+            f'{"".join(tips)}'
+            "</div>"
+        )
+
+    return (
+        '<div class="race-buildup-hr-pie-side">'
+        f"{body}"
+        "</div>"
+    )
+
+
+def race_buildup_hr_pies_html(
+    shares_a: Mapping[str, float] | None,
+    shares_b: Mapping[str, float] | None,
+    *,
+    insufficient_a: bool = False,
+    insufficient_b: bool = False,
+    label_a: str = "Race A",
+    label_b: str = "Race B",
+) -> str:
+    """Side-by-side mileage-weighted HR-zone pies for Race A / Race B.
+
+    When ``insufficient_a`` / ``insufficient_b`` is True (HR coverage ≤ 10% of
+    training miles), that column shows “Insufficient HR data” instead of a pie.
+    ``label_a`` / ``label_b`` are accepted for call-site compatibility but are
+    not rendered — column identity comes from the Race A | Race B header row.
+    Returns ``""`` when neither side has HR-zone data nor an insufficient label.
+    """
+    _ = (label_a, label_b)
+    has_a = (not insufficient_a) and bool(shares_a) and any(
+        f"zone_{i}_pct" in shares_a for i in range(1, len(HR_ZONE_COLORS) + 1)
+    )
+    has_b = (not insufficient_b) and bool(shares_b) and any(
+        f"zone_{i}_pct" in shares_b for i in range(1, len(HR_ZONE_COLORS) + 1)
+    )
+    if not has_a and not has_b and not insufficient_a and not insufficient_b:
+        return ""
+
+    mid = '<div class="race-buildup-mid-gutter" aria-hidden="true"></div>'
+    return (
+        '<div class="race-buildup-hr-pies race-buildup-compare-row" '
+        'role="group" aria-label="Heart rate zones">'
+        '<div class="race-buildup-hr-pies-title">HR zones</div>'
+        f"{_race_buildup_hr_pie_donut(shares_a if has_a else None, insufficient=insufficient_a)}"
+        f"{mid}"
+        f"{_race_buildup_hr_pie_donut(shares_b if has_b else None, insufficient=insufficient_b)}"
+        "</div>"
+    )
+
+
 def render_race_section_nav(*, chart_label: str = "Finish Times") -> None:
     """Render in-page section links for Performance.
 
@@ -1405,6 +1789,7 @@ def render_race_section_nav(*, chart_label: str = "Finish Times") -> None:
             ("fastest-races", "Personal Records"),
             ("chart-race-results", chart_label),
             ("race-results-table", "Race History"),
+            ("chart-race-buildup", "Race Build-Up Comparison"),
         ],
         aria_label="Performance sections",
         current_page="performance",

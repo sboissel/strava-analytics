@@ -227,6 +227,15 @@ class AggregateHrZonesTests(unittest.TestCase):
             "Mar 9, 2026 - Mar 15, 2026",
         )
 
+    def test_custom_count_shortens_window(self):
+        runs = self._runs(
+            ["2026-03-10T08:00:00Z"],
+            [[100.0, 100.0, 0.0, 0.0, 0.0]],
+        )
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        result = aggregate_hr_zones_by_period(runs, "Week", as_of=as_of, count=12)
+        self.assertEqual(len(result), 12)
+
     def test_all_null_period_is_nan(self):
         """A period whose runs have no zone columns filled is not a 0% stack."""
         runs = self._runs(

@@ -892,6 +892,15 @@ class PeriodMetricsTests(unittest.TestCase):
         self.assertIn("total_elevation_ft", result.columns)
         self.assertTrue((result["total_elevation_ft"] == 0.0).all())
 
+    def test_custom_count_shortens_window(self):
+        from dashboard.data import aggregate_period_metrics
+
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        result = aggregate_period_metrics(
+            self._runs(), "Week", as_of=as_of, count=12
+        )
+        self.assertEqual(len(result), 12)
+
 
 class AnnotateRacePeriodsTests(unittest.TestCase):
     """Race periods match Performance race rows (race=true) on the period axis."""
@@ -967,6 +976,24 @@ class AnnotateRacePeriodsTests(unittest.TestCase):
         self.assertTrue((result["race_names"] == "").all())
         self.assertTrue((result["race_type"] == "").all())
         self.assertTrue((result["race_hover"] == "").all())
+
+    def test_object_dtype_dates_are_coerced(self):
+        """Single-row race frames (e.g. Series→DataFrame) can lose datetime dtype."""
+        from dashboard.data import annotate_race_periods
+
+        race_row = pd.Series(
+            {
+                "date": pd.Timestamp("2026-03-11T09:00:00Z"),
+                "name": "Spring 5k",
+                "race_type": "5k",
+            }
+        )
+        races = race_row.to_frame().T.reset_index(drop=True)
+        self.assertFalse(pd.api.types.is_datetime64_any_dtype(races["date"]))
+        result = annotate_race_periods(self._periods(), races, "Week")
+        week_11 = result.loc[result["period_key"] == "2026-11"].iloc[0]
+        self.assertTrue(bool(week_11["is_race_period"]))
+        self.assertEqual(week_11["race_names"], "Spring 5k")
 
     def test_primary_type_is_longest_distance(self):
         from dashboard.data import annotate_race_periods

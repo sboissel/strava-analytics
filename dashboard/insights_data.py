@@ -420,6 +420,7 @@ def aggregate_hr_zones_by_period(
     grain: PeriodGrain,
     *,
     as_of: pd.Timestamp | None = None,
+    count: int | None = None,
 ) -> pd.DataFrame:
     """Sum HR-zone seconds by period and convert each period to a 100% stack.
 
@@ -435,6 +436,8 @@ def aggregate_hr_zones_by_period(
         Calendar aggregation grain.
     as_of : pandas.Timestamp, optional
         Reference end date for the period window. Defaults to the latest activity.
+    count : int, optional
+        Number of periods to include. Defaults to ``PERIOD_CONFIG[grain]["count"]``.
 
     Returns
     -------
@@ -442,7 +445,9 @@ def aggregate_hr_zones_by_period(
         One row per period with ``zone_1_pct`` … ``zone_5_pct`` (0–100) and an
         ``in_progress`` flag.
     """
-    n = int(PERIOD_CONFIG[grain]["count"])
+    n = int(PERIOD_CONFIG[grain]["count"] if count is None else count)
+    if n < 1:
+        raise ValueError("count must be >= 1")
     end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
     full_index = generate_period_index(grain, end, n)
     current_key = current_period_key(grain, end)

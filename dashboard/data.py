@@ -485,6 +485,7 @@ def aggregate_period_metrics(
     grain: PeriodGrain,
     *,
     as_of: pd.Timestamp | None = None,
+    count: int | None = None,
 ) -> pd.DataFrame:
     """Aggregate miles, elevation, and easy/hard mileage shares by period.
 
@@ -496,6 +497,8 @@ def aggregate_period_metrics(
         Calendar aggregation grain.
     as_of : pandas.Timestamp, optional
         Reference end date for the period window. Defaults to the latest activity.
+    count : int, optional
+        Number of periods to include. Defaults to ``PERIOD_CONFIG[grain]["count"]``.
 
     Returns
     -------
@@ -504,7 +507,9 @@ def aggregate_period_metrics(
         easy/hard fractions, and an ``in_progress`` flag for the current
         calendar period.
     """
-    n = int(PERIOD_CONFIG[grain]["count"])
+    n = int(PERIOD_CONFIG[grain]["count"] if count is None else count)
+    if n < 1:
+        raise ValueError("count must be >= 1")
     end = normalize_utc(as_of) if as_of is not None else reference_end(df)
 
     full_index = generate_period_index(grain, end, n)
@@ -734,6 +739,8 @@ def annotate_race_periods(
         return out
 
     work = races.dropna(subset=["date"]).copy()
+    work["date"] = pd.to_datetime(work["date"], utc=True, errors="coerce")
+    work = work.dropna(subset=["date"])
     if work.empty:
         return out
 
