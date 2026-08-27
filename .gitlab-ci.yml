@@ -38,7 +38,11 @@ sync:
       fi
       git config user.email "gitlab-ci@${CI_SERVER_HOST}"
       git config user.name "GitLab CI"
-      git add data/
+      # Do not `git add data/` — if data/ is ignored as a directory, git refuses
+      # the path even when CSVs inside are meant to be tracked. Stage tracked
+      # updates plus the explicit export paths the pipeline writes.
+      git add -u -- data/
+      git add -- data/*.csv data/highest_activity_id.txt
       git commit -m "chore: daily Strava data sync"
       # Schedule may start from an older SHA while main moved (e.g. a merge).
       # Rebase the data commit onto current default branch before pushing.
@@ -47,7 +51,8 @@ sync:
       if ! git rebase "FETCH_HEAD"; then
         echo "Rebase conflict in data/; preferring sync output."
         git checkout --theirs -- data/ || true
-        git add data/
+        git add -u -- data/
+        git add -- data/*.csv data/highest_activity_id.txt
         GIT_EDITOR=true git rebase --continue
       fi
       git push "${REMOTE_URL}" "HEAD:${CI_DEFAULT_BRANCH}"

@@ -10,9 +10,11 @@ env/
 # Local pyenv pin (CI/Streamlit use 3.11 from config)
 .python-version
 
-# data/*.csv and highest_activity_id.txt stay tracked: GitLab CI sync commits
-# them for Streamlit Cloud. Ignore only local scratch under data/ if added later.
+# Keep CI-managed exports trackable for Streamlit Cloud. Parent-dir ignore of
+# `data/` (or omitting `!data/`) prevents git from descending; use contents-only
+# ignore plus re-include the directory and the files the sync job commits.
 data/*
+!data/
 !data/*.csv
 !data/highest_activity_id.txt
 
