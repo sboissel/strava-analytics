@@ -20,7 +20,14 @@ from charts import (
     mileage_title,
     pace_hr_title,
 )
-from data import format_full_date
+from data import (
+    PeriodGrain,
+    PeriodWindow,
+    clamp_period_window,
+    default_period_bounds,
+    format_full_date,
+    period_window_limits,
+)
 from race_data import (
     easy_hard_ratio_from_pct,
     fastest_races_by_type,
@@ -1338,6 +1345,145 @@ def render_metrics_section_nav() -> None:
         aria_label="Metrics sections",
         current_page="metrics",
     )
+
+
+def render_period_range_inputs(
+    grain: PeriodGrain,
+    *,
+    as_of: pd.Timestamp,
+    page_key: str,
+) -> PeriodWindow:
+    """Render start/end controls for the Show By window.
+
+    Session state is keyed by ``page_key`` and ``grain`` so switching grains
+    remembers each range independently. Defaults match ``PERIOD_CONFIG``
+    lookbacks ending at ``as_of`` (e.g. last 20 weeks).
+
+    Day / Week / Month use date inputs (Week and Month snap to period start
+    for aggregation). Year uses year number inputs.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Selected Show By grain.
+    as_of : pandas.Timestamp
+        Reference end date (typically latest activity).
+    page_key : str
+        Page namespace such as ``"training"`` or ``"fitness"``.
+
+    Returns
+    -------
+    PeriodWindow
+        Inclusive aligned start/end to pass into period aggregators.
+    """
+    import streamlit as st
+    import pandas as pd
+
+    as_of_ts = pd.Timestamp(as_of)
+    if as_of_ts.tzinfo is None:
+        as_of_ts = as_of_ts.tz_localize("UTC")
+    defaults = default_period_bounds(grain, as_of_ts)
+    limits = period_window_limits(grain, as_of_ts)
+
+    start_key = f"{page_key}_period_start_{grain}"
+    end_key = f"{page_key}_period_end_{grain}"
+
+    st.markdown(
+        '<div class="controls-date-filter">'
+        '<div class="controls-filter-label">Start / End</div></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="period-range-inputs" aria-hidden="true"></div>',
+        unsafe_allow_html=True,
+    )
+
+    if grain == "Year":
+        if start_key not in st.session_state:
+            st.session_state[start_key] = int(defaults.start.year)
+        if end_key not in st.session_state:
+            st.session_state[end_key] = int(defaults.end.year)
+        # Clamp stale session values when as_of moves the allowed band.
+        st.session_state[start_key] = int(
+            min(max(int(st.session_state[start_key]), limits.start.year), limits.end.year)
+        )
+        st.session_state[end_key] = int(
+            min(max(int(st.session_state[end_key]), limits.start.year), limits.end.year)
+        )
+        start_col, end_col = st.columns(2, gap="small")
+        with start_col:
+            start_year = st.number_input(
+                "Start year",
+                min_value=int(limits.start.year),
+                max_value=int(limits.end.year),
+                step=1,
+                key=start_key,
+                label_visibility="collapsed",
+                help="First calendar year in the chart window.",
+            )
+        with end_col:
+            end_year = st.number_input(
+                "End year",
+                min_value=int(limits.start.year),
+                max_value=int(limits.end.year),
+                step=1,
+                key=end_key,
+                label_visibility="collapsed",
+                help="Last calendar year in the chart window.",
+            )
+        raw_start = pd.Timestamp(year=int(start_year), month=1, day=1, tz="UTC")
+        raw_end = pd.Timestamp(year=int(end_year), month=1, day=1, tz="UTC")
+    else:
+        if start_key not in st.session_state:
+            st.session_state[start_key] = defaults.start.date()
+        if end_key not in st.session_state:
+            st.session_state[end_key] = defaults.end.date()
+        bounds_min = limits.start.date()
+        bounds_max = limits.end.date()
+        # Keep widget values inside current limits (e.g. after new activities).
+        start_date = st.session_state[start_key]
+        end_date = st.session_state[end_key]
+        if hasattr(start_date, "year"):
+            st.session_state[start_key] = max(bounds_min, min(bounds_max, start_date))
+        if hasattr(end_date, "year"):
+            st.session_state[end_key] = max(bounds_min, min(bounds_max, end_date))
+
+        help_start = {
+            "Day": "First day in the chart window.",
+            "Week": "Any day in the first week (aligned to Monday).",
+            "Month": "Any day in the first month (aligned to the 1st).",
+        }[grain]
+        help_end = {
+            "Day": "Last day in the chart window.",
+            "Week": "Any day in the last week (aligned to Monday).",
+            "Month": "Any day in the last month (aligned to the 1st).",
+        }[grain]
+
+        start_col, end_col = st.columns(2, gap="small")
+        with start_col:
+            range_start = st.date_input(
+                "Start",
+                min_value=bounds_min,
+                max_value=bounds_max,
+                format="MM/DD/YYYY",
+                label_visibility="collapsed",
+                key=start_key,
+                help=help_start,
+            )
+        with end_col:
+            range_end = st.date_input(
+                "End",
+                min_value=bounds_min,
+                max_value=bounds_max,
+                format="MM/DD/YYYY",
+                label_visibility="collapsed",
+                key=end_key,
+                help=help_end,
+            )
+        raw_start = pd.Timestamp(range_start, tz="UTC")
+        raw_end = pd.Timestamp(range_end, tz="UTC")
+
+    return clamp_period_window(grain, raw_start, raw_end, as_of=as_of_ts)
 
 
 def render_sidebar_section_nav(grain: str) -> None:

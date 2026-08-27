@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -24,16 +24,34 @@ DATA_DIR = REPO_ROOT / "data"
 
 PeriodGrain = Literal["Day", "Week", "Month", "Year"]
 
-# Year grain is a fixed calendar window, not a rolling lookback, so early
-# years (including all of 2016) stay on the yearly Training/Fitness charts.
-YEARLY_START_YEAR = 2016
-
 PERIOD_CONFIG: dict[PeriodGrain, dict[str, int | str]] = {
     "Day": {"count": 30, "showing": "Last 30 days"},
     "Week": {"count": 20, "showing": "Last 20 weeks"},
     "Month": {"count": 20, "showing": "Last 20 months"},
-    "Year": {"showing": "Since 2016"},
+    "Year": {"count": 10, "showing": "Last 10 years"},
 }
+
+_PERIOD_UNITS: dict[PeriodGrain, str] = {
+    "Day": "days",
+    "Week": "weeks",
+    "Month": "months",
+    "Year": "years",
+}
+
+# Soft caps for Training/Fitness start/end selectors (max lookback from as-of).
+PERIOD_COUNT_MAX: dict[PeriodGrain, int] = {
+    "Day": 366,
+    "Week": 104,
+    "Month": 120,
+    "Year": 30,
+}
+
+
+class PeriodWindow(NamedTuple):
+    """Inclusive Show By window as aligned period-start timestamps."""
+
+    start: pd.Timestamp
+    end: pd.Timestamp
 
 
 def _coerce_race_flag(series: pd.Series) -> pd.Series:
@@ -412,29 +430,250 @@ def reference_end(df: pd.DataFrame) -> pd.Timestamp:
     return normalize_utc(df["date"].max())
 
 
-def period_count(grain: PeriodGrain, end: pd.Timestamp) -> int:
+def period_count(
+    grain: PeriodGrain,
+    end: pd.Timestamp | None = None,
+    *,
+    count: int | None = None,
+) -> int:
     """Return how many calendar periods the dashboard window includes.
 
-    Day, week, and month grains use a rolling lookback from ``PERIOD_CONFIG``.
-    Year grain is a fixed window from ``YEARLY_START_YEAR`` through the
-    calendar year of ``end`` (inclusive).
+    Every grain uses a rolling lookback from ``PERIOD_CONFIG`` (Year defaults
+    to the last 10 years). Pass ``count`` to override. ``end`` is accepted for
+    call-site compatibility and is unused for default rolling windows.
 
     Parameters
     ----------
     grain : PeriodGrain
         Calendar aggregation grain.
-    end : pandas.Timestamp
-        Reference end date for the period window.
+    end : pandas.Timestamp, optional
+        Reference end date (unused for defaults; kept for existing callers).
+    count : int, optional
+        Override window length. Must be >= 1 when provided.
 
     Returns
     -------
     int
         Number of periods to include. Always at least 1.
     """
-    if grain == "Year":
-        years = int(normalize_utc(end).year) - YEARLY_START_YEAR + 1
-        return max(1, years)
+    del end  # Rolling defaults do not depend on as-of; override via ``count``.
+    if count is not None:
+        n = int(count)
+        if n < 1:
+            raise ValueError("count must be >= 1")
+        return n
     return int(PERIOD_CONFIG[grain]["count"])
+
+
+def align_to_period_start(grain: PeriodGrain, ts: pd.Timestamp) -> pd.Timestamp:
+    """Snap a timestamp to the start of its calendar period.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    ts : pandas.Timestamp
+        Timestamp to align.
+
+    Returns
+    -------
+    pandas.Timestamp
+        UTC midnight at the period start (day, ISO week Monday, month start,
+        or January 1).
+    """
+    stamp = normalize_utc(ts)
+    if grain == "Day":
+        return stamp
+    if grain == "Week":
+        return stamp - pd.Timedelta(days=int(stamp.dayofweek))
+    if grain == "Month":
+        return stamp.replace(day=1)
+    return stamp.replace(month=1, day=1)
+
+
+def period_key_to_timestamp(period_key: str, grain: PeriodGrain) -> pd.Timestamp:
+    """Convert a sortable period key to the period's start timestamp.
+
+    Parameters
+    ----------
+    period_key : str
+        Sortable period identifier for ``grain``.
+    grain : PeriodGrain
+        Calendar aggregation grain.
+
+    Returns
+    -------
+    pandas.Timestamp
+        UTC midnight at the period start.
+    """
+    if grain == "Day":
+        return pd.Timestamp(period_key, tz="UTC")
+    if grain == "Week":
+        year_str, week_str = period_key.split("-")
+        return pd.Timestamp.fromisocalendar(
+            int(year_str), int(week_str), 1
+        ).tz_localize("UTC")
+    if grain == "Month":
+        return pd.Timestamp(f"{period_key}-01", tz="UTC")
+    return pd.Timestamp(f"{period_key}-01-01", tz="UTC")
+
+
+def default_period_bounds(
+    grain: PeriodGrain, as_of: pd.Timestamp
+) -> PeriodWindow:
+    """Return the default inclusive start/end for ``grain`` ending at ``as_of``.
+
+    Uses ``PERIOD_CONFIG`` lookback counts (e.g. last 20 weeks, last 10 years).
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    as_of : pandas.Timestamp
+        Reference end date (typically latest activity).
+
+    Returns
+    -------
+    PeriodWindow
+        Aligned period starts for the default window.
+    """
+    end = align_to_period_start(grain, as_of)
+    n = period_count(grain, as_of)
+    index = generate_period_index(grain, as_of, n)
+    start = period_key_to_timestamp(str(index["period_key"].iloc[0]), grain)
+    return PeriodWindow(start=start, end=end)
+
+
+def period_window_limits(
+    grain: PeriodGrain, as_of: pd.Timestamp
+) -> PeriodWindow:
+    """Return the selectable min start and max end for period range controls.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    as_of : pandas.Timestamp
+        Reference end date (typically latest activity).
+
+    Returns
+    -------
+    PeriodWindow
+        ``start`` is the earliest allowed period; ``end`` is the period
+        containing ``as_of``.
+    """
+    end = align_to_period_start(grain, as_of)
+    n = int(PERIOD_COUNT_MAX.get(grain, 200))
+    index = generate_period_index(grain, as_of, n)
+    start = period_key_to_timestamp(str(index["period_key"].iloc[0]), grain)
+    return PeriodWindow(start=start, end=end)
+
+
+def clamp_period_window(
+    grain: PeriodGrain,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    *,
+    as_of: pd.Timestamp,
+) -> PeriodWindow:
+    """Align, order, and clamp a start/end pair to selectable bounds.
+
+    Ensures ``start <= end`` and at least one period. Values outside the
+    ``PERIOD_COUNT_MAX`` lookback from ``as_of`` are clamped.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    start : pandas.Timestamp
+        Requested window start.
+    end : pandas.Timestamp
+        Requested window end.
+    as_of : pandas.Timestamp
+        Reference used for max end and min start limits.
+
+    Returns
+    -------
+    PeriodWindow
+        Valid inclusive aligned window.
+    """
+    limits = period_window_limits(grain, as_of)
+    left = align_to_period_start(grain, start)
+    right = align_to_period_start(grain, end)
+    if left > right:
+        left, right = right, left
+    if left < limits.start:
+        left = limits.start
+    if right > limits.end:
+        right = limits.end
+    if left > right:
+        left = right
+    return PeriodWindow(start=left, end=right)
+
+
+def period_showing_label(
+    grain: PeriodGrain,
+    count: int | None = None,
+    *,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
+) -> str:
+    """Return the human-readable "Showing" label for a period window.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    count : int, optional
+        Window length override for legacy "Last N …" labels.
+    start : pandas.Timestamp, optional
+        Inclusive window start (preferred with ``end``).
+    end : pandas.Timestamp, optional
+        Inclusive window end (preferred with ``start``).
+
+    Returns
+    -------
+    str
+        Range label such as ``"Jan 5, 2026 – May 18, 2026"``, or a legacy
+        ``"Last 20 weeks"`` / ``"Last 10 years"`` string when only ``count``
+        (or defaults) are provided.
+    """
+    if start is not None and end is not None:
+        return _format_period_range_label(grain, start, end)
+    n = period_count(grain, count=count)
+    if count is None or n == int(PERIOD_CONFIG[grain]["count"]):
+        return str(PERIOD_CONFIG[grain]["showing"])
+    return f"Last {n} {_PERIOD_UNITS[grain]}"
+
+
+def _format_period_range_label(
+    grain: PeriodGrain, start: pd.Timestamp, end: pd.Timestamp
+) -> str:
+    """Format an inclusive start/end pair for the Showing meta line."""
+    left = align_to_period_start(grain, start)
+    right = align_to_period_start(grain, end)
+    if left > right:
+        left, right = right, left
+    if grain == "Day":
+        if left == right:
+            return _format_short_date(left)
+        return f"{_format_short_date(left)} – {_format_short_date(right)}"
+    if grain == "Week":
+        if left == right:
+            return _format_short_date(left)
+        return f"{_format_short_date(left)} – {_format_short_date(right)}"
+    if grain == "Month":
+        if left.year == right.year and left.month == right.month:
+            return format_full_month(left)
+        if left.year == right.year:
+            return f"{left.strftime('%b')} – {right.strftime('%b')} {right.year}"
+        return (
+            f"{left.strftime('%b')} {left.year} – "
+            f"{right.strftime('%b')} {right.year}"
+        )
+    if left.year == right.year:
+        return str(left.year)
+    return f"{left.year} – {right.year}"
 
 
 def generate_period_index(
@@ -480,8 +719,122 @@ def generate_period_index(
     )
 
 
-def filter_to_recent_periods(df: pd.DataFrame, grain: PeriodGrain) -> pd.DataFrame:
-    """Keep rows belonging to the last N calendar periods for the selected grain.
+def generate_period_index_range(
+    grain: PeriodGrain, start: pd.Timestamp, end: pd.Timestamp
+) -> pd.DataFrame:
+    """Build ordered period keys for an inclusive start/end window.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    start : pandas.Timestamp
+        Inclusive window start (aligned to period start).
+    end : pandas.Timestamp
+        Inclusive window end (aligned to period start of the last period).
+
+    Returns
+    -------
+    pandas.DataFrame
+        Frame with ``period_key``, ``period_label``, and ``period_tooltip``.
+
+    Raises
+    ------
+    ValueError
+        If the aligned range is empty (should not occur when start <= end).
+    """
+    left = align_to_period_start(grain, start)
+    right = align_to_period_start(grain, end)
+    if left > right:
+        raise ValueError("start must be <= end")
+    if grain == "Day":
+        dates = pd.date_range(start=left, end=right, freq="D", tz=left.tz)
+    elif grain == "Week":
+        dates = pd.date_range(start=left, end=right, freq="7D", tz=left.tz)
+    elif grain == "Month":
+        dates = pd.date_range(start=left, end=right, freq="MS", tz=left.tz)
+    else:
+        dates = pd.date_range(start=left, end=right, freq="YS", tz=left.tz)
+    if len(dates) == 0:
+        raise ValueError("period range must include at least one period")
+    keys, labels = _period_key_and_label(pd.Series(dates), grain)
+    tooltips = keys.map(lambda k: period_tooltip_label(k, grain))
+    return pd.DataFrame(
+        {
+            "period_key": keys.to_numpy(),
+            "period_label": labels.to_numpy(),
+            "period_tooltip": tooltips.to_numpy(),
+        }
+    )
+
+
+def resolve_period_index(
+    grain: PeriodGrain,
+    *,
+    as_of: pd.Timestamp | None = None,
+    count: int | None = None,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
+    reference_df: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, str]:
+    """Resolve the period axis and in-progress key for aggregators.
+
+    Prefer ``start``/``end`` when provided. Otherwise fall back to a rolling
+    ``count`` (or ``PERIOD_CONFIG``) ending at ``as_of`` / ``reference_df``.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    as_of : pandas.Timestamp, optional
+        Reference for in-progress marking and default window end.
+    count : int, optional
+        Rolling lookback when ``start`` is omitted.
+    start : pandas.Timestamp, optional
+        Inclusive window start.
+    end : pandas.Timestamp, optional
+        Inclusive window end (period containing this date). Defaults to
+        ``as_of`` when ``start`` is set.
+    reference_df : pandas.DataFrame, optional
+        Used to derive ``as_of`` when it is omitted.
+
+    Returns
+    -------
+    tuple[pandas.DataFrame, str]
+        ``(full_index, current_key)`` where ``current_key`` is the period
+        containing the reference ``as_of``.
+    """
+    if as_of is not None:
+        ref = normalize_utc(as_of)
+    elif reference_df is not None:
+        ref = reference_end(reference_df)
+    else:
+        ref = pd.Timestamp.now(tz="UTC").normalize()
+
+    current_key = current_period_key(grain, ref)
+
+    if start is not None:
+        window_end = align_to_period_start(grain, end if end is not None else ref)
+        window_start = align_to_period_start(grain, start)
+        if window_start > window_end:
+            window_start, window_end = window_end, window_start
+        return generate_period_index_range(grain, window_start, window_end), current_key
+
+    window_end = align_to_period_start(grain, end) if end is not None else ref
+    n = period_count(grain, window_end, count=count)
+    return generate_period_index(grain, window_end, n), current_key
+
+
+def filter_to_recent_periods(
+    df: pd.DataFrame,
+    grain: PeriodGrain,
+    *,
+    count: int | None = None,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
+    as_of: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Keep rows belonging to the selected calendar period window.
 
     Parameters
     ----------
@@ -489,18 +842,33 @@ def filter_to_recent_periods(df: pd.DataFrame, grain: PeriodGrain) -> pd.DataFra
         Run dataframe with a ``date`` column.
     grain : PeriodGrain
         Calendar aggregation grain.
+    count : int, optional
+        Number of periods to include. Defaults to ``period_count(grain)``.
+    start : pandas.Timestamp, optional
+        Inclusive window start (with optional ``end``).
+    end : pandas.Timestamp, optional
+        Inclusive window end.
+    as_of : pandas.Timestamp, optional
+        Reference end when building a rolling window.
 
     Returns
     -------
     pandas.DataFrame
-        Filtered copy containing only rows in the configured recent window.
+        Filtered copy containing only rows in the configured window.
     """
     if df.empty:
         return df
 
-    end = reference_end(df)
-    n = period_count(grain, end)
-    keep_keys = set(generate_period_index(grain, end, n)["period_key"])
+    ref = normalize_utc(as_of) if as_of is not None else reference_end(df)
+    full_index, _ = resolve_period_index(
+        grain,
+        as_of=ref,
+        count=count,
+        start=start,
+        end=end,
+        reference_df=df,
+    )
+    keep_keys = set(full_index["period_key"])
 
     work = df.copy()
     key, label = _period_key_and_label(work["date"], grain)
@@ -515,6 +883,8 @@ def aggregate_period_metrics(
     *,
     as_of: pd.Timestamp | None = None,
     count: int | None = None,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """Aggregate miles, elevation, and easy/hard mileage shares by period.
 
@@ -525,9 +895,14 @@ def aggregate_period_metrics(
     grain : PeriodGrain
         Calendar aggregation grain.
     as_of : pandas.Timestamp, optional
-        Reference end date for the period window. Defaults to the latest activity.
+        Reference end date for in-progress marking and default windows.
+        Defaults to the latest activity.
     count : int, optional
         Number of periods to include. Defaults to ``period_count(grain, end)``.
+    start : pandas.Timestamp, optional
+        Inclusive window start (preferred with ``end``).
+    end : pandas.Timestamp, optional
+        Inclusive window end.
 
     Returns
     -------
@@ -537,14 +912,15 @@ def aggregate_period_metrics(
         miles (NaN when the period has no HR coverage), and an
         ``in_progress`` flag for the current calendar period.
     """
-    end = normalize_utc(as_of) if as_of is not None else reference_end(df)
-    n = int(count) if count is not None else period_count(grain, end)
-    if n < 1:
-        raise ValueError("count must be >= 1")
-
-    full_index = generate_period_index(grain, end, n)
-
-    current_key = current_period_key(grain, end)
+    ref = normalize_utc(as_of) if as_of is not None else reference_end(df)
+    full_index, current_key = resolve_period_index(
+        grain,
+        as_of=ref,
+        count=count,
+        start=start,
+        end=end,
+        reference_df=df,
+    )
 
     if df.empty:
         out = full_index.copy()

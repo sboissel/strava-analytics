@@ -24,12 +24,11 @@ from data import (
     format_full_month,
     format_week_range_short,
     normalize_utc,
-    period_count,
     reference_end,
-    current_period_key,
     filter_to_recent_periods,
     generate_period_index,
     load_runs,
+    resolve_period_index,
     window_mask,
     with_period_columns,
 )
@@ -303,6 +302,9 @@ def aggregate_pace_hr_by_period(
     bin_key: str,
     *,
     as_of: pd.Timestamp | None = None,
+    count: int | None = None,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """Aggregate elevation-adjusted, time-weighted average HR for a pace bin.
 
@@ -320,7 +322,13 @@ def aggregate_pace_hr_by_period(
     bin_key : str
         Internal pace-bin key such as ``"800_830"``.
     as_of : pandas.Timestamp, optional
-        Reference end date for the period window. Defaults to the latest activity.
+        Reference end date for in-progress marking. Defaults to the latest activity.
+    count : int, optional
+        Number of periods to include. Defaults to ``period_count(grain)``.
+    start : pandas.Timestamp, optional
+        Inclusive window start.
+    end : pandas.Timestamp, optional
+        Inclusive window end.
 
     Returns
     -------
@@ -330,11 +338,15 @@ def aggregate_pace_hr_by_period(
     """
     seconds_col = f"seconds_{bin_key}"
     hr_col = f"avg_hr_{bin_key}"
-    end = normalize_utc(as_of) if as_of is not None else reference_end(pace_runs)
-    n = period_count(grain, end)
-
-    full_index = generate_period_index(grain, end, n)
-    current_key = current_period_key(grain, end)
+    ref = normalize_utc(as_of) if as_of is not None else reference_end(pace_runs)
+    full_index, current_key = resolve_period_index(
+        grain,
+        as_of=ref,
+        count=count,
+        start=start,
+        end=end,
+        reference_df=pace_runs,
+    )
 
     if pace_runs.empty or seconds_col not in pace_runs.columns:
         out = full_index.copy()
@@ -342,7 +354,9 @@ def aggregate_pace_hr_by_period(
         out["in_progress"] = out["period_key"] == current_key
         return out[["period_key", "period_label", "period_tooltip", "avg_hr", "in_progress"]]
 
-    work = filter_to_recent_periods(pace_runs, grain)
+    work = filter_to_recent_periods(
+        pace_runs, grain, count=count, start=start, end=end, as_of=ref
+    )
     work[seconds_col] = pd.to_numeric(work[seconds_col], errors="coerce").fillna(0.0)
     work[hr_col] = pd.to_numeric(work[hr_col], errors="coerce")
     valid = (work[seconds_col] > 0) & work[hr_col].notna() & np.isfinite(work[hr_col])
@@ -422,6 +436,8 @@ def aggregate_hr_zones_by_period(
     *,
     as_of: pd.Timestamp | None = None,
     count: int | None = None,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """Sum HR-zone seconds by period and convert each period to a 100% stack.
 
@@ -436,9 +452,13 @@ def aggregate_hr_zones_by_period(
     grain : PeriodGrain
         Calendar aggregation grain.
     as_of : pandas.Timestamp, optional
-        Reference end date for the period window. Defaults to the latest activity.
+        Reference end date for in-progress marking. Defaults to the latest activity.
     count : int, optional
         Number of periods to include. Defaults to ``period_count(grain, end)``.
+    start : pandas.Timestamp, optional
+        Inclusive window start.
+    end : pandas.Timestamp, optional
+        Inclusive window end.
 
     Returns
     -------
@@ -446,12 +466,15 @@ def aggregate_hr_zones_by_period(
         One row per period with ``zone_1_pct`` … ``zone_5_pct`` (0–100) and an
         ``in_progress`` flag.
     """
-    end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
-    n = int(count) if count is not None else period_count(grain, end)
-    if n < 1:
-        raise ValueError("count must be >= 1")
-    full_index = generate_period_index(grain, end, n)
-    current_key = current_period_key(grain, end)
+    ref = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    full_index, current_key = resolve_period_index(
+        grain,
+        as_of=ref,
+        count=count,
+        start=start,
+        end=end,
+        reference_df=runs,
+    )
     sec_cols = hr_zone_sec_columns()
 
     if runs.empty or any(col not in runs.columns for col in sec_cols):
@@ -842,6 +865,9 @@ def aggregate_aerobic_efficiency_by_period(
     grain: PeriodGrain,
     *,
     as_of: pd.Timestamp | None = None,
+    count: int | None = None,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """Median elevation-adjusted aerobic-efficiency residual by period.
 
@@ -859,7 +885,13 @@ def aggregate_aerobic_efficiency_by_period(
     grain : PeriodGrain
         Calendar aggregation grain.
     as_of : pandas.Timestamp, optional
-        Reference end date for the period window. Defaults to the latest activity.
+        Reference end date for in-progress marking. Defaults to the latest activity.
+    count : int, optional
+        Number of periods to include. Defaults to ``period_count(grain)``.
+    start : pandas.Timestamp, optional
+        Inclusive window start.
+    end : pandas.Timestamp, optional
+        Inclusive window end.
 
     Returns
     -------
@@ -867,10 +899,15 @@ def aggregate_aerobic_efficiency_by_period(
         One row per period with ``residual``, ``efficiency``,
         ``elev_ft_per_mile``, and ``in_progress``.
     """
-    end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
-    n = period_count(grain, end)
-    full_index = generate_period_index(grain, end, n)
-    current_key = current_period_key(grain, end)
+    ref = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    full_index, current_key = resolve_period_index(
+        grain,
+        as_of=ref,
+        count=count,
+        start=start,
+        end=end,
+        reference_df=runs,
+    )
 
     eligible = eligible_aerobic_efficiency_runs(runs)
     if eligible.empty or "date" not in eligible.columns:
@@ -907,12 +944,23 @@ def aggregate_aerobic_efficiency_by_period(
 
 
 def _year_matrix(
-    runs: pd.DataFrame, *, as_of: pd.Timestamp | None = None
+    runs: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp | None = None,
+    count: int | None = None,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
 ) -> tuple[np.ndarray, list[str], list[str], np.ndarray]:
     """Horizontal heatmap: one total-miles row with years as columns."""
-    end = _normalize_as_of(runs, as_of)
-    n = period_count("Year", end)
-    full_index = generate_period_index("Year", end, n)
+    ref = _normalize_as_of(runs, as_of)
+    full_index, _ = resolve_period_index(
+        "Year",
+        as_of=ref,
+        count=count,
+        start=start,
+        end=end,
+        reference_df=runs,
+    )
     x_labels = full_index["period_label"].tolist()
     year_keys = full_index["period_key"].tolist()
     y_labels = ["Miles"]
@@ -921,7 +969,9 @@ def _year_matrix(
     for x_idx, year_key in enumerate(year_keys):
         tooltips[0, x_idx] = year_key
 
-    period_runs = filter_to_recent_periods(runs, "Year")
+    period_runs = filter_to_recent_periods(
+        runs, "Year", count=count, start=start, end=end, as_of=ref
+    )
     if period_runs.empty:
         return matrix, y_labels, x_labels, tooltips
 
@@ -1064,6 +1114,9 @@ def mileage_heatmap_matrix(
     grain: PeriodGrain,
     *,
     as_of: pd.Timestamp | None = None,
+    count: int | None = None,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
 ) -> tuple[np.ndarray, list[str], list[str], str, np.ndarray]:
     """Build mileage heatmap matrix, labels, title, and tooltips.
 
@@ -1075,6 +1128,12 @@ def mileage_heatmap_matrix(
         Calendar aggregation grain selecting the heatmap layout.
     as_of : pandas.Timestamp, optional
         Reference end date for the heatmap window. Defaults to the latest activity.
+    count : int, optional
+        Year-grain window override (ignored for Day/Week/Month calendar layouts).
+    start : pandas.Timestamp, optional
+        Inclusive year-grain window start.
+    end : pandas.Timestamp, optional
+        Inclusive year-grain window end.
 
     Returns
     -------
@@ -1091,7 +1150,9 @@ def mileage_heatmap_matrix(
     title = titles.get(grain, "Mileage Heatmap")
 
     if grain == "Year":
-        matrix, y_labels, x_labels, tooltips = _year_matrix(runs, as_of=as_of)
+        matrix, y_labels, x_labels, tooltips = _year_matrix(
+            runs, as_of=as_of, count=count, start=start, end=end
+        )
     elif grain == "Month":
         matrix, y_labels, x_labels, tooltips = _month_calendar_matrix(runs, as_of=as_of)
     elif grain == "Week":
@@ -1398,6 +1459,9 @@ def aggregate_fitness_form_fatigue_by_period(
     grain: PeriodGrain,
     *,
     as_of: pd.Timestamp | None = None,
+    count: int | None = None,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """Sample Fitness / Fatigue / Form at each Show By period end.
 
@@ -1413,7 +1477,14 @@ def aggregate_fitness_form_fatigue_by_period(
     grain : PeriodGrain
         Calendar aggregation grain.
     as_of : pandas.Timestamp, optional
-        Reference end date for the period window. Defaults to the latest activity.
+        Reference end date for in-progress marking and Banister series.
+        Defaults to the latest activity.
+    count : int, optional
+        Number of periods to include. Defaults to ``period_count(grain)``.
+    start : pandas.Timestamp, optional
+        Inclusive window start.
+    end : pandas.Timestamp, optional
+        Inclusive window end.
 
     Returns
     -------
@@ -1421,15 +1492,20 @@ def aggregate_fitness_form_fatigue_by_period(
         One row per period with ``fitness``, ``fatigue``, ``form``, ``load``,
         and ``in_progress``.
     """
-    end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
-    n = period_count(grain, end)
-    full_index = generate_period_index(grain, end, n)
-    current_key = current_period_key(grain, end)
+    ref = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    full_index, current_key = resolve_period_index(
+        grain,
+        as_of=ref,
+        count=count,
+        start=start,
+        end=end,
+        reference_df=runs,
+    )
 
     if runs.empty:
         return _empty_fitness_form_fatigue_periods(full_index, current_key)
 
-    daily = fitness_form_fatigue_daily(runs, as_of=end)
+    daily = fitness_form_fatigue_daily(runs, as_of=ref)
     if daily.empty:
         return _empty_fitness_form_fatigue_periods(full_index, current_key)
 
@@ -1446,7 +1522,7 @@ def aggregate_fitness_form_fatigue_by_period(
     rows: list[dict[str, object]] = []
     for _, period in full_index.iterrows():
         period_key = str(period["period_key"])
-        sample_day = _period_end_date(period_key, grain, end)
+        sample_day = _period_end_date(period_key, grain, ref)
         if sample_day in by_date.index:
             point = by_date.loc[sample_day]
             fitness = float(point["fitness"])

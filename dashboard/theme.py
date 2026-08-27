@@ -2163,7 +2163,9 @@ GLOBAL_CSS = f"""
   [data-testid="stColumn"]:has(.controls-panel--compact) .controls-meta,
   [data-testid="column"]:has(.controls-panel--compact) .controls-meta,
   [data-testid="stColumn"]:has(.controls-panel--compact) .race-date-inputs,
-  [data-testid="column"]:has(.controls-panel--compact) .race-date-inputs {{
+  [data-testid="column"]:has(.controls-panel--compact) .race-date-inputs,
+  [data-testid="stColumn"]:has(.controls-panel--compact) .period-range-inputs,
+  [data-testid="column"]:has(.controls-panel--compact) .period-range-inputs {{
     width: 75%;
     max-width: 75%;
   }}
@@ -2284,8 +2286,10 @@ GLOBAL_CSS = f"""
     width: 75%;
     max-width: 75%;
   }}
-  /* Performance: side-by-side date pickers */
+  /* Performance / Training / Fitness: side-by-side date (or year) pickers */
   [data-testid="stElementContainer"]:has(.race-date-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stHorizontalBlock"],
+  [data-testid="stElementContainer"]:has(.period-range-inputs)
     + [data-testid="stElementContainer"] [data-testid="stHorizontalBlock"] {{
     width: 75% !important;
     max-width: 75% !important;
@@ -2294,7 +2298,15 @@ GLOBAL_CSS = f"""
   [data-testid="stElementContainer"]:has(.race-date-inputs)
     + [data-testid="stElementContainer"] [data-testid="stDateInput"] input,
   [data-testid="stElementContainer"]:has(.race-date-inputs)
-    + [data-testid="stElementContainer"] [data-testid="stDateInput"] [data-baseweb="input"] {{
+    + [data-testid="stElementContainer"] [data-testid="stDateInput"] [data-baseweb="input"],
+  [data-testid="stElementContainer"]:has(.period-range-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stDateInput"] input,
+  [data-testid="stElementContainer"]:has(.period-range-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stDateInput"] [data-baseweb="input"],
+  [data-testid="stElementContainer"]:has(.period-range-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stNumberInput"] input,
+  [data-testid="stElementContainer"]:has(.period-range-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stNumberInput"] [data-baseweb="input"] {{
     background: {SURFACE} !important;
     border: 1px solid {LINE} !important;
     border-radius: 10px !important;
@@ -2308,9 +2320,27 @@ GLOBAL_CSS = f"""
   [data-testid="stElementContainer"]:has(.race-date-inputs)
     + [data-testid="stElementContainer"] [data-testid="stDateInput"] input:focus-within,
   [data-testid="stElementContainer"]:has(.race-date-inputs)
-    + [data-testid="stElementContainer"] [data-testid="stDateInput"] [data-baseweb="input"]:focus-within {{
+    + [data-testid="stElementContainer"] [data-testid="stDateInput"] [data-baseweb="input"]:focus-within,
+  [data-testid="stElementContainer"]:has(.period-range-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stDateInput"] input:focus-within,
+  [data-testid="stElementContainer"]:has(.period-range-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stDateInput"] [data-baseweb="input"]:focus-within,
+  [data-testid="stElementContainer"]:has(.period-range-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stNumberInput"] input:focus-within,
+  [data-testid="stElementContainer"]:has(.period-range-inputs)
+    + [data-testid="stElementContainer"] [data-testid="stNumberInput"] [data-baseweb="input"]:focus-within {{
     border-color: rgba(91, 155, 213, 0.45) !important;
     box-shadow: 0 0 0 3px rgba(91, 155, 213, 0.1) !important;
+  }}
+  .controls-date-filter {{
+    margin-top: 0.15rem;
+  }}
+  .controls-date-filter .controls-filter-label {{
+    margin-bottom: 0.42rem;
+  }}
+  .race-date-inputs,
+  .period-range-inputs {{
+    display: none;
   }}
   [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1),
   [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1),
@@ -2352,15 +2382,6 @@ GLOBAL_CSS = f"""
   }}
   .controls-meta .meta-line:last-of-type {{
     margin-bottom: 0.65rem;
-  }}
-  .controls-date-filter {{
-    margin-top: 0.15rem;
-  }}
-  .controls-date-filter .controls-filter-label {{
-    margin-bottom: 0.42rem;
-  }}
-  .race-date-inputs {{
-    display: none;
   }}
   .meta-key {{
     font-size: 0.72rem;

@@ -584,7 +584,7 @@ class MileageHeatmapTests(unittest.TestCase):
         )
         self.assertEqual(y_labels, ["Miles"])
         self.assertEqual(len(x_labels), period_count("Year", as_of))
-        self.assertEqual(x_labels[0], "2016")
+        self.assertEqual(x_labels[0], "2017")
         self.assertIn("2024", x_labels)
         self.assertIn("2026", x_labels)
         self.assertEqual(matrix.shape[0], 1)
@@ -730,16 +730,16 @@ class HeatmapShowingLabelTests(unittest.TestCase):
     """Heatmap window labels for dashboard controls."""
 
     def test_labels_match_heatmap_windows(self):
-        self.assertEqual(heatmap_showing_label("Year"), "Since 2016")
+        self.assertEqual(heatmap_showing_label("Year"), "Last 10 years")
         self.assertEqual(heatmap_showing_label("Month"), "Last 10 years × months")
         self.assertEqual(heatmap_showing_label("Week"), "Last 2 years")
         self.assertEqual(heatmap_showing_label("Day"), "Last 1 year")
 
 
 class FitnessYearlyWindowTests(unittest.TestCase):
-    """Year grain Fitness aggregators share the 2016–present window."""
+    """Year grain Fitness aggregators share the rolling last-10-years window."""
 
-    def test_year_aggregators_start_at_2016(self):
+    def test_year_aggregators_use_rolling_ten(self):
         as_of = pd.Timestamp("2026-03-16T12:00:00Z")
         expected_n = period_count("Year", as_of)
         frames = (
@@ -750,8 +750,18 @@ class FitnessYearlyWindowTests(unittest.TestCase):
         )
         for result in frames:
             self.assertEqual(len(result), expected_n)
-            self.assertEqual(result["period_key"].iloc[0], "2016")
+            self.assertEqual(expected_n, 10)
+            self.assertEqual(result["period_key"].iloc[0], "2017")
             self.assertEqual(result["period_key"].iloc[-1], "2026")
+
+    def test_year_aggregators_honor_count_override(self):
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        result = aggregate_pace_hr_by_period(
+            pd.DataFrame(), "Year", "800_830", as_of=as_of, count=11
+        )
+        self.assertEqual(len(result), 11)
+        self.assertEqual(result["period_key"].iloc[0], "2016")
+        self.assertEqual(result["period_key"].iloc[-1], "2026")
 
 
 class EdwardsZoneLoadTests(unittest.TestCase):

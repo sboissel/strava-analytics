@@ -943,34 +943,36 @@ class PeriodMetricsTests(unittest.TestCase):
 
 
 class YearlyWindowTests(unittest.TestCase):
-    """Year grain is a fixed window from 2016 through the as-of year."""
+    """Year grain defaults to a rolling last-10-years lookback."""
 
-    def test_period_count_includes_2016_and_grows_with_end_year(self):
-        from dashboard.data import YEARLY_START_YEAR, period_count
+    def test_period_count_defaults_to_ten_years(self):
+        from dashboard.data import PERIOD_CONFIG, period_count, period_showing_label
 
         as_of = pd.Timestamp("2026-03-16T12:00:00Z")
-        self.assertEqual(YEARLY_START_YEAR, 2016)
-        self.assertEqual(period_count("Year", as_of), 11)
+        self.assertEqual(int(PERIOD_CONFIG["Year"]["count"]), 10)
+        self.assertEqual(period_count("Year", as_of), 10)
         later = pd.Timestamp("2027-08-01T12:00:00Z")
-        self.assertEqual(period_count("Year", later), 12)
+        self.assertEqual(period_count("Year", later), 10)
+        self.assertEqual(period_showing_label("Year"), "Last 10 years")
+        self.assertEqual(period_showing_label("Year", 15), "Last 15 years")
 
-    def test_year_index_starts_at_2016(self):
+    def test_year_index_is_rolling_ten(self):
         from dashboard.data import generate_period_index, period_count
 
         as_of = pd.Timestamp("2026-03-16T12:00:00Z")
         index = generate_period_index("Year", as_of, period_count("Year", as_of))
         keys = list(index["period_key"])
-        self.assertEqual(keys[0], "2016")
+        self.assertEqual(keys[0], "2017")
         self.assertEqual(keys[-1], "2026")
-        self.assertEqual(len(keys), 11)
+        self.assertEqual(len(keys), 10)
 
-    def test_year_metrics_keep_2016_rows(self):
+    def test_year_metrics_use_rolling_window(self):
         from dashboard.data import aggregate_period_metrics, filter_to_recent_periods
 
         runs = pd.DataFrame(
             {
                 "date": pd.to_datetime(
-                    ["2016-02-01T08:00:00Z", "2015-06-01T08:00:00Z", "2026-03-10T08:00:00Z"],
+                    ["2016-02-01T08:00:00Z", "2017-06-01T08:00:00Z", "2026-03-10T08:00:00Z"],
                     utc=True,
                 ),
                 "distance_miles": [5.0, 9.0, 3.0],
@@ -978,28 +980,134 @@ class YearlyWindowTests(unittest.TestCase):
                 "elevation_gain_ft": [10.0, 20.0, 30.0],
             }
         )
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
         kept = filter_to_recent_periods(runs, "Year")
         years = set(kept["date"].dt.year)
-        self.assertIn(2016, years)
-        self.assertNotIn(2015, years)
+        self.assertNotIn(2016, years)
+        self.assertIn(2017, years)
         self.assertIn(2026, years)
 
-        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
         result = aggregate_period_metrics(runs, "Year", as_of=as_of)
-        self.assertEqual(result["period_key"].iloc[0], "2016")
+        self.assertEqual(result["period_key"].iloc[0], "2017")
+        self.assertEqual(len(result), 10)
         self.assertAlmostEqual(
-            float(result.loc[result["period_key"] == "2016", "total_miles"].iloc[0]),
-            5.0,
+            float(result.loc[result["period_key"] == "2017", "total_miles"].iloc[0]),
+            9.0,
         )
         self.assertAlmostEqual(
             float(result.loc[result["period_key"] == "2026", "total_miles"].iloc[0]),
             3.0,
         )
 
-    def test_showing_label_is_since_2016(self):
+    def test_year_override_can_reach_2016(self):
+        from dashboard.data import aggregate_period_metrics
+
+        runs = pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    ["2016-02-01T08:00:00Z", "2026-03-10T08:00:00Z"],
+                    utc=True,
+                ),
+                "distance_miles": [5.0, 3.0],
+                "%_easy": [80.0, 80.0],
+                "elevation_gain_ft": [10.0, 30.0],
+            }
+        )
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        result = aggregate_period_metrics(runs, "Year", as_of=as_of, count=11)
+        self.assertEqual(len(result), 11)
+        self.assertEqual(result["period_key"].iloc[0], "2016")
+        self.assertAlmostEqual(
+            float(result.loc[result["period_key"] == "2016", "total_miles"].iloc[0]),
+            5.0,
+        )
+
+    def test_showing_label_is_last_ten_years(self):
         from dashboard.data import PERIOD_CONFIG
 
-        self.assertEqual(PERIOD_CONFIG["Year"]["showing"], "Since 2016")
+        self.assertEqual(PERIOD_CONFIG["Year"]["showing"], "Last 10 years")
+        self.assertEqual(int(PERIOD_CONFIG["Year"]["count"]), 10)
+
+    def test_period_count_rejects_non_positive_override(self):
+        from dashboard.data import period_count
+
+        with self.assertRaises(ValueError):
+            period_count("Week", count=0)
+
+
+class PeriodWindowControlsTests(unittest.TestCase):
+    """Training and Fitness expose start/end period range controls."""
+
+    def test_pages_wire_period_range_override(self):
+        root = Path(__file__).resolve().parents[2] / "dashboard" / "pages"
+        training = (root / "training.py").read_text()
+        fitness = (root / "fitness.py").read_text()
+        for page in (training, fitness):
+            self.assertIn("render_period_range_inputs", page)
+            self.assertIn("period_showing_label", page)
+            self.assertIn("start=window.start", page)
+            self.assertIn("end=window.end", page)
+            self.assertNotIn("render_period_count_input", page)
+            self.assertNotIn("count=window", page)
+        self.assertIn('page_key="training"', training)
+        self.assertIn('page_key="fitness"', fitness)
+        ui = (
+            Path(__file__).resolve().parents[2] / "dashboard" / "ui.py"
+        ).read_text()
+        self.assertIn("def render_period_range_inputs", ui)
+        self.assertIn("Start / End", ui)
+        self.assertNotIn("Periods to show", ui)
+
+    def test_default_bounds_match_period_config(self):
+        from dashboard.data import PERIOD_CONFIG, default_period_bounds, generate_period_index_range
+
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        for grain, cfg in PERIOD_CONFIG.items():
+            window = default_period_bounds(grain, as_of)
+            index = generate_period_index_range(grain, window.start, window.end)
+            self.assertEqual(len(index), int(cfg["count"]), grain)
+
+    def test_start_end_shortens_metrics_window(self):
+        from dashboard.data import aggregate_period_metrics, align_to_period_start
+
+        runs = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-03-10T08:00:00Z"], utc=True),
+                "distance_miles": [5.0],
+                "%_easy": [80.0],
+                "elevation_gain_ft": [40.0],
+            }
+        )
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        start = align_to_period_start("Week", pd.Timestamp("2026-01-05T12:00:00Z"))
+        end = align_to_period_start("Week", as_of)
+        result = aggregate_period_metrics(
+            runs, "Week", as_of=as_of, start=start, end=end
+        )
+        self.assertGreaterEqual(len(result), 1)
+        self.assertLess(len(result), 20)
+
+    def test_clamp_swaps_reversed_bounds(self):
+        from dashboard.data import clamp_period_window
+
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        window = clamp_period_window(
+            "Month",
+            pd.Timestamp("2026-03-01T00:00:00Z"),
+            pd.Timestamp("2025-01-01T00:00:00Z"),
+            as_of=as_of,
+        )
+        self.assertLessEqual(window.start, window.end)
+
+    def test_showing_label_uses_range(self):
+        from dashboard.data import period_showing_label
+
+        label = period_showing_label(
+            "Year",
+            start=pd.Timestamp("2017-01-01T00:00:00Z"),
+            end=pd.Timestamp("2026-01-01T00:00:00Z"),
+        )
+        self.assertEqual(label, "2017 – 2026")
 
 
 class AnnotateRacePeriodsTests(unittest.TestCase):

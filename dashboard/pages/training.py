@@ -6,6 +6,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 # Load bootstrap by absolute path so a stale/wrong ``_bootstrap`` in
@@ -39,6 +40,7 @@ from data import (
     annotate_race_periods,
     latest_activity_label,
     load_runs,
+    period_showing_label,
 )
 from insights_data import (
     aggregate_hr_zones_by_period,
@@ -50,6 +52,7 @@ from ui import (
     compliance_info_html,
     hr_zones_week_to_date_pie_html,
     race_weeks_legend_html,
+    render_period_range_inputs,
     render_sidebar_section_nav,
 )
 
@@ -75,6 +78,7 @@ st.markdown(
 )
 
 runs = load_runs()
+as_of = runs["date"].max() if not runs.empty else pd.Timestamp.now(tz="UTC")
 controls_col, _ = st.columns([1.05, 2.35], gap="medium")
 
 with controls_col:
@@ -92,13 +96,14 @@ with controls_col:
         index=1,
         label_visibility="collapsed",
     )
+    window = render_period_range_inputs(grain, as_of=as_of, page_key="training")
     st.markdown(
         f"""
         <div class="controls-meta">
           <div class="controls-meta-divider" aria-hidden="true"></div>
           <div class="meta-line">
             <span class="meta-key">Showing</span>
-            <span class="meta-val">{PERIOD_CONFIG[grain]["showing"]}</span>
+            <span class="meta-val">{period_showing_label(grain, start=window.start, end=window.end)}</span>
           </div>
           <div class="meta-line">
             <span class="meta-key">Latest activity</span>
@@ -111,10 +116,13 @@ with controls_col:
 
 render_sidebar_section_nav(grain)
 
-as_of = runs["date"].max() if not runs.empty else None
-period_metrics = aggregate_period_metrics(runs, grain, as_of=as_of)
+period_metrics = aggregate_period_metrics(
+    runs, grain, as_of=as_of, start=window.start, end=window.end
+)
 period_metrics = annotate_race_periods(period_metrics, load_race_results(), grain)
-zone_periods = aggregate_hr_zones_by_period(runs, grain, as_of=as_of)
+zone_periods = aggregate_hr_zones_by_period(
+    runs, grain, as_of=as_of, start=window.start, end=window.end
+)
 week_to_date_zones = week_to_date_hr_zone_shares(runs, as_of=as_of)
 
 st.markdown('<div id="chart-race-weeks" class="page-anchor"></div>', unsafe_allow_html=True)
@@ -146,7 +154,9 @@ with st.expander(
     key="training_mileage_heatmap",
 ):
     matrix, y_labels, x_labels, heatmap_title_text, tooltip_matrix = (
-        mileage_heatmap_matrix(runs, grain, as_of=as_of)
+        mileage_heatmap_matrix(
+            runs, grain, as_of=as_of, start=window.start, end=window.end
+        )
     )
     st.plotly_chart(
         mileage_heatmap_chart(

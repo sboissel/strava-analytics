@@ -670,10 +670,34 @@ class TrainingChartTests(unittest.TestCase):
             self.assertNotIn("Accounted:", trace.hovertemplate)
             self.assertNotIn("HR coverage:", trace.hovertemplate)
         # First period: 8 easy / 2 hard / 0 unaccounted → 10 accounted miles.
-        self.assertEqual(list(easy.customdata[0][2:]), [8.0, 2.0, 0.0, 10.0])
+        self.assertEqual(list(easy.customdata[0][2:6]), [8.0, 2.0, 0.0, 10.0])
         self.assertIn("Easy: %{y:.0%}", easy.hovertemplate)
-        self.assertIn("Moderate/Hard: %{y:.0%}", hard.hovertemplate)
+        # Hard uses customdata[6] (hard_frac); %{y} with base would show ~100%.
+        self.assertIn("Moderate/Hard: %{customdata[6]:.0%}", hard.hovertemplate)
+        self.assertNotIn("Moderate/Hard: %{y", hard.hovertemplate)
         self.assertEqual(fig.layout.yaxis.title.text, "Fraction")
+
+    def test_compliance_hard_hover_shows_hard_frac_not_stack_top(self):
+        """Moderate/Hard hover % must be hard_frac (100 − easy%), not base+y ≈ 100%."""
+        period_df = _training_period_df()
+        # 72% easy / 28% hard — stack top is 100%; hover must show 28%, not 100%.
+        period_df.loc[0, ["easy_frac", "hard_frac"]] = [0.72, 0.28]
+        period_df.loc[1, ["easy_frac", "hard_frac"]] = [0.85, 0.15]
+        fig = compliance_chart(period_df, "Week")
+        easy, hard, coverage = fig.data[0], fig.data[1], fig.data[2]
+        self.assertIn("Easy: %{y:.0%}", easy.hovertemplate)
+        self.assertIn("Moderate/Hard: %{customdata[6]:.0%}", hard.hovertemplate)
+        self.assertNotIn("Moderate/Hard: %{y", hard.hovertemplate)
+        self.assertAlmostEqual(float(hard.customdata[0][6]), 0.28)
+        self.assertAlmostEqual(float(hard.customdata[1][6]), 0.15)
+        # hard_frac matches 1 − easy_frac when the stack fills to 1.
+        self.assertAlmostEqual(
+            float(hard.customdata[0][6]), 1.0 - float(easy.y[0])
+        )
+        # Coverage hover still uses %{y} and must not pick up hard-frac wording.
+        self.assertIn("HR coverage: %{y:.0%}", coverage.hovertemplate)
+        self.assertNotIn("Moderate/Hard:", coverage.hovertemplate)
+        self.assertNotIn("%{customdata[6]", coverage.hovertemplate)
 
     def test_compliance_chart_coverage_bar_encodes_hr_share(self):
         """Thin gray bar height = accounted/total miles; stack stays full opacity."""
@@ -703,7 +727,8 @@ class TrainingChartTests(unittest.TestCase):
         self.assertAlmostEqual(float(coverage.width), 0.08)
         self.assertAlmostEqual(float(coverage.offset), 0.42)
         self.assertAlmostEqual(float(coverage.width) * 10, float(easy.width))
-        self.assertFalse(coverage.showlegend)
+        self.assertTrue(coverage.showlegend)
+        self.assertEqual(coverage.legendrank, 3)
         self.assertAlmostEqual(float(coverage.y[0]), 0.1)
         self.assertAlmostEqual(float(coverage.y[1]), 1.0)
         self.assertIn("HR coverage: %{y:.0%}", coverage.hovertemplate)
@@ -750,8 +775,9 @@ class TrainingChartTests(unittest.TestCase):
         self.assertAlmostEqual(float(hard.y[1]), 0.3)
         # Coverage bar at 0% when all miles are unaccounted.
         self.assertAlmostEqual(float(coverage.y[0]), 0.0)
-        # Hover customdata: easy/hard/unaccounted miles + accounted miles.
-        self.assertEqual(list(easy.customdata[0][2:]), [0.0, 0.0, 10.0, 0.0])
+        # Hover customdata: easy/hard/unaccounted miles + accounted miles (+ NaN hard_frac).
+        self.assertEqual(list(easy.customdata[0][2:6]), [0.0, 0.0, 10.0, 0.0])
+        self.assertIsNone(easy.customdata[0][6])
 
     def test_compliance_legend_is_horizontal_under_title(self):
         """80:20 Easy / Moderate/Hard key sits under the HTML title, not a side legend."""
@@ -771,13 +797,16 @@ class TrainingChartTests(unittest.TestCase):
         # Room for HTML title+ⓘ above the horizontal key (was 72 when Plotly owned the title).
         self.assertGreaterEqual(COMPLIANCE_MARGIN_T, 96)
         self.assertGreater(COMPLIANCE_MARGIN_T, TRAINING_MARGIN_T)
-        # Legend order Easy → Moderate/Hard; coverage bar is hidden from the key.
+        # Legend order Easy → Moderate/Hard → HR coverage.
         bars = [t for t in fig.data if t.type == "bar"]
         self.assertEqual([t.name for t in bars], ["Easy", "Moderate/Hard", "HR coverage"])
         legend_bars = [t for t in bars if t.showlegend is not False]
-        self.assertEqual([t.name for t in legend_bars], ["Easy", "Moderate/Hard"])
-        self.assertEqual([t.legendrank for t in legend_bars], [1, 2])
-        self.assertFalse(bars[2].showlegend)
+        self.assertEqual(
+            [t.name for t in legend_bars],
+            ["Easy", "Moderate/Hard", "HR coverage"],
+        )
+        self.assertEqual([t.legendrank for t in legend_bars], [1, 2, 3])
+        self.assertTrue(bars[2].showlegend)
 
     def test_compliance_info_html_explains_8020(self):
         """ⓘ after the title covers polarized idea, zone split, and bar %."""

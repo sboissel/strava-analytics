@@ -6,6 +6,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 # Load bootstrap by absolute path so a stale/wrong ``_bootstrap`` in
@@ -41,6 +42,7 @@ from data import (
     latest_activity_label,
     load_runs,
     merge_race_period_annotations,
+    period_showing_label,
 )
 from insights_data import (
     aggregate_aerobic_efficiency_by_period,
@@ -56,6 +58,7 @@ from ui import (
     pace_hr_title_html,
     race_weeks_legend_html,
     render_insights_section_nav,
+    render_period_range_inputs,
 )
 
 
@@ -76,6 +79,7 @@ pace_runs = load_pace_runs()
 pace_labels = [label for label, _ in PACE_BIN_OPTIONS]
 pace_keys = [key for _, key in PACE_BIN_OPTIONS]
 default_idx = pace_keys.index(DEFAULT_PACE_BIN_KEY)
+as_of = runs["date"].max() if not runs.empty else pd.Timestamp.now(tz="UTC")
 
 st.markdown(
     """
@@ -117,6 +121,7 @@ with panel_col:
             label_visibility="collapsed",
             key="insights_grain",
         )
+        window = render_period_range_inputs(grain, as_of=as_of, page_key="fitness")
         st.markdown(
             f"""
             <div class="controls-meta">
@@ -163,7 +168,7 @@ with panel_col:
               <div class="controls-meta-divider" aria-hidden="true"></div>
               <div class="meta-line">
                 <span class="meta-key">Showing</span>
-                <span class="meta-val">{PERIOD_CONFIG[grain]["showing"]}</span>
+                <span class="meta-val">{period_showing_label(grain, start=window.start, end=window.end)}</span>
               </div>
             </div>
             """,
@@ -172,25 +177,37 @@ with panel_col:
 
 render_insights_section_nav(grain, [label for label, _ in ordered_bins])
 
-as_of = runs["date"].max() if not runs.empty else None
-period_metrics = aggregate_period_metrics(runs, grain, as_of=as_of)
+period_metrics = aggregate_period_metrics(
+    runs, grain, as_of=as_of, start=window.start, end=window.end
+)
 period_metrics = annotate_race_periods(period_metrics, load_race_results(), grain)
 hr_series = [
     (
         label,
         merge_race_period_annotations(
-            aggregate_pace_hr_by_period(pace_runs, grain, key, as_of=as_of),
+            aggregate_pace_hr_by_period(
+                pace_runs,
+                grain,
+                key,
+                as_of=as_of,
+                start=window.start,
+                end=window.end,
+            ),
             period_metrics,
         ),
     )
     for label, key in ordered_bins
 ]
 freshness_periods = merge_race_period_annotations(
-    aggregate_fitness_form_fatigue_by_period(runs, grain, as_of=as_of),
+    aggregate_fitness_form_fatigue_by_period(
+        runs, grain, as_of=as_of, start=window.start, end=window.end
+    ),
     period_metrics,
 )
 efficiency_periods = merge_race_period_annotations(
-    aggregate_aerobic_efficiency_by_period(runs, grain, as_of=as_of),
+    aggregate_aerobic_efficiency_by_period(
+        runs, grain, as_of=as_of, start=window.start, end=window.end
+    ),
     period_metrics,
 )
 
