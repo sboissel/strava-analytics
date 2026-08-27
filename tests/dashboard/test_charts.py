@@ -30,8 +30,11 @@ from dashboard.charts import (
     FITNESS_MARGIN_R,
     FITNESS_MARGIN_T,
     FITNESS_XAXIS_DOMAIN,
+    RACE_CHART_DIAMOND_HALO_COLOR,
+    RACE_CHART_DIAMOND_HALO_WIDTH,
     RACE_CHART_DIAMOND_SIZE,
     RACE_CHART_DIAMOND_Y_PAD_FRAC,
+    RACE_CHART_DIAMOND_Y_PAD_MIN_MI,
     RACE_LINE_CHART_DIAMOND_Y_PAD_FRAC,
     RACE_STRIP_DIAMOND_COLOR,
     RACE_STRIP_DIAMOND_SIZE,
@@ -56,6 +59,7 @@ from dashboard.charts import (
     TRAINING_MARGIN_T,
     TRAINING_OFFSETGROUP,
     TRAINING_XAXIS_DOMAIN,
+    COMPLIANCE_COVERAGE_BAR,
     COMPLIANCE_MARGIN_T,
     FITNESS_Y_TITLE_STANDOFF,
     LEGEND_FITNESS_GUTTER,
@@ -108,7 +112,7 @@ from dashboard.ui import (
     aerobic_efficiency_info_html,
     compliance_info_html,
     fitness_freshness_info_html,
-    hr_zones_last_week_pie_html,
+    hr_zones_week_to_date_pie_html,
     pace_hr_title_html,
     race_weeks_legend_html,
 )
@@ -122,6 +126,9 @@ def _training_period_df() -> pd.DataFrame:
             "period_label": ["Mar 2, 26", "Mar 9, 26"],
             "period_tooltip": ["March 2, 2026", "March 9, 2026"],
             "total_miles": [10.0, 20.0],
+            "easy_miles": [8.0, 14.0],
+            "hard_miles": [2.0, 6.0],
+            "unaccounted_miles": [0.0, 0.0],
             "easy_frac": [0.8, 0.7],
             "hard_frac": [0.2, 0.3],
             "total_elevation_ft": [200.0, 350.0],
@@ -148,6 +155,25 @@ def _race_diamond_traces(fig) -> list:
             continue
         diamonds.append(trace)
     return diamonds
+
+
+def _goal_line_shapes(fig) -> list:
+    """Horizontal goal strokes: full-width paper shapes (not scatter traces)."""
+    goals = []
+    for shape in fig.layout.shapes or ():
+        if getattr(shape, "type", None) != "line":
+            continue
+        if getattr(shape, "y0", None) != getattr(shape, "y1", None):
+            continue
+        if getattr(shape, "xref", None) != "paper":
+            continue
+        line = getattr(shape, "line", None)
+        if line is None:
+            continue
+        if getattr(line, "color", None) != TRAINING_GOAL_LINE:
+            continue
+        goals.append(shape)
+    return goals
 
 
 def _has_dashed_race_vline(fig) -> bool:
@@ -198,14 +224,16 @@ class TrainingChartTests(unittest.TestCase):
     def test_main_charts_have_race_diamonds_at_bar_tops(self):
         period_df = _training_period_df()
         # Bar tops (race week) and chart-wide max used for the above-bar pad.
+        # Mileage pads against max(bar, goal) when the goal line is shown,
+        # with a fixed mile floor so markers clear the goal visually.
         bar_tops = {
             "compliance_chart": 1.0,  # easy_frac + hard_frac for race week
-            "mileage_chart": 20.0,
+            "mileage_chart": 20.0,  # max(20 mi bar, 20 mi week goal)
             "elevation_chart": 350.0,
         }
         chart_max = {
             "compliance_chart": 1.0,  # both weeks sum to 1.0
-            "mileage_chart": 20.0,
+            "mileage_chart": 20.0,  # clipped tops: max(10,20)=20, max(20,20)=20
             "elevation_chart": 350.0,
         }
         for builder in (compliance_chart, mileage_chart, elevation_chart):
@@ -217,7 +245,11 @@ class TrainingChartTests(unittest.TestCase):
                 msg=f"{builder.__name__} should draw one race diamond scatter",
             )
             scatter = diamonds[0]
-            pad = chart_max[builder.__name__] * RACE_CHART_DIAMOND_Y_PAD_FRAC
+            frac_pad = chart_max[builder.__name__] * RACE_CHART_DIAMOND_Y_PAD_FRAC
+            if builder is mileage_chart:
+                pad = max(RACE_CHART_DIAMOND_Y_PAD_MIN_MI, frac_pad)
+            else:
+                pad = frac_pad
             expected_y = bar_tops[builder.__name__] + pad
             self.assertEqual(list(scatter.x), ["Mar 9, 26"])
             self.assertEqual(list(scatter.y), [expected_y])
@@ -225,9 +257,19 @@ class TrainingChartTests(unittest.TestCase):
             self.assertEqual(scatter.marker.symbol, "diamond")
             self.assertEqual(scatter.marker.color, RACE_STRIP_DIAMOND_COLOR)
             self.assertEqual(scatter.marker.size, RACE_CHART_DIAMOND_SIZE)
-            self.assertEqual(RACE_CHART_DIAMOND_SIZE, 10)
+            self.assertEqual(RACE_CHART_DIAMOND_SIZE, 12)
             self.assertGreater(RACE_CHART_DIAMOND_SIZE, RACE_STRIP_DIAMOND_SIZE)
+            # White halo keeps diamonds readable when a goal line crosses them.
+            self.assertEqual(
+                float(scatter.marker.line.width), RACE_CHART_DIAMOND_HALO_WIDTH
+            )
+            self.assertEqual(
+                scatter.marker.line.color, RACE_CHART_DIAMOND_HALO_COLOR
+            )
+            self.assertEqual(RACE_CHART_DIAMOND_HALO_COLOR, "#FFFFFF")
+            self.assertGreater(RACE_CHART_DIAMOND_HALO_WIDTH, 0)
             self.assertFalse(scatter.showlegend)
+            self.assertTrue(scatter.cliponaxis is False)
             self.assertEqual(scatter.customdata[0], "Spring 5k<br>5k")
             self.assertFalse(
                 _has_dashed_race_vline(fig),
@@ -241,6 +283,7 @@ class TrainingChartTests(unittest.TestCase):
                 name = (getattr(trace, "name", None) or "").lower()
                 self.assertNotIn("race", name)
         self.assertEqual(RACE_STRIP_DIAMOND_COLOR, "#E3C677")
+        self.assertGreaterEqual(RACE_CHART_DIAMOND_Y_PAD_MIN_MI, 1.5)
 
     def test_main_charts_skip_diamonds_without_race_column(self):
         period_df = _training_period_df().drop(columns=["is_race_period"])
@@ -249,6 +292,92 @@ class TrainingChartTests(unittest.TestCase):
             self.assertEqual(_race_diamond_traces(fig), [])
             self.assertFalse(_has_dashed_race_vline(fig))
             self.assertFalse(_has_filled_race_vrect(fig))
+
+    def test_mileage_race_diamond_clears_goal_when_bar_equals_goal(self):
+        """Apr 13 regression: bar≈goal must not center the diamond on the line."""
+        from dashboard.theme import WEEKLY_MILES_GOAL
+
+        period_df = _training_period_df()
+        goal = float(WEEKLY_MILES_GOAL)
+        self.assertEqual(goal, 20.0)
+        # Both weeks at the goal — frac pad alone is only 1 mi and looks bisected.
+        period_df.loc[0, "total_miles"] = goal
+        period_df.loc[1, "total_miles"] = goal
+        fig = mileage_chart(period_df, "Week")
+        diamonds = _race_diamond_traces(fig)
+        self.assertEqual(len(diamonds), 1)
+        frac_pad = goal * RACE_CHART_DIAMOND_Y_PAD_FRAC
+        pad = max(RACE_CHART_DIAMOND_Y_PAD_MIN_MI, frac_pad)
+        expected_y = goal + pad
+        self.assertEqual(list(diamonds[0].y), [expected_y])
+        self.assertGreaterEqual(diamonds[0].y[0], goal + 1.5)
+        self.assertGreaterEqual(diamonds[0].y[0], 21.5)
+        self.assertEqual(RACE_CHART_DIAMOND_Y_PAD_MIN_MI, 2.0)
+        self.assertEqual(expected_y, 22.0)
+        y_hi = float(fig.layout.yaxis.range[1])
+        self.assertGreaterEqual(y_hi, expected_y + 1.0)
+        goal_shapes = _goal_line_shapes(fig)
+        self.assertEqual(len(goal_shapes), 1)
+        self.assertEqual(float(goal_shapes[0].y0), goal)
+        self.assertEqual(float(goal_shapes[0].y1), goal)
+
+    def test_mileage_race_diamond_clears_goal_when_bar_below_goal(self):
+        """Diamond y = max(bar, goal) + max(MIN_MI, frac) so markers clear the line."""
+        from dashboard.theme import WEEKLY_MILES_GOAL
+
+        period_df = _training_period_df()
+        # Race week below the 20 mi goal — diamond must clear the goal, not the bar.
+        period_df.loc[1, "total_miles"] = 12.0
+        period_df.loc[0, "total_miles"] = 8.0
+        fig = mileage_chart(period_df, "Week")
+        diamonds = _race_diamond_traces(fig)
+        self.assertEqual(len(diamonds), 1)
+        goal = float(WEEKLY_MILES_GOAL)
+        frac_pad = goal * RACE_CHART_DIAMOND_Y_PAD_FRAC
+        pad = max(RACE_CHART_DIAMOND_Y_PAD_MIN_MI, frac_pad)
+        expected_y = goal + pad
+        self.assertEqual(list(diamonds[0].y), [expected_y])
+        self.assertGreater(diamonds[0].y[0], goal)
+        self.assertGreater(diamonds[0].y[0], 12.0)
+        # Y-axis must include marker top + headroom (not clip at the plot edge).
+        y_hi = float(fig.layout.yaxis.range[1])
+        self.assertGreaterEqual(y_hi, expected_y + 1.0)
+        self.assertTrue(diamonds[0].cliponaxis is False)
+        # Goal line is a full-width paper shape at the weekly mileage goal.
+        goal_shapes = _goal_line_shapes(fig)
+        self.assertEqual(len(goal_shapes), 1)
+        self.assertEqual(float(goal_shapes[0].y0), goal)
+        self.assertEqual(float(goal_shapes[0].y1), goal)
+        self.assertEqual(goal_shapes[0].x0, 0)
+        self.assertEqual(goal_shapes[0].x1, 1)
+
+    def test_mileage_race_diamond_ignores_goal_floor_when_hidden(self):
+        """With show_goal=False, diamond y is bar + max(MIN_MI, frac) only."""
+        period_df = _training_period_df()
+        period_df.loc[1, "total_miles"] = 12.0
+        period_df.loc[0, "total_miles"] = 8.0
+        fig = mileage_chart(period_df, "Week", show_goal=False)
+        diamonds = _race_diamond_traces(fig)
+        self.assertEqual(len(diamonds), 1)
+        chart_max = 12.0
+        frac_pad = chart_max * RACE_CHART_DIAMOND_Y_PAD_FRAC
+        pad = max(RACE_CHART_DIAMOND_Y_PAD_MIN_MI, frac_pad)
+        self.assertEqual(list(diamonds[0].y), [12.0 + pad])
+        self.assertFalse(_goal_line_shapes(fig))
+
+    def test_mileage_race_diamond_y_range_clears_peak_bar(self):
+        """Tall race-week bars still leave axis room above the diamond."""
+        period_df = _training_period_df()
+        period_df.loc[1, "total_miles"] = 40.0
+        period_df.loc[0, "total_miles"] = 10.0
+        fig = mileage_chart(period_df, "Week")
+        diamond_y = float(_race_diamond_traces(fig)[0].y[0])
+        # max(40, 20) + max(MIN_MI, 40*0.05)
+        frac_pad = 40.0 * RACE_CHART_DIAMOND_Y_PAD_FRAC
+        pad = max(RACE_CHART_DIAMOND_Y_PAD_MIN_MI, frac_pad)
+        self.assertAlmostEqual(diamond_y, 40.0 + pad)
+        y_hi = float(fig.layout.yaxis.range[1])
+        self.assertGreaterEqual(y_hi, diamond_y + 1.0)
 
     def test_race_weeks_strip_marks_race_periods(self):
         fig = race_weeks_chart(_training_period_df(), "Week")
@@ -349,25 +478,33 @@ class TrainingChartTests(unittest.TestCase):
         self.assertEqual(MILEAGE_BAR, "#509B8F")
         self.assertEqual(MILES, "#3A4A55")
         self.assertNotEqual(MILEAGE_BAR, MILES)
-        goal_lines = [
-            shape
-            for shape in fig.layout.shapes or ()
-            if getattr(shape, "type", None) == "line"
-            and getattr(shape, "y0", None) == getattr(shape, "y1", None)
-        ]
-        self.assertTrue(goal_lines)
-        self.assertEqual(goal_lines[0].line.color, TRAINING_GOAL_LINE)
+        # Full-width paper shape (layer above bars); pre-scatter stroke look.
+        goal_shapes = _goal_line_shapes(fig)
+        self.assertEqual(len(goal_shapes), 1)
+        self.assertEqual(goal_shapes[0].xref, "paper")
+        self.assertEqual(goal_shapes[0].x0, 0)
+        self.assertEqual(goal_shapes[0].x1, 1)
+        self.assertEqual(goal_shapes[0].layer, "above")
+        self.assertEqual(goal_shapes[0].line.color, TRAINING_GOAL_LINE)
         self.assertEqual(TRAINING_GOAL_LINE, "#2E4552")
+        self.assertEqual(float(goal_shapes[0].line.width), 1)
+        self.assertEqual(float(goal_shapes[0].y0), 20.0)
+        self.assertEqual(float(goal_shapes[0].y1), 20.0)
+        diamonds = _race_diamond_traces(fig)
+        self.assertTrue(diamonds)
+        # Race diamonds remain the last data trace (clear of the goal in y).
+        self.assertIs(fig.data[-1], diamonds[0])
+        self.assertGreater(float(diamonds[0].marker.line.width), 0)
+        self.assertEqual(diamonds[0].marker.line.color, RACE_CHART_DIAMOND_HALO_COLOR)
+        # Default race week is at the goal: diamond clears goal + pad, axis clears diamond.
+        self.assertGreater(float(diamonds[0].y[0]), 20.0)
+        self.assertGreaterEqual(
+            float(fig.layout.yaxis.range[1]), float(diamonds[0].y[0]) + 1.0
+        )
 
     def test_mileage_chart_hides_goal_when_requested(self):
         fig = mileage_chart(_training_period_df(), "Week", show_goal=False)
-        goal_lines = [
-            shape
-            for shape in fig.layout.shapes or ()
-            if getattr(shape, "type", None) == "line"
-            and getattr(shape, "y0", None) == getattr(shape, "y1", None)
-        ]
-        self.assertFalse(goal_lines)
+        self.assertFalse(_goal_line_shapes(fig))
         annotations = [
             ann
             for ann in fig.layout.annotations or ()
@@ -498,14 +635,123 @@ class TrainingChartTests(unittest.TestCase):
         self.assertEqual(HARD, "#E67E22")
         self.assertFalse(easy.marker.colorscale)
         self.assertFalse(hard.marker.colorscale)
-        goal_lines = [
-            shape
-            for shape in fig.layout.shapes or ()
-            if getattr(shape, "type", None) == "line"
-            and getattr(shape, "y0", None) == getattr(shape, "y1", None)
+        # Full-width paper shape above the stack; diamonds last with halo.
+        goal_shapes = _goal_line_shapes(fig)
+        self.assertEqual(len(goal_shapes), 1)
+        self.assertEqual(goal_shapes[0].xref, "paper")
+        self.assertEqual(goal_shapes[0].x0, 0)
+        self.assertEqual(goal_shapes[0].x1, 1)
+        self.assertEqual(goal_shapes[0].layer, "above")
+        self.assertEqual(goal_shapes[0].line.color, TRAINING_GOAL_LINE)
+        self.assertEqual(TRAINING_GOAL_LINE, "#2E4552")
+        self.assertEqual(float(goal_shapes[0].line.width), 1)
+        self.assertEqual(float(goal_shapes[0].y0), 0.8)
+        self.assertEqual(float(goal_shapes[0].y1), 0.8)
+        goal_anns = [
+            ann
+            for ann in fig.layout.annotations or ()
+            if "Goal: 80% easy" in (getattr(ann, "text", None) or "")
         ]
-        self.assertTrue(goal_lines)
-        self.assertEqual(goal_lines[0].line.color, TRAINING_GOAL_LINE)
+        self.assertTrue(goal_anns)
+        diamonds = _race_diamond_traces(fig)
+        self.assertTrue(diamonds)
+        self.assertIs(fig.data[-1], diamonds[0])
+        self.assertGreater(float(diamonds[0].marker.line.width), 0)
+        self.assertEqual(diamonds[0].marker.line.color, RACE_CHART_DIAMOND_HALO_COLOR)
+
+    def test_compliance_hover_includes_mileage_breakdown(self):
+        """Easy/hard hover: % share + easy/hard miles only (no accounted/unaccounted)."""
+        fig = compliance_chart(_training_period_df(), "Week")
+        easy, hard = fig.data[0], fig.data[1]
+        for trace in (easy, hard):
+            self.assertIn("Easy miles: %{customdata[2]:.1f}", trace.hovertemplate)
+            self.assertIn("Hard miles: %{customdata[3]:.1f}", trace.hovertemplate)
+            self.assertNotIn("Unaccounted miles", trace.hovertemplate)
+            self.assertNotIn("Accounted:", trace.hovertemplate)
+            self.assertNotIn("HR coverage:", trace.hovertemplate)
+        # First period: 8 easy / 2 hard / 0 unaccounted → 10 accounted miles.
+        self.assertEqual(list(easy.customdata[0][2:]), [8.0, 2.0, 0.0, 10.0])
+        self.assertIn("Easy: %{y:.0%}", easy.hovertemplate)
+        self.assertIn("Moderate/Hard: %{y:.0%}", hard.hovertemplate)
+        self.assertEqual(fig.layout.yaxis.title.text, "Fraction")
+
+    def test_compliance_chart_coverage_bar_encodes_hr_share(self):
+        """Thin gray bar height = accounted/total miles; stack stays full opacity."""
+        period_df = _training_period_df()
+        # Period 0: 2 HR miles of 20 total → 10% coverage.
+        period_df.loc[0, ["total_miles", "easy_miles", "hard_miles", "unaccounted_miles"]] = [
+            20.0,
+            1.6,
+            0.4,
+            18.0,
+        ]
+        period_df.loc[0, ["easy_frac", "hard_frac"]] = [0.8, 0.2]
+        # Period 1: full HR coverage → coverage bar at 1.0.
+        fig = compliance_chart(period_df, "Week")
+        easy, hard, coverage = fig.data[0], fig.data[1], fig.data[2]
+        for stack in (easy, hard):
+            opacity = stack.marker.opacity
+            self.assertTrue(
+                opacity is None or opacity == 1.0 or list(opacity) == [1.0, 1.0],
+                msg="easy/hard stack must stay full opacity",
+            )
+            self.assertAlmostEqual(float(stack.width), 0.8)
+            self.assertAlmostEqual(float(stack.offset), -0.4)
+        self.assertEqual(coverage.name, "HR coverage")
+        self.assertEqual(coverage.marker.color, COMPLIANCE_COVERAGE_BAR)
+        self.assertEqual(COMPLIANCE_COVERAGE_BAR, "#9AA5AD")
+        self.assertAlmostEqual(float(coverage.width), 0.08)
+        self.assertAlmostEqual(float(coverage.offset), 0.42)
+        self.assertAlmostEqual(float(coverage.width) * 10, float(easy.width))
+        self.assertFalse(coverage.showlegend)
+        self.assertAlmostEqual(float(coverage.y[0]), 0.1)
+        self.assertAlmostEqual(float(coverage.y[1]), 1.0)
+        self.assertIn("HR coverage: %{y:.0%}", coverage.hovertemplate)
+        self.assertIn("Accounted miles: %{customdata[5]:.1f}", coverage.hovertemplate)
+        self.assertIn("Unaccounted miles: %{customdata[4]:.1f}", coverage.hovertemplate)
+        self.assertNotIn("Accounted:", coverage.hovertemplate)
+        self.assertNotIn("Easy miles:", coverage.hovertemplate)
+        self.assertNotIn("Hard miles:", coverage.hovertemplate)
+        self.assertNotIn("Easy:", coverage.hovertemplate)
+        self.assertNotIn("Moderate/Hard:", coverage.hovertemplate)
+        # Hover miles: 2 accounted / 18 unaccounted.
+        self.assertAlmostEqual(float(easy.customdata[0][4]), 18.0)
+        self.assertAlmostEqual(float(easy.customdata[0][5]), 2.0)
+        # Stack heights still reflect HR-only 80:20 (unchanged semantics).
+        self.assertAlmostEqual(float(easy.y[0]), 0.8)
+        self.assertAlmostEqual(float(hard.y[0]), 0.2)
+        # Coverage and easy/hard share one 0–1 axis (no secondary y2).
+        self.assertEqual(fig.layout.barmode, "overlay")
+        self.assertEqual(getattr(easy, "yaxis", "y") or "y", "y")
+        self.assertEqual(getattr(hard, "yaxis", "y") or "y", "y")
+        self.assertEqual(getattr(coverage, "yaxis", "y") or "y", "y")
+        self.assertFalse(hasattr(fig.layout, "yaxis2") and fig.layout.yaxis2)
+        self.assertEqual(fig.layout.yaxis.title.text, "Fraction")
+        self.assertEqual(tuple(fig.layout.yaxis.range), (0, 1.08))
+        # Manual stack: hard sits on easy; coverage baseline is 0 on the same axis.
+        self.assertAlmostEqual(float(easy.base), 0.0)
+        self.assertAlmostEqual(float(hard.base[0]), 0.8)
+        self.assertAlmostEqual(float(coverage.base), 0.0)
+
+    def test_compliance_chart_omits_bars_without_hr_miles(self):
+        """Periods with no HR coverage use NaN y so Plotly draws no bar."""
+        period_df = _training_period_df()
+        period_df.loc[0, ["easy_frac", "hard_frac"]] = [float("nan"), float("nan")]
+        period_df.loc[0, ["easy_miles", "hard_miles", "unaccounted_miles"]] = [
+            0.0,
+            0.0,
+            10.0,
+        ]
+        fig = compliance_chart(period_df, "Week")
+        easy, hard, coverage = fig.data[0], fig.data[1], fig.data[2]
+        self.assertTrue(np.isnan(easy.y[0]))
+        self.assertTrue(np.isnan(hard.y[0]))
+        self.assertAlmostEqual(float(easy.y[1]), 0.7)
+        self.assertAlmostEqual(float(hard.y[1]), 0.3)
+        # Coverage bar at 0% when all miles are unaccounted.
+        self.assertAlmostEqual(float(coverage.y[0]), 0.0)
+        # Hover customdata: easy/hard/unaccounted miles + accounted miles.
+        self.assertEqual(list(easy.customdata[0][2:]), [0.0, 0.0, 10.0, 0.0])
 
     def test_compliance_legend_is_horizontal_under_title(self):
         """80:20 Easy / Moderate/Hard key sits under the HTML title, not a side legend."""
@@ -525,10 +771,13 @@ class TrainingChartTests(unittest.TestCase):
         # Room for HTML title+ⓘ above the horizontal key (was 72 when Plotly owned the title).
         self.assertGreaterEqual(COMPLIANCE_MARGIN_T, 96)
         self.assertGreater(COMPLIANCE_MARGIN_T, TRAINING_MARGIN_T)
-        # Legend order Easy → Moderate/Hard; stack still has Easy as the base bar.
+        # Legend order Easy → Moderate/Hard; coverage bar is hidden from the key.
         bars = [t for t in fig.data if t.type == "bar"]
-        self.assertEqual([t.name for t in bars], ["Easy", "Moderate/Hard"])
-        self.assertEqual([t.legendrank for t in bars], [1, 2])
+        self.assertEqual([t.name for t in bars], ["Easy", "Moderate/Hard", "HR coverage"])
+        legend_bars = [t for t in bars if t.showlegend is not False]
+        self.assertEqual([t.name for t in legend_bars], ["Easy", "Moderate/Hard"])
+        self.assertEqual([t.legendrank for t in legend_bars], [1, 2])
+        self.assertFalse(bars[2].showlegend)
 
     def test_compliance_info_html_explains_8020(self):
         """ⓘ after the title covers polarized idea, zone split, and bar %."""
@@ -550,6 +799,9 @@ class TrainingChartTests(unittest.TestCase):
         self.assertIn("%_easy", html)
         self.assertIn("Show By", html)
         self.assertIn("HR zones", html)
+        self.assertIn("Gray coverage bar", html)
+        self.assertIn("HR coverage", html)
+        self.assertNotIn("Faded bars", html)
 
     def test_elevation_bars_use_purple_heatmap_without_colorbar(self):
         fig = elevation_chart(_training_period_df(), "Week")
@@ -810,9 +1062,9 @@ class TrainingChartThemeTests(unittest.TestCase):
             page.find("training_elevation"),
         )
         self.assertIn("hr_zones_stacked_area_chart", page)
-        self.assertIn("hr_zones_last_week_pie_html", page)
+        self.assertIn("hr_zones_week_to_date_pie_html", page)
         self.assertIn("aggregate_hr_zones_by_period", page)
-        self.assertIn("last_full_week_hr_zone_shares", page)
+        self.assertIn("week_to_date_hr_zone_shares", page)
         metrics = (
             Path(__file__).resolve().parents[2]
             / "dashboard"
@@ -1019,11 +1271,11 @@ class FitnessHrZoneChartTests(unittest.TestCase):
         self.assertEqual(HR_ZONE_COLORS[2], RACE_STRIP_DIAMOND_COLOR)
         self.assertEqual(HR_ZONE_COLORS[3], TRAINING_HARD)
 
-    def test_last_week_pie_under_legend(self):
+    def test_week_to_date_pie_under_legend(self):
         """Donut HTML sits in the right gutter; Plotly figure has no pie trace."""
-        last_week = {
-            "week_key": "2026-10",
-            "week_label": "Mar 2, 2026 - Mar 8, 2026",
+        week_to_date = {
+            "week_key": "2026-11",
+            "week_label": "Mar 9, 2026 - Mar 12, 2026",
             "zone_1_pct": 40.0,
             "zone_2_pct": 30.0,
             "zone_3_pct": 20.0,
@@ -1040,14 +1292,15 @@ class FitnessHrZoneChartTests(unittest.TestCase):
         self.assertEqual(len(pies), 0)
         self.assertEqual(fig.layout.margin.r, FITNESS_MARGIN_R)
 
-        html = hr_zones_last_week_pie_html(last_week)
+        html = hr_zones_week_to_date_pie_html(week_to_date)
         self.assertIn("hr-zones-pie-gutter", html)
         self.assertIn("hr-zones-pie-panel", html)
         self.assertIn("hr-zones-pie-donut", html)
         self.assertIn("hr-zones-pie-slice", html)
         self.assertIn("hr-zones-pie-tip", html)
-        self.assertIn("Last week", html)
-        self.assertIn("Mar 2, 2026 - Mar 8, 2026", html)
+        self.assertIn("This week to date", html)
+        self.assertNotIn("Last week", html)
+        self.assertIn("Mar 9, 2026 - Mar 12, 2026", html)
         self.assertIn("<svg", html)
         self.assertNotIn("conic-gradient", html)
         # Zero-share zones omit a path (no hover target); colors for used wedges only.
@@ -1061,9 +1314,12 @@ class FitnessHrZoneChartTests(unittest.TestCase):
         self.assertIn("Zone 2: 30% · 03:00", html)
         self.assertIn("01:00", html)  # zone 4 duration
 
-        empty = hr_zones_last_week_pie_html({"week_label": "Mar 2, 2026 - Mar 8, 2026"})
+        empty = hr_zones_week_to_date_pie_html(
+            {"week_label": "Mar 9, 2026 - Mar 12, 2026"}
+        )
         self.assertIn("hr-zones-pie-empty", empty)
         self.assertIn("No HR data", empty)
+        self.assertIn("this week to date", empty)
 
     def test_week_hover_uses_iso_week_range(self):
         """Unified hover header (x) and customdata are abbreviated Mon–Sun ranges."""
@@ -1100,11 +1356,13 @@ class FitnessHrZoneChartTests(unittest.TestCase):
         ).read_text()
         self.assertIn("hr_zones_stacked_area_chart", training)
         self.assertIn("aggregate_hr_zones_by_period", training)
-        self.assertIn("last_full_week_hr_zone_shares", training)
-        self.assertIn("hr_zones_last_week_pie_html", training)
-        self.assertIn("hr_zones_last_week_pie_html(last_week_zones)", training)
+        self.assertIn("week_to_date_hr_zone_shares", training)
+        self.assertIn("hr_zones_week_to_date_pie_html", training)
+        self.assertIn("hr_zones_week_to_date_pie_html(week_to_date_zones)", training)
         self.assertIn("hr_zones_stacked_area_chart(zone_periods, grain)", training)
-        self.assertNotIn("last_week_zones=", training)
+        self.assertNotIn("week_to_date_zones=", training)
+        self.assertNotIn("last_full_week_hr_zone_shares", training)
+        self.assertNotIn("hr_zones_last_week_pie_html", training)
         self.assertIn('id="chart-hr-zones"', training)
         self.assertNotIn("hr_zones_stacked_area_chart", fitness)
         self.assertNotIn('id="chart-hr-zones"', fitness)

@@ -73,9 +73,16 @@ RACE_STRIP_DIAMOND_SIZE = 9
 RACE_STRIP_SQUARE_COLOR = "#9AA5AD"
 RACE_STRIP_DIAMOND_COLOR = "#E3C677"
 # Gold diamonds on Training bar charts (slightly larger than strip markers).
-RACE_CHART_DIAMOND_SIZE = 10
+RACE_CHART_DIAMOND_SIZE = 12
+# White stroke so a dark goal line cannot visually bisect race diamonds.
+RACE_CHART_DIAMOND_HALO_WIDTH = 2.5
+RACE_CHART_DIAMOND_HALO_COLOR = "#FFFFFF"
 # Lift diamonds above bar tops by this fraction of the chart's max bar height.
 RACE_CHART_DIAMOND_Y_PAD_FRAC = 0.05
+# Mileage race diamonds: always clear the goal line by at least this many miles.
+# A pure fraction of max(bar, goal) is ~1 mi when the scale tops out at 20, which
+# centers the diamond on the goal line (half the marker hangs below its y).
+RACE_CHART_DIAMOND_Y_PAD_MIN_MI = 2.0
 # Fitness line charts: lift by a fraction of the visible y-axis span so diamonds
 # clear the line+marker points (residuals / load can be much smaller than bar tops).
 RACE_LINE_CHART_DIAMOND_Y_PAD_FRAC = 0.14
@@ -214,6 +221,79 @@ def _bar_period_customdata(period_df: pd.DataFrame, grain: str) -> list[list[str
         [tip, note_html if bool(in_prog) else ""]
         for tip, in_prog in zip(tooltips, period_df["in_progress"])
     ]
+
+
+# 80:20 stack + thin HR-coverage bar (same category unit; coverage = 1/10 stack).
+# Overlay + explicit base keeps both series on one 0–1 y-axis (stack mode can
+# fold the thin bar into the easy/hard stack and break the shared scale).
+_COMPLIANCE_STACK_WIDTH = 0.8
+_COMPLIANCE_STACK_OFFSET = -0.4  # centered on the category
+_COMPLIANCE_COVERAGE_WIDTH = 0.08
+_COMPLIANCE_COVERAGE_OFFSET = 0.42  # adjacent to the right of the stack
+_COMPLIANCE_COVERAGE_OFFSETGROUP = "compliance-coverage"
+# Medium gray (matches in-progress hatch / race-strip squares).
+COMPLIANCE_COVERAGE_BAR = "#9AA5AD"
+
+
+def _compliance_mile_breakdown(
+    period_df: pd.DataFrame,
+) -> tuple[list[float], list[float], list[float]]:
+    """Return easy / hard / unaccounted miles per period for 80:20 hover."""
+    if {
+        "easy_miles",
+        "hard_miles",
+        "unaccounted_miles",
+    }.issubset(period_df.columns):
+        return (
+            period_df["easy_miles"].fillna(0.0).astype(float).tolist(),
+            period_df["hard_miles"].fillna(0.0).astype(float).tolist(),
+            period_df["unaccounted_miles"].fillna(0.0).astype(float).tolist(),
+        )
+    # Synthetic / legacy frames: treat stacked fractions as shares of total miles.
+    total = period_df["total_miles"].fillna(0.0).astype(float)
+    easy_frac = period_df["easy_frac"] if "easy_frac" in period_df.columns else 0.0
+    hard_frac = period_df["hard_frac"] if "hard_frac" in period_df.columns else 0.0
+    easy = (pd.Series(easy_frac, index=period_df.index).fillna(0.0) * total).tolist()
+    hard = (pd.Series(hard_frac, index=period_df.index).fillna(0.0) * total).tolist()
+    unaccounted = (total - pd.Series(easy) - pd.Series(hard)).clip(lower=0.0).tolist()
+    return easy, hard, unaccounted
+
+
+def _compliance_hr_coverage_fracs(period_df: pd.DataFrame) -> list[float]:
+    """Share of period miles with HR zones (accounted / total), 0–1."""
+    easy, hard, unaccounted = _compliance_mile_breakdown(period_df)
+    coverages: list[float] = []
+    for e, h, u in zip(easy, hard, unaccounted):
+        total = float(e) + float(h) + float(u)
+        if total <= 0:
+            coverages.append(0.0)
+        else:
+            coverages.append((float(e) + float(h)) / total)
+    return coverages
+
+
+def _compliance_customdata(period_df: pd.DataFrame, grain: str) -> list[list]:
+    """80:20 hover: tip, in-progress note, easy/hard/unaccounted miles, accounted mi."""
+    base = _bar_period_customdata(period_df, grain)
+    easy, hard, unaccounted = _compliance_mile_breakdown(period_df)
+    rows: list[list] = []
+    for (tip, note), e, h, u in zip(base, easy, hard, unaccounted):
+        accounted_miles = float(e) + float(h)
+        rows.append([tip, note, e, h, u, accounted_miles])
+    return rows
+
+
+_COMPLIANCE_MILES_HOVER = (
+    "<br>Easy miles: %{customdata[2]:.1f}"
+    "<br>Hard miles: %{customdata[3]:.1f}"
+    "<extra></extra>"
+)
+
+_COMPLIANCE_COVERAGE_HOVER = (
+    "<br>Accounted miles: %{customdata[5]:.1f}"
+    "<br>Unaccounted miles: %{customdata[4]:.1f}"
+    "<extra></extra>"
+)
 
 
 def compliance_title(grain: str) -> str:
@@ -638,6 +718,53 @@ def _format_miles_goal(goal: float) -> str:
     return f"{goal:.1f}"
 
 
+def _add_goal_line(
+    fig: go.Figure,
+    *,
+    goal: float,
+    annotation_text: str,
+) -> None:
+    """Draw a horizontal goal as a full-width layout shape above traces.
+
+    Uses ``xref="paper"`` so the stroke spans the plot (category scatter
+    lines stop at the first/last tick centers). ``layer="above"`` keeps the
+    goal in front of bars; race diamonds sit above the goal in data space
+    (pad + white halo) so they stay readable.
+    """
+    fig.add_shape(
+        type="line",
+        xref="paper",
+        x0=0,
+        x1=1,
+        yref="y",
+        y0=goal,
+        y1=goal,
+        layer="above",
+        line=dict(color=TRAINING_GOAL_LINE, width=1),
+    )
+    fig.add_annotation(
+        xref="x domain",
+        x=0,
+        yref="y",
+        y=goal,
+        text=annotation_text,
+        showarrow=False,
+        xanchor="left",
+        yanchor="bottom",
+        font=dict(size=12, color=MUTED),
+        bgcolor="rgba(255,255,255,0.35)",
+    )
+
+
+def _add_mileage_goal_line(fig: go.Figure, *, goal: float) -> None:
+    """Draw the mileage goal as a full-width shape above bar traces."""
+    _add_goal_line(
+        fig,
+        goal=goal,
+        annotation_text=f"Goal: {_format_miles_goal(goal)} miles",
+    )
+
+
 def _race_period_hover_details(period_df: pd.DataFrame) -> list[str]:
     """Hover body for each period: name + type, or name + miles for Other."""
     if period_df.empty:
@@ -681,8 +808,17 @@ def _race_diamond_y_positions(
     y_tops: pd.Series | list[float],
     *,
     y_axis_range: tuple[float, float] | None = None,
+    y_floor: float | None = None,
+    min_pad: float | None = None,
 ) -> tuple[list[str], list[float], list[str]]:
-    """Return race-period diamond x labels, y positions, and hover bodies."""
+    """Return race-period diamond x labels, y positions, and hover bodies.
+
+    Diamonds sit at ``max(y_top, y_floor) + pad`` when ``y_floor`` is set
+    (mileage goal), otherwise ``y_top + pad``. For bar charts ``pad`` is
+    ``max(min_pad, max(clipped y_tops) * frac)`` when ``min_pad`` is set
+    (mileage: fixed miles so markers clear the goal line), else the frac
+    alone. Line charts use a fraction of the y-axis span.
+    """
     if period_df.empty or "is_race_period" not in period_df.columns:
         return [], [], []
     is_race = period_df["is_race_period"].fillna(False).astype(bool)
@@ -690,12 +826,16 @@ def _race_diamond_y_positions(
         return [], [], []
 
     ys = pd.Series(y_tops, index=period_df.index, dtype=float)
+    if y_floor is not None:
+        ys = ys.clip(lower=float(y_floor))
     if y_axis_range is not None:
         y_lo, y_hi = y_axis_range
         pad = max(float(y_hi) - float(y_lo), 1e-9) * RACE_LINE_CHART_DIAMOND_Y_PAD_FRAC
     else:
         y_max = float(ys.fillna(0.0).max()) if len(ys) else 0.0
         pad = y_max * RACE_CHART_DIAMOND_Y_PAD_FRAC
+        if min_pad is not None:
+            pad = max(float(min_pad), pad)
     race = period_df.loc[is_race]
     labels = race["period_label"].astype(str).tolist()
     y_vals = (ys.loc[is_race].fillna(0.0).astype(float) + pad).tolist()
@@ -726,18 +866,25 @@ def _add_race_week_diamonds(
     y_tops: pd.Series | list[float],
     *,
     y_axis_range: tuple[float, float] | None = None,
+    y_floor: float | None = None,
+    min_pad: float | None = None,
 ) -> None:
     """Overlay gold diamonds slightly above race-period bar tops (no dashed vlines).
 
     ``y_tops`` must align with ``period_df`` rows (stacked total for 80:20,
     bar height for mileage/elevation, line high-water mark for Fitness lines).
-    Diamonds sit at ``top + pad`` where ``pad`` is a fraction of either the
-    chart y-axis span (``y_axis_range``) or ``max(y_tops)`` for bar charts.
+    Diamonds sit at ``max(top, y_floor) + pad`` when ``y_floor`` is set (e.g.
+    mileage goal), else ``top + pad``. Bar ``pad`` is ``max(min_pad, frac)``
+    when ``min_pad`` is set; line charts use a y-axis-span fraction.
     Uses the same categorical x as the top race-week strip. Hover shows race
     name + type (or miles for Other); no legend entry.
     """
     labels, y_vals, hover = _race_diamond_y_positions(
-        period_df, y_tops, y_axis_range=y_axis_range
+        period_df,
+        y_tops,
+        y_axis_range=y_axis_range,
+        y_floor=y_floor,
+        min_pad=min_pad,
     )
     if not labels:
         return
@@ -751,12 +898,18 @@ def _add_race_week_diamonds(
                 symbol="diamond",
                 size=RACE_CHART_DIAMOND_SIZE,
                 color=RACE_STRIP_DIAMOND_COLOR,
-                line=dict(width=0),
+                line=dict(
+                    width=RACE_CHART_DIAMOND_HALO_WIDTH,
+                    color=RACE_CHART_DIAMOND_HALO_COLOR,
+                ),
             ),
             customdata=hover,
             hovertemplate="<b>%{customdata}</b><extra></extra>",
             showlegend=False,
             cliponaxis=False,
+            # Last data trace; white halo keeps markers clear if a goal shape
+            # crosses nearby. Diamonds also sit above the goal in y (pad).
+            zorder=1,
         )
     )
 
@@ -805,14 +958,24 @@ def compliance_chart(
         )
         return fig
 
-    customdata = _bar_period_customdata(period_df, grain)
-    # Full fill opacity; gray hatch on the unfinished current period.
+    customdata = _compliance_customdata(period_df, grain)
+    # Solid easy/hard stack; thin gray bar encodes HR coverage (accounted / total).
+    # Overlay + base keeps coverage on the same 0–1 y-axis as the stack (not y2,
+    # and not folded into the stack by barmode="stack").
+    # Gray hatch still marks the unfinished current period on the stack.
     in_progress_pattern = _in_progress_bar_pattern(period_df)
+    easy_fracs = period_df["easy_frac"]
+    hard_fracs = period_df["hard_frac"]
+    coverage_fracs = _compliance_hr_coverage_fracs(period_df)
     fig.add_trace(
         go.Bar(
             name="Easy",
             x=labels,
-            y=period_df["easy_frac"],
+            y=easy_fracs,
+            base=0,
+            yaxis="y",
+            width=_COMPLIANCE_STACK_WIDTH,
+            offset=_COMPLIANCE_STACK_OFFSET,
             offsetgroup=TRAINING_OFFSETGROUP,
             alignmentgroup=TRAINING_OFFSETGROUP,
             # Leave cornerradius unset on Easy (square join). Explicit 0 would be the
@@ -825,7 +988,8 @@ def compliance_chart(
             customdata=customdata,
             hovertemplate=(
                 "<b>%{customdata[0]}</b>%{customdata[1]}"
-                "<br>Easy: %{y:.0%}<extra></extra>"
+                "<br>Easy: %{y:.0%}"
+                f"{_COMPLIANCE_MILES_HOVER}"
             ),
         )
     )
@@ -833,7 +997,11 @@ def compliance_chart(
         go.Bar(
             name="Moderate/Hard",
             x=labels,
-            y=period_df["hard_frac"],
+            y=hard_fracs,
+            base=easy_fracs,
+            yaxis="y",
+            width=_COMPLIANCE_STACK_WIDTH,
+            offset=_COMPLIANCE_STACK_OFFSET,
             offsetgroup=TRAINING_OFFSETGROUP,
             alignmentgroup=TRAINING_OFFSETGROUP,
             # First set cornerradius in the stack → rounds outer column tops (~mileage).
@@ -846,26 +1014,49 @@ def compliance_chart(
             customdata=customdata,
             hovertemplate=(
                 "<b>%{customdata[0]}</b>%{customdata[1]}"
-                "<br>Moderate/Hard: %{y:.0%}<extra></extra>"
+                "<br>Moderate/Hard: %{y:.0%}"
+                f"{_COMPLIANCE_MILES_HOVER}"
             ),
         )
     )
-    fig.add_hline(
-        y=EASY_TARGET_FRAC,
-        line_width=1,
-        line_color=TRAINING_GOAL_LINE,
+    fig.add_trace(
+        go.Bar(
+            name="HR coverage",
+            x=labels,
+            y=coverage_fracs,
+            base=0,
+            yaxis="y",
+            width=_COMPLIANCE_COVERAGE_WIDTH,
+            offset=_COMPLIANCE_COVERAGE_OFFSET,
+            offsetgroup=_COMPLIANCE_COVERAGE_OFFSETGROUP,
+            marker=dict(color=COMPLIANCE_COVERAGE_BAR),
+            showlegend=False,
+            customdata=customdata,
+            hovertemplate=(
+                "<b>%{customdata[0]}</b>%{customdata[1]}"
+                "<br>HR coverage: %{y:.0%}"
+                f"{_COMPLIANCE_COVERAGE_HOVER}"
+            ),
+        )
+    )
+    # Full-width paper shape above bars so the 80% goal spans the plot and
+    # sits in front of the stack / coverage bars; race diamonds are added
+    # later (above the line in y, with a white halo).
+    _add_goal_line(
+        fig,
+        goal=EASY_TARGET_FRAC,
         annotation_text="Goal: 80% easy",
-        annotation_font=dict(size=12, color=MUTED),
-        annotation_position="top left",
-        annotation_bgcolor="rgba(255,255,255,0.35)",
     )
     fig.update_layout(
         title=_title(chart_title),
-        barmode="stack",
+        barmode="overlay",
         showlegend=True,
         legend=LEGEND_UNDER_TITLE,
         yaxis=_training_yaxis(
-            title=dict(text="Fraction of mileage", font=dict(size=12, color=MUTED)),
+            title=dict(
+                text="Fraction",
+                font=dict(size=12, color=MUTED),
+            ),
             range=[0, 1.08],
             tickformat=".1f",
             gridcolor="rgba(21,32,40,0.08)",
@@ -1011,22 +1202,40 @@ def mileage_chart(
         )
     )
     if show_goal:
-        fig.add_hline(
-            y=goal,
-            line_width=1,
-            line_color=TRAINING_GOAL_LINE,
-            annotation_text=f"Goal: {_format_miles_goal(goal)} miles",
-            annotation_font=dict(size=12, color=MUTED),
-            annotation_position="top left",
-            annotation_bgcolor="rgba(255,255,255,0.35)",
-        )
+        # Full-width paper shape above bars; diamonds clear the line in y.
+        _add_mileage_goal_line(fig, goal=goal)
+    # Race diamonds: y = max(bar, goal?) + max(MIN_MI, frac·scale).
+    diamond_floor = float(goal) if show_goal else None
+    diamond_min_pad = RACE_CHART_DIAMOND_Y_PAD_MIN_MI
     if y_max is None:
         peak = float(totals.max())
         if show_goal:
             peak = max(peak, goal)
         axis_max = max(peak * 1.18, 5)
+        if not relative_weeks_from_race:
+            _, diamond_ys, _ = _race_diamond_y_positions(
+                period_df,
+                totals,
+                y_floor=diamond_floor,
+                min_pad=diamond_min_pad,
+            )
+            if diamond_ys:
+                # Keep marker tops inside the axis (cliponaxis=False alone is
+                # not always enough in Streamlit/Plotly).
+                headroom = max(axis_max * 0.02, 1.0)
+                axis_max = max(axis_max, max(diamond_ys) + headroom)
     else:
         axis_max = max(float(y_max), 5)
+        if not relative_weeks_from_race:
+            _, diamond_ys, _ = _race_diamond_y_positions(
+                period_df,
+                totals,
+                y_floor=diamond_floor,
+                min_pad=diamond_min_pad,
+            )
+            if diamond_ys:
+                headroom = max(axis_max * 0.02, 1.0)
+                axis_max = max(axis_max, max(diamond_ys) + headroom)
     xaxis = _training_xaxis(labels, grain)
     if relative_weeks_from_race:
         xaxis.update(
@@ -1051,7 +1260,13 @@ def mileage_chart(
         },
     )
     if not relative_weeks_from_race:
-        _add_race_week_diamonds(fig, period_df, totals)
+        _add_race_week_diamonds(
+            fig,
+            period_df,
+            totals,
+            y_floor=diamond_floor,
+            min_pad=diamond_min_pad,
+        )
     return fig
 
 
@@ -1740,9 +1955,9 @@ def hr_zones_stacked_area_chart(
 
     Each period's ``zone_1_pct`` … ``zone_5_pct`` already sum to 100 when HR
     data exists. Periods with no zone time use ``None`` so the stack gaps
-    instead of drawing a fake 0% band. The last completed Mon–Sun week pie is
+    instead of drawing a fake 0% band. The current-week-to-date Mon–as_of pie is
     rendered beside this chart in the Training right gutter (see
-    ``hr_zones_last_week_pie_html``), under the Zone legend.
+    ``hr_zones_week_to_date_pie_html``), under the Zone legend.
 
     Parameters
     ----------

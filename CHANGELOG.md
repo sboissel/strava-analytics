@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.3] — 2026-08-27
+
+### Changed
+
+**Dashboard**
+
+- **Training / Fitness**: Year grain is a fixed window **since 2016** (not a rolling last-N years), so early years stay on the charts.
+- **Training**: HR Zones donut uses **week-to-date** zone shares instead of the last completed week.
+- **Training**: 80:20 chart adds a thin gray **HR coverage** bar and richer hovers (easy / hard / unaccounted miles, coverage %).
+- **Training**: Mileage and 80:20 **goal lines** draw as full-width shapes in front of bars; race diamonds clear the goal with a white halo and a minimum y pad.
+- **Metrics**: Shoes tooltip clarifies baseline + gear-tagged activity miles.
+
 ## [1.5.2] — 2026-08-26
 
 ### Fixed

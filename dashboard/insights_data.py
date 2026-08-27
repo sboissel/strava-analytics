@@ -24,6 +24,7 @@ from data import (
     format_full_month,
     format_week_range_short,
     normalize_utc,
+    period_count,
     reference_end,
     current_period_key,
     filter_to_recent_periods,
@@ -49,7 +50,7 @@ HEATMAP_WEEK_MONTHS = 24
 HEATMAP_DAY_MONTHS = 12
 
 HEATMAP_SHOWING: dict[PeriodGrain, str] = {
-    "Year": "Last 10 years",
+    "Year": str(PERIOD_CONFIG["Year"]["showing"]),
     "Month": "Last 10 years × months",
     "Week": "Last 2 years",
     "Day": "Last 1 year",
@@ -329,8 +330,8 @@ def aggregate_pace_hr_by_period(
     """
     seconds_col = f"seconds_{bin_key}"
     hr_col = f"avg_hr_{bin_key}"
-    n = int(PERIOD_CONFIG[grain]["count"])
     end = normalize_utc(as_of) if as_of is not None else reference_end(pace_runs)
+    n = period_count(grain, end)
 
     full_index = generate_period_index(grain, end, n)
     current_key = current_period_key(grain, end)
@@ -437,7 +438,7 @@ def aggregate_hr_zones_by_period(
     as_of : pandas.Timestamp, optional
         Reference end date for the period window. Defaults to the latest activity.
     count : int, optional
-        Number of periods to include. Defaults to ``PERIOD_CONFIG[grain]["count"]``.
+        Number of periods to include. Defaults to ``period_count(grain, end)``.
 
     Returns
     -------
@@ -445,10 +446,10 @@ def aggregate_hr_zones_by_period(
         One row per period with ``zone_1_pct`` … ``zone_5_pct`` (0–100) and an
         ``in_progress`` flag.
     """
-    n = int(PERIOD_CONFIG[grain]["count"] if count is None else count)
+    end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    n = int(count) if count is not None else period_count(grain, end)
     if n < 1:
         raise ValueError("count must be >= 1")
-    end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
     full_index = generate_period_index(grain, end, n)
     current_key = current_period_key(grain, end)
     sec_cols = hr_zone_sec_columns()
@@ -500,6 +501,26 @@ def aggregate_hr_zones_by_period(
     ]
 
 
+def current_iso_week_monday(as_of: pd.Timestamp) -> pd.Timestamp:
+    """Return the Monday of the ISO week containing ``as_of``.
+
+    Parameters
+    ----------
+    as_of : pandas.Timestamp
+        Reference instant (typically latest activity or "today").
+
+    Returns
+    -------
+    pandas.Timestamp
+        UTC Monday of the current Mon–Sun ISO week.
+    """
+    end = normalize_utc(as_of)
+    iso = end.isocalendar()
+    return pd.Timestamp.fromisocalendar(
+        int(iso.year), int(iso.week), 1
+    ).tz_localize("UTC")
+
+
 def last_completed_iso_week_monday(as_of: pd.Timestamp) -> pd.Timestamp:
     """Return the Monday of the latest full ISO week before ``as_of``'s week.
 
@@ -516,12 +537,63 @@ def last_completed_iso_week_monday(as_of: pd.Timestamp) -> pd.Timestamp:
     pandas.Timestamp
         UTC Monday of the last completed Mon–Sun ISO week.
     """
-    end = normalize_utc(as_of)
-    iso = end.isocalendar()
-    current_monday = pd.Timestamp.fromisocalendar(
-        int(iso.year), int(iso.week), 1
-    ).tz_localize("UTC")
-    return current_monday - pd.Timedelta(days=7)
+    return current_iso_week_monday(as_of) - pd.Timedelta(days=7)
+
+
+def _short_date_span(start: pd.Timestamp, end_inclusive: pd.Timestamp) -> str:
+    """Abbreviated UTC date span like ``Mar 9, 2026 - Mar 12, 2026``."""
+
+    def _fmt(ts: pd.Timestamp) -> str:
+        stamp = pd.Timestamp(ts)
+        if stamp.tzinfo is not None:
+            stamp = stamp.tz_convert("UTC")
+        return f"{stamp.strftime('%b')} {stamp.day}, {stamp.year}"
+
+    return f"{_fmt(start)} - {_fmt(end_inclusive)}"
+
+
+def _hr_zone_shares_in_window(
+    runs: pd.DataFrame,
+    start: pd.Timestamp,
+    end_exclusive: pd.Timestamp,
+    *,
+    week_key: str,
+    week_label: str,
+) -> dict[str, object]:
+    """Sum HR-zone seconds in ``[start, end_exclusive)`` into share dict keys."""
+    out: dict[str, object] = {
+        "week_key": week_key,
+        "week_label": week_label,
+    }
+    sec_cols = hr_zone_sec_columns()
+
+    if runs.empty or any(col not in runs.columns for col in sec_cols):
+        return out
+
+    work = runs.loc[window_mask(runs, start, end_exclusive)].copy()
+    if work.empty:
+        return out
+
+    for col in sec_cols:
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+    work["_hr_zone_total"] = work[sec_cols].sum(axis=1, min_count=1)
+    valid = work["_hr_zone_total"].notna() & (work["_hr_zone_total"] > 0)
+    work = work.loc[valid]
+    if work.empty:
+        return out
+
+    for col in sec_cols:
+        work[col] = work[col].fillna(0.0)
+    totals = work[sec_cols].sum(axis=0)
+    grand = float(totals.sum())
+    if grand <= 0:
+        return out
+
+    for idx, sec_col in enumerate(sec_cols, start=1):
+        sec = float(totals[sec_col])
+        out[f"zone_{idx}_sec"] = sec
+        out[f"zone_{idx}_pct"] = sec / grand * 100.0
+    return out
 
 
 def last_full_week_hr_zone_shares(
@@ -551,40 +623,52 @@ def last_full_week_hr_zone_shares(
     sunday_exclusive = monday + pd.Timedelta(days=7)
     iso = monday.isocalendar()
     week_key = f"{int(iso.year)}-{int(iso.week):02d}"
-    week_label = format_week_range_short(monday)
-    out: dict[str, object] = {
-        "week_key": week_key,
-        "week_label": week_label,
-    }
-    sec_cols = hr_zone_sec_columns()
+    return _hr_zone_shares_in_window(
+        runs,
+        monday,
+        sunday_exclusive,
+        week_key=week_key,
+        week_label=format_week_range_short(monday),
+    )
 
-    if runs.empty or any(col not in runs.columns for col in sec_cols):
-        return out
 
-    work = runs.loc[window_mask(runs, monday, sunday_exclusive)].copy()
-    if work.empty:
-        return out
+def week_to_date_hr_zone_shares(
+    runs: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> dict[str, object]:
+    """Aggregate HR-zone shares for the current ISO week through ``as_of``.
 
-    for col in sec_cols:
-        work[col] = pd.to_numeric(work[col], errors="coerce")
-    work["_hr_zone_total"] = work[sec_cols].sum(axis=1, min_count=1)
-    valid = work["_hr_zone_total"].notna() & (work["_hr_zone_total"] > 0)
-    work = work.loc[valid]
-    if work.empty:
-        return out
+    Window is Monday 00:00 UTC of the ISO week containing ``as_of`` through the
+    end of the ``as_of`` calendar day (``[monday, as_of_midnight + 1 day)``).
 
-    for col in sec_cols:
-        work[col] = work[col].fillna(0.0)
-    totals = work[sec_cols].sum(axis=0)
-    grand = float(totals.sum())
-    if grand <= 0:
-        return out
+    Parameters
+    ----------
+    runs : pandas.DataFrame
+        Run analysis rows with ``date`` and ``hr_zone_1_sec`` … ``hr_zone_5_sec``.
+    as_of : pandas.Timestamp, optional
+        Reference end date. Defaults to the latest activity.
 
-    for idx, sec_col in enumerate(sec_cols, start=1):
-        sec = float(totals[sec_col])
-        out[f"zone_{idx}_sec"] = sec
-        out[f"zone_{idx}_pct"] = sec / grand * 100.0
-    return out
+    Returns
+    -------
+    dict
+        Always includes ``week_key`` and ``week_label`` (Mon–as_of range). When
+        the window has positive zone seconds, also includes ``zone_1_pct`` …
+        ``zone_5_pct`` and ``zone_1_sec`` … ``zone_5_sec``; otherwise those
+        keys are omitted (pie shows empty).
+    """
+    end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    monday = current_iso_week_monday(end)
+    end_exclusive = end + pd.Timedelta(days=1)
+    iso = monday.isocalendar()
+    week_key = f"{int(iso.year)}-{int(iso.week):02d}"
+    return _hr_zone_shares_in_window(
+        runs,
+        monday,
+        end_exclusive,
+        week_key=week_key,
+        week_label=_short_date_span(monday, end),
+    )
 
 
 # Minimum distance (miles) before climb density is defined. Near-zero distance
@@ -783,8 +867,8 @@ def aggregate_aerobic_efficiency_by_period(
         One row per period with ``residual``, ``efficiency``,
         ``elev_ft_per_mile``, and ``in_progress``.
     """
-    n = int(PERIOD_CONFIG[grain]["count"])
     end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    n = period_count(grain, end)
     full_index = generate_period_index(grain, end, n)
     current_key = current_period_key(grain, end)
 
@@ -827,7 +911,7 @@ def _year_matrix(
 ) -> tuple[np.ndarray, list[str], list[str], np.ndarray]:
     """Horizontal heatmap: one total-miles row with years as columns."""
     end = _normalize_as_of(runs, as_of)
-    n = int(PERIOD_CONFIG["Year"]["count"])
+    n = period_count("Year", end)
     full_index = generate_period_index("Year", end, n)
     x_labels = full_index["period_label"].tolist()
     year_keys = full_index["period_key"].tolist()
@@ -1337,8 +1421,8 @@ def aggregate_fitness_form_fatigue_by_period(
         One row per period with ``fitness``, ``fatigue``, ``form``, ``load``,
         and ``in_progress``.
     """
-    n = int(PERIOD_CONFIG[grain]["count"])
     end = normalize_utc(as_of) if as_of is not None else reference_end(runs)
+    n = period_count(grain, end)
     full_index = generate_period_index(grain, end, n)
     current_key = current_period_key(grain, end)
 

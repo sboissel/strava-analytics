@@ -282,6 +282,11 @@ def compliance_info_html(title: str) -> str:
         "(<code>%_easy</code> ÷ 100); the rest of that distance is hard miles. "
         "Each bar is the share of those summed miles in the Show By period "
         "(runs without HR zones are omitted from the %)."
+        "<br><br>"
+        "<strong>Gray coverage bar</strong>"
+        "The thin gray bar shows HR coverage (accounted miles ÷ total miles). "
+        "Full height means all miles have HR zones; hover shows "
+        "HR coverage % plus accounted and unaccounted miles."
     )
     return (
         '<div class="compliance-info" role="group" '
@@ -352,10 +357,10 @@ def _hr_zone_duration_label(seconds: float | None) -> str:
     return formatted if formatted else "—"
 
 
-def hr_zones_last_week_pie_html(
-    last_week_zones: Mapping[str, object] | None,
+def hr_zones_week_to_date_pie_html(
+    week_to_date_zones: Mapping[str, object] | None,
 ) -> str:
-    """Return a last-full-week HR-zone donut for the Training right gutter.
+    """Return a week-to-date HR-zone donut for the Training right gutter.
 
     Positioned under the Plotly Zone legend in the shared ``FITNESS_MARGIN_R``
     deadspan (same 168px legend column as other charts) so it sits beside the
@@ -365,8 +370,8 @@ def hr_zones_last_week_pie_html(
 
     Parameters
     ----------
-    last_week_zones : mapping or None
-        Shares from ``last_full_week_hr_zone_shares`` (``week_label`` plus
+    week_to_date_zones : mapping or None
+        Shares from ``week_to_date_hr_zone_shares`` (``week_label`` plus
         ``zone_1_pct`` … ``zone_5_pct``, optionally ``zone_1_sec`` …).
 
     Returns
@@ -377,29 +382,29 @@ def hr_zones_last_week_pie_html(
     label = ""
     values: list[float] = []
     seconds: list[float | None] = []
-    if last_week_zones is not None:
-        label = str(last_week_zones.get("week_label") or "")
+    if week_to_date_zones is not None:
+        label = str(week_to_date_zones.get("week_label") or "")
         for idx in range(1, len(HR_ZONE_COLORS) + 1):
-            if f"zone_{idx}_pct" not in last_week_zones:
+            if f"zone_{idx}_pct" not in week_to_date_zones:
                 values = []
                 seconds = []
                 break
-            values.append(_parse_zone_float(last_week_zones.get(f"zone_{idx}_pct")))
+            values.append(_parse_zone_float(week_to_date_zones.get(f"zone_{idx}_pct")))
             sec_key = f"zone_{idx}_sec"
-            if sec_key in last_week_zones:
-                seconds.append(_parse_zone_float(last_week_zones.get(sec_key)))
+            if sec_key in week_to_date_zones:
+                seconds.append(_parse_zone_float(week_to_date_zones.get(sec_key)))
             else:
                 seconds.append(None)
 
-    caption = "Last week"
+    caption = "This week to date"
     if label:
-        caption = f"Last week<br>{html.escape(label)}"
+        caption = f"This week to date<br>{html.escape(label)}"
 
     total = sum(values)
     if not values or total <= 0:
         body = (
             '<div class="hr-zones-pie-empty" role="img" '
-            'aria-label="No HR zone data for last week">No HR data</div>'
+            'aria-label="No HR zone data for this week to date">No HR data</div>'
         )
     else:
         paths: list[str] = []
@@ -446,7 +451,7 @@ def hr_zones_last_week_pie_html(
 
     return (
         '<div class="hr-zones-pie-gutter" role="group" '
-        'aria-label="Last week heart rate zone share">'
+        'aria-label="This week to date heart rate zone share">'
         '<aside class="hr-zones-pie-panel">'
         f'<div class="hr-zones-pie-caption">{caption}</div>'
         f"{body}"
@@ -1104,7 +1109,8 @@ def shoe_kpi_tooltip(goal: float = SHOE_MILEAGE_GOAL) -> str:
     """Return tooltip HTML for shoe mileage gauge cards."""
     return (
         "<strong>Definition</strong>"
-        "Total miles on this shoe."
+        "Baseline miles (before Strava shoe tracking) plus the sum of "
+        "activity distances tagged with this shoe's gear ID."
         "<br><br>"
         "<strong>Target</strong>"
         f"Retire around {goal:.0f} mi."

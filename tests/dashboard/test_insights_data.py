@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from dashboard.charts import mileage_heatmap_chart
-from dashboard.data import PERIOD_CONFIG
+from dashboard.data import PERIOD_CONFIG, period_count
 from dashboard.insights_data import (
     HEATMAP_MONTH_YEARS,
     HR_ZONE_PCT_COLUMNS,
@@ -18,6 +18,7 @@ from dashboard.insights_data import (
     aggregate_pace_hr_by_period,
     banister_ema,
     climb_density_ft_per_mile,
+    current_iso_week_monday,
     daily_training_load,
     edwards_zone_load,
     efficiency_elevation_residuals,
@@ -29,6 +30,7 @@ from dashboard.insights_data import (
     last_full_week_hr_zone_shares,
     mileage_heatmap_matrix,
     raw_aerobic_efficiency,
+    week_to_date_hr_zone_shares,
 )
 
 
@@ -308,6 +310,10 @@ class AggregateHrZonesTests(unittest.TestCase):
         monday = last_completed_iso_week_monday(wednesday)
         self.assertEqual(monday, pd.Timestamp("2026-03-02T00:00:00Z"))
         self.assertEqual(last_completed_iso_week_monday(sunday), monday)
+        self.assertEqual(
+            current_iso_week_monday(wednesday),
+            pd.Timestamp("2026-03-09T00:00:00Z"),
+        )
 
     def test_last_full_week_hr_zone_shares(self):
         """Pie data uses the prior Mon–Sun week, not the in-progress week."""
@@ -346,6 +352,43 @@ class AggregateHrZonesTests(unittest.TestCase):
         result = last_full_week_hr_zone_shares(runs, as_of=as_of)
         self.assertEqual(result["week_key"], "2026-10")
         self.assertEqual(result["week_label"], "Mar 2, 2026 - Mar 8, 2026")
+        self.assertNotIn("zone_1_pct", result)
+
+    def test_week_to_date_hr_zone_shares(self):
+        """WTD pie uses current ISO week Mon through as_of, not prior week."""
+        runs = self._runs(
+            [
+                "2026-03-03T08:00:00Z",  # week 10 — excluded
+                "2026-03-10T08:00:00Z",  # week 11 Tue
+                "2026-03-12T08:00:00Z",  # week 11 Thu (as_of day)
+                "2026-03-13T08:00:00Z",  # week 11 Fri — after as_of, excluded
+            ],
+            [
+                [500.0, 0.0, 0.0, 0.0, 0.0],
+                [100.0, 300.0, 0.0, 0.0, 0.0],
+                [100.0, 100.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 500.0, 0.0, 0.0],
+            ],
+        )
+        as_of = pd.Timestamp("2026-03-12T12:00:00Z")  # Thu week 11
+        result = week_to_date_hr_zone_shares(runs, as_of=as_of)
+        self.assertEqual(result["week_key"], "2026-11")
+        self.assertEqual(result["week_label"], "Mar 9, 2026 - Mar 12, 2026")
+        # Combined WTD seconds: 200, 400, 0, 0, 0 = 600
+        self.assertAlmostEqual(float(result["zone_1_sec"]), 200.0, places=4)
+        self.assertAlmostEqual(float(result["zone_2_sec"]), 400.0, places=4)
+        self.assertAlmostEqual(float(result["zone_1_pct"]), 200 / 6, places=4)
+        self.assertAlmostEqual(float(result["zone_2_pct"]), 400 / 6, places=4)
+
+    def test_week_to_date_hr_zone_shares_empty(self):
+        runs = self._runs(
+            ["2026-03-03T08:00:00Z"],
+            [[100.0, 0.0, 0.0, 0.0, 0.0]],
+        )
+        as_of = pd.Timestamp("2026-03-12T12:00:00Z")
+        result = week_to_date_hr_zone_shares(runs, as_of=as_of)
+        self.assertEqual(result["week_key"], "2026-11")
+        self.assertEqual(result["week_label"], "Mar 9, 2026 - Mar 12, 2026")
         self.assertNotIn("zone_1_pct", result)
 
 
@@ -540,7 +583,8 @@ class MileageHeatmapTests(unittest.TestCase):
             runs, "Year", as_of=as_of
         )
         self.assertEqual(y_labels, ["Miles"])
-        self.assertEqual(len(x_labels), int(PERIOD_CONFIG["Year"]["count"]))
+        self.assertEqual(len(x_labels), period_count("Year", as_of))
+        self.assertEqual(x_labels[0], "2016")
         self.assertIn("2024", x_labels)
         self.assertIn("2026", x_labels)
         self.assertEqual(matrix.shape[0], 1)
@@ -686,10 +730,28 @@ class HeatmapShowingLabelTests(unittest.TestCase):
     """Heatmap window labels for dashboard controls."""
 
     def test_labels_match_heatmap_windows(self):
-        self.assertEqual(heatmap_showing_label("Year"), "Last 10 years")
+        self.assertEqual(heatmap_showing_label("Year"), "Since 2016")
         self.assertEqual(heatmap_showing_label("Month"), "Last 10 years × months")
         self.assertEqual(heatmap_showing_label("Week"), "Last 2 years")
         self.assertEqual(heatmap_showing_label("Day"), "Last 1 year")
+
+
+class FitnessYearlyWindowTests(unittest.TestCase):
+    """Year grain Fitness aggregators share the 2016–present window."""
+
+    def test_year_aggregators_start_at_2016(self):
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        expected_n = period_count("Year", as_of)
+        frames = (
+            aggregate_pace_hr_by_period(pd.DataFrame(), "Year", "800_830", as_of=as_of),
+            aggregate_hr_zones_by_period(pd.DataFrame(), "Year", as_of=as_of),
+            aggregate_aerobic_efficiency_by_period(pd.DataFrame(), "Year", as_of=as_of),
+            aggregate_fitness_form_fatigue_by_period(pd.DataFrame(), "Year", as_of=as_of),
+        )
+        for result in frames:
+            self.assertEqual(len(result), expected_n)
+            self.assertEqual(result["period_key"].iloc[0], "2016")
+            self.assertEqual(result["period_key"].iloc[-1], "2026")
 
 
 class EdwardsZoneLoadTests(unittest.TestCase):

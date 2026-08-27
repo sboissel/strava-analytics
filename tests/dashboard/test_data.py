@@ -891,6 +891,46 @@ class PeriodMetricsTests(unittest.TestCase):
         )
         self.assertIn("total_elevation_ft", result.columns)
         self.assertTrue((result["total_elevation_ft"] == 0.0).all())
+        self.assertTrue(result["easy_frac"].isna().all())
+        self.assertTrue(result["hard_frac"].isna().all())
+
+    def test_hr_mile_breakdown_and_nan_without_hr(self):
+        """HR miles drive fractions; no HR coverage → NaN fracs and full unaccounted."""
+        from dashboard.data import aggregate_period_metrics
+
+        runs = pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    [
+                        "2026-03-03T08:00:00Z",  # week 10: 10 mi, tiny HR easy
+                        "2026-03-04T08:00:00Z",  # week 10: 90 mi, no HR
+                        "2026-03-10T08:00:00Z",  # week 11: 8 mi, no HR at all
+                    ],
+                    utc=True,
+                ),
+                "distance_miles": [10.0, 90.0, 8.0],
+                "%_easy": [100.0, None, None],
+                "elevation_gain_ft": [0.0, 0.0, 0.0],
+            }
+        )
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        result = aggregate_period_metrics(runs, "Week", as_of=as_of, count=3)
+        week_10 = result.loc[result["period_key"] == "2026-10"].iloc[0]
+        week_11 = result.loc[result["period_key"] == "2026-11"].iloc[0]
+
+        self.assertAlmostEqual(float(week_10["total_miles"]), 100.0)
+        self.assertAlmostEqual(float(week_10["easy_miles"]), 10.0)
+        self.assertAlmostEqual(float(week_10["hard_miles"]), 0.0)
+        self.assertAlmostEqual(float(week_10["unaccounted_miles"]), 90.0)
+        self.assertAlmostEqual(float(week_10["easy_frac"]), 1.0)
+        self.assertAlmostEqual(float(week_10["hard_frac"]), 0.0)
+
+        self.assertAlmostEqual(float(week_11["total_miles"]), 8.0)
+        self.assertAlmostEqual(float(week_11["easy_miles"]), 0.0)
+        self.assertAlmostEqual(float(week_11["hard_miles"]), 0.0)
+        self.assertAlmostEqual(float(week_11["unaccounted_miles"]), 8.0)
+        self.assertTrue(pd.isna(week_11["easy_frac"]))
+        self.assertTrue(pd.isna(week_11["hard_frac"]))
 
     def test_custom_count_shortens_window(self):
         from dashboard.data import aggregate_period_metrics
@@ -900,6 +940,66 @@ class PeriodMetricsTests(unittest.TestCase):
             self._runs(), "Week", as_of=as_of, count=12
         )
         self.assertEqual(len(result), 12)
+
+
+class YearlyWindowTests(unittest.TestCase):
+    """Year grain is a fixed window from 2016 through the as-of year."""
+
+    def test_period_count_includes_2016_and_grows_with_end_year(self):
+        from dashboard.data import YEARLY_START_YEAR, period_count
+
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        self.assertEqual(YEARLY_START_YEAR, 2016)
+        self.assertEqual(period_count("Year", as_of), 11)
+        later = pd.Timestamp("2027-08-01T12:00:00Z")
+        self.assertEqual(period_count("Year", later), 12)
+
+    def test_year_index_starts_at_2016(self):
+        from dashboard.data import generate_period_index, period_count
+
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        index = generate_period_index("Year", as_of, period_count("Year", as_of))
+        keys = list(index["period_key"])
+        self.assertEqual(keys[0], "2016")
+        self.assertEqual(keys[-1], "2026")
+        self.assertEqual(len(keys), 11)
+
+    def test_year_metrics_keep_2016_rows(self):
+        from dashboard.data import aggregate_period_metrics, filter_to_recent_periods
+
+        runs = pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    ["2016-02-01T08:00:00Z", "2015-06-01T08:00:00Z", "2026-03-10T08:00:00Z"],
+                    utc=True,
+                ),
+                "distance_miles": [5.0, 9.0, 3.0],
+                "%_easy": [80.0, 80.0, 80.0],
+                "elevation_gain_ft": [10.0, 20.0, 30.0],
+            }
+        )
+        kept = filter_to_recent_periods(runs, "Year")
+        years = set(kept["date"].dt.year)
+        self.assertIn(2016, years)
+        self.assertNotIn(2015, years)
+        self.assertIn(2026, years)
+
+        as_of = pd.Timestamp("2026-03-16T12:00:00Z")
+        result = aggregate_period_metrics(runs, "Year", as_of=as_of)
+        self.assertEqual(result["period_key"].iloc[0], "2016")
+        self.assertAlmostEqual(
+            float(result.loc[result["period_key"] == "2016", "total_miles"].iloc[0]),
+            5.0,
+        )
+        self.assertAlmostEqual(
+            float(result.loc[result["period_key"] == "2026", "total_miles"].iloc[0]),
+            3.0,
+        )
+
+    def test_showing_label_is_since_2016(self):
+        from dashboard.data import PERIOD_CONFIG
+
+        self.assertEqual(PERIOD_CONFIG["Year"]["showing"], "Since 2016")
 
 
 class AnnotateRacePeriodsTests(unittest.TestCase):

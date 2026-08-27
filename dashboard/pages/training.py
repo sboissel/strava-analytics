@@ -42,13 +42,13 @@ from data import (
 )
 from insights_data import (
     aggregate_hr_zones_by_period,
-    last_full_week_hr_zone_shares,
     mileage_heatmap_matrix,
+    week_to_date_hr_zone_shares,
 )
 from race_data import load_race_results
 from ui import (
     compliance_info_html,
-    hr_zones_last_week_pie_html,
+    hr_zones_week_to_date_pie_html,
     race_weeks_legend_html,
     render_sidebar_section_nav,
 )
@@ -115,7 +115,7 @@ as_of = runs["date"].max() if not runs.empty else None
 period_metrics = aggregate_period_metrics(runs, grain, as_of=as_of)
 period_metrics = annotate_race_periods(period_metrics, load_race_results(), grain)
 zone_periods = aggregate_hr_zones_by_period(runs, grain, as_of=as_of)
-last_week_zones = last_full_week_hr_zone_shares(runs, as_of=as_of)
+week_to_date_zones = week_to_date_hr_zone_shares(runs, as_of=as_of)
 
 st.markdown('<div id="chart-race-weeks" class="page-anchor"></div>', unsafe_allow_html=True)
 _race_week_strip(period_metrics, grain)
@@ -168,10 +168,10 @@ st.plotly_chart(
     config=PLOTLY_CONFIG,
     key="training_elevation",
 )
-# HR zone stack last — last-week donut in the shared right gutter under Zone legend.
+# HR zone stack last — week-to-date donut in the shared right gutter under Zone legend.
 st.markdown('<div id="chart-hr-zones" class="page-anchor"></div>', unsafe_allow_html=True)
 st.markdown(
-    hr_zones_last_week_pie_html(last_week_zones),
+    hr_zones_week_to_date_pie_html(week_to_date_zones),
     unsafe_allow_html=True,
 )
 st.plotly_chart(

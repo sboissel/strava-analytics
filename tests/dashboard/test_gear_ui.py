@@ -14,7 +14,7 @@ from dashboard.theme import (
     TRAFFIC_RED,
     shoe_wear_color,
 )
-from dashboard.ui import shoe_kpi_cards_html
+from dashboard.ui import shoe_kpi_cards_html, shoe_kpi_tooltip
 from strava_analytics.gear import TRACKED_GEAR
 
 
@@ -79,6 +79,16 @@ class ShoeWearColorTests(unittest.TestCase):
     def test_at_or_over_goal_is_red(self):
         self.assertEqual(shoe_wear_color(400, SHOE_MILEAGE_GOAL), TRAFFIC_RED)
         self.assertEqual(shoe_wear_color(450, SHOE_MILEAGE_GOAL), TRAFFIC_RED)
+
+
+class ShoeKpiTooltipTests(unittest.TestCase):
+    """Shoes ⓘ copy explains baseline + activity miles."""
+
+    def test_definition_mentions_baseline_and_activity_gear(self):
+        tip = shoe_kpi_tooltip()
+        self.assertIn("Baseline miles", tip)
+        self.assertIn("gear ID", tip)
+        self.assertIn("400", tip)
 
 
 class ShoeKpiCardsHtmlTests(unittest.TestCase):

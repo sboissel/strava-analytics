@@ -24,11 +24,15 @@ DATA_DIR = REPO_ROOT / "data"
 
 PeriodGrain = Literal["Day", "Week", "Month", "Year"]
 
+# Year grain is a fixed calendar window, not a rolling lookback, so early
+# years (including all of 2016) stay on the yearly Training/Fitness charts.
+YEARLY_START_YEAR = 2016
+
 PERIOD_CONFIG: dict[PeriodGrain, dict[str, int | str]] = {
     "Day": {"count": 30, "showing": "Last 30 days"},
     "Week": {"count": 20, "showing": "Last 20 weeks"},
     "Month": {"count": 20, "showing": "Last 20 months"},
-    "Year": {"count": 10, "showing": "Last 10 years"},
+    "Year": {"showing": "Since 2016"},
 }
 
 
@@ -408,6 +412,31 @@ def reference_end(df: pd.DataFrame) -> pd.Timestamp:
     return normalize_utc(df["date"].max())
 
 
+def period_count(grain: PeriodGrain, end: pd.Timestamp) -> int:
+    """Return how many calendar periods the dashboard window includes.
+
+    Day, week, and month grains use a rolling lookback from ``PERIOD_CONFIG``.
+    Year grain is a fixed window from ``YEARLY_START_YEAR`` through the
+    calendar year of ``end`` (inclusive).
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Calendar aggregation grain.
+    end : pandas.Timestamp
+        Reference end date for the period window.
+
+    Returns
+    -------
+    int
+        Number of periods to include. Always at least 1.
+    """
+    if grain == "Year":
+        years = int(normalize_utc(end).year) - YEARLY_START_YEAR + 1
+        return max(1, years)
+    return int(PERIOD_CONFIG[grain]["count"])
+
+
 def generate_period_index(
     grain: PeriodGrain, end: pd.Timestamp, count: int
 ) -> pd.DataFrame:
@@ -470,7 +499,7 @@ def filter_to_recent_periods(df: pd.DataFrame, grain: PeriodGrain) -> pd.DataFra
         return df
 
     end = reference_end(df)
-    n = int(PERIOD_CONFIG[grain]["count"])
+    n = period_count(grain, end)
     keep_keys = set(generate_period_index(grain, end, n)["period_key"])
 
     work = df.copy()
@@ -498,19 +527,20 @@ def aggregate_period_metrics(
     as_of : pandas.Timestamp, optional
         Reference end date for the period window. Defaults to the latest activity.
     count : int, optional
-        Number of periods to include. Defaults to ``PERIOD_CONFIG[grain]["count"]``.
+        Number of periods to include. Defaults to ``period_count(grain, end)``.
 
     Returns
     -------
     pandas.DataFrame
         One row per period with mileage totals, summed elevation in feet,
-        easy/hard fractions, and an ``in_progress`` flag for the current
-        calendar period.
+        easy/hard HR miles and unaccounted miles, easy/hard fractions of HR
+        miles (NaN when the period has no HR coverage), and an
+        ``in_progress`` flag for the current calendar period.
     """
-    n = int(PERIOD_CONFIG[grain]["count"] if count is None else count)
+    end = normalize_utc(as_of) if as_of is not None else reference_end(df)
+    n = int(count) if count is not None else period_count(grain, end)
     if n < 1:
         raise ValueError("count must be >= 1")
-    end = normalize_utc(as_of) if as_of is not None else reference_end(df)
 
     full_index = generate_period_index(grain, end, n)
 
@@ -520,8 +550,11 @@ def aggregate_period_metrics(
         out = full_index.copy()
         out["total_miles"] = 0.0
         out["total_elevation_ft"] = 0.0
-        out["easy_frac"] = 0.0
-        out["hard_frac"] = 0.0
+        out["easy_miles"] = 0.0
+        out["hard_miles"] = 0.0
+        out["unaccounted_miles"] = 0.0
+        out["easy_frac"] = np.nan
+        out["hard_frac"] = np.nan
         out["in_progress"] = out["period_key"] == current_key
         return out
 
@@ -559,17 +592,24 @@ def aggregate_period_metrics(
     )
 
     hr_total = grouped["easy_miles"] + grouped["hard_miles"]
-    grouped["easy_frac"] = 0.0
-    grouped["hard_frac"] = 0.0
+    # NaN fractions → Plotly omits the stacked bar (no fake 0% / 100% easy).
+    grouped["easy_frac"] = np.nan
+    grouped["hard_frac"] = np.nan
     positive = hr_total > 0
     grouped.loc[positive, "easy_frac"] = grouped.loc[positive, "easy_miles"] / hr_total[positive]
     grouped.loc[positive, "hard_frac"] = grouped.loc[positive, "hard_miles"] / hr_total[positive]
+    grouped["unaccounted_miles"] = (
+        grouped["total_miles"] - grouped["easy_miles"] - grouped["hard_miles"]
+    ).clip(lower=0.0)
 
     merged = full_index.merge(
         grouped[
             [
                 "period_key",
                 "total_miles",
+                "easy_miles",
+                "hard_miles",
+                "unaccounted_miles",
                 "easy_frac",
                 "hard_frac",
                 "total_elevation_ft",
@@ -580,8 +620,10 @@ def aggregate_period_metrics(
     )
     merged["total_miles"] = merged["total_miles"].fillna(0.0)
     merged["total_elevation_ft"] = merged["total_elevation_ft"].fillna(0.0)
-    merged["easy_frac"] = merged["easy_frac"].fillna(0.0)
-    merged["hard_frac"] = merged["hard_frac"].fillna(0.0)
+    merged["easy_miles"] = merged["easy_miles"].fillna(0.0)
+    merged["hard_miles"] = merged["hard_miles"].fillna(0.0)
+    merged["unaccounted_miles"] = merged["unaccounted_miles"].fillna(0.0)
+    # Leave easy_frac / hard_frac as NaN when the period has no HR miles.
     merged["in_progress"] = merged["period_key"] == current_key
     return merged[
         [
@@ -590,6 +632,9 @@ def aggregate_period_metrics(
             "period_tooltip",
             "total_miles",
             "total_elevation_ft",
+            "easy_miles",
+            "hard_miles",
+            "unaccounted_miles",
             "easy_frac",
             "hard_frac",
             "in_progress",
