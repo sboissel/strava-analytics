@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- GitLab daily sync: stop ignoring CI-managed `data/` CSVs so `git add data/` can commit updates for Streamlit Cloud (v1.5.0 had ignored the whole `data/` tree).
-
 ## [1.5.2] — 2026-08-26
 
 ### Fixed
@@ -19,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Streamlit Cloud**: `AttributeError` on `_bootstrap.ensure_sys_path` from a stale/wrong `_bootstrap` in `sys.modules`; entrypoint and pages now load `_bootstrap.py` by absolute file path and replace the cached module.
 - **Streamlit Cloud**: `ImportError` for `compare_race_type_options` (and related Performance exports) when a stale `race_data` object still pointed at the correct file path; bootstrap now reloads `race_data` from disk when required attrs are missing.
+
+**Pipeline / data**
+
+- GitLab daily sync: stop ignoring CI-managed `data/` CSVs so `git add data/` can commit updates for Streamlit Cloud (v1.5.0 had ignored the whole `data/` tree).
 
 ## [1.5.1] — 2026-08-26
 
