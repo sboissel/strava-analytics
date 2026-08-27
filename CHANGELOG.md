@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- GitLab daily sync: stop ignoring CI-managed `data/` CSVs so `git add data/` can commit updates for Streamlit Cloud (v1.5.0 had ignored the whole `data/` tree).
+
 ## [1.5.2] — 2026-08-26
 
 ### Fixed
@@ -38,7 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Dashboard**
 
 - Theme and UI helpers for build-up panels, delta tables, and HR pie summaries on Performance.
-- Ignore regenerated pipeline `data/` CSVs in git (local/pipeline output).
 
 ## [1.4.0] — 2026-08-22
 
