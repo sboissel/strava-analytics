@@ -11,11 +11,9 @@ env/
 .python-version
 
 # CI-managed exports under data/ must stay trackable (Streamlit Cloud + GitLab
-# sync). Never ignore `data/` or `data/*` — that makes `git add data/` / even
-# `git add data/*.csv` fail with "paths are ignored: data". Only ignore scratch.
+# sync). Never ignore `data/` or `data/*` — directory pathspecs fail with
+# "paths are ignored: data". Only ignore scratch under data/.cache/.
 data/.cache/
-data/*.tmp
-data/*.temp
 
 # Secrets and local env
 .env

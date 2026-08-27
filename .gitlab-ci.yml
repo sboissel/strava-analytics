@@ -15,10 +15,14 @@ test:
     - pip install -r requirements.txt -r requirements-dev.txt
     - PYTHONPATH=.:src pytest -q --cov=strava_analytics --cov-report=term-missing
 
+# Scheduled pipelines resolve `main` to the tip SHA at creation time. Do not
+# retry an old scheduled pipeline after CI/ignore fixes — that reuses the old
+# YAML (`git add data/`). Use the next schedule or Run pipeline on main.
 sync:
   stage: sync
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   variables:
     GIT_DEPTH: "0"
   before_script:
@@ -32,36 +36,31 @@ sync:
       fi
     - PYTHONPATH=src python -m strava_analytics.pipeline
     - |
-      if git diff --quiet -- data/ && [ -z "$(git ls-files --others --exclude-standard -- data/)" ]; then
+      # sync-data-v3
+      set -- \
+        data/strava_run_analysis.csv \
+        data/strava_run_pace_analysis.csv \
+        data/strava_ride_analysis.csv \
+        data/strava_swim_analysis.csv \
+        data/strava_hike_analysis.csv \
+        data/activities_last_week.csv \
+        data/highest_activity_id.txt
+      # Refresh ignore rules from default-branch tip. Retries keep the original
+      # SHA; an old `.gitignore` with `data/` would still be in the checkout.
+      git fetch origin "${CI_DEFAULT_BRANCH}" || true
+      git checkout "origin/${CI_DEFAULT_BRANCH}" -- .gitignore || true
+      if git diff --quiet -- "$@" && [ -z "$(git ls-files --others --exclude-standard -- "$@")" ]; then
         echo "No data changes to commit."
         exit 0
       fi
       git config user.email "gitlab-ci@${CI_SERVER_HOST}"
       git config user.name "GitLab CI"
-      # Never `git add data` / `git add data/` — if anything ignores the directory,
-      # git exits 1 with "paths are ignored: data". Stage only pipeline outputs.
-      # Use -f so adds still succeed if a broad data/ ignore is reintroduced.
-      if ! git add -f -- \
-          data/strava_run_analysis.csv \
-          data/strava_run_pace_analysis.csv \
-          data/strava_ride_analysis.csv \
-          data/strava_swim_analysis.csv \
-          data/strava_hike_analysis.csv \
-          data/activities_last_week.csv \
-          data/highest_activity_id.txt
-      then
+      # Never `git add data` / `git add data/` — ignored directory pathspecs
+      # exit 1 with "paths are ignored: data". Force-add explicit outputs only.
+      if ! git add -f -- "$@"; then
         echo "ERROR: git add of sync data files failed. Ignore diagnostics:"
-        git check-ignore -v \
-          data \
-          data/ \
-          data/strava_run_analysis.csv \
-          data/strava_run_pace_analysis.csv \
-          data/strava_ride_analysis.csv \
-          data/strava_swim_analysis.csv \
-          data/strava_hike_analysis.csv \
-          data/activities_last_week.csv \
-          data/highest_activity_id.txt || true
-        git status --short -- data/ || true
+        git check-ignore -v -- "$@" || true
+        git status
         exit 1
       fi
       git commit -m "chore: daily Strava data sync"
@@ -71,25 +70,11 @@ sync:
       git fetch "${REMOTE_URL}" "${CI_DEFAULT_BRANCH}"
       if ! git rebase "FETCH_HEAD"; then
         echo "Rebase conflict in data/; preferring sync output."
-        git checkout --theirs -- \
-          data/strava_run_analysis.csv \
-          data/strava_run_pace_analysis.csv \
-          data/strava_ride_analysis.csv \
-          data/strava_swim_analysis.csv \
-          data/strava_hike_analysis.csv \
-          data/activities_last_week.csv \
-          data/highest_activity_id.txt || true
-        if ! git add -f -- \
-            data/strava_run_analysis.csv \
-            data/strava_run_pace_analysis.csv \
-            data/strava_ride_analysis.csv \
-            data/strava_swim_analysis.csv \
-            data/strava_hike_analysis.csv \
-            data/activities_last_week.csv \
-            data/highest_activity_id.txt
-        then
+        git checkout --theirs -- "$@" || true
+        if ! git add -f -- "$@"; then
           echo "ERROR: git add during rebase conflict resolution failed."
-          git check-ignore -v data data/ || true
+          git check-ignore -v -- "$@" || true
+          git status
           exit 1
         fi
         GIT_EDITOR=true git rebase --continue
