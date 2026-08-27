@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Pipeline / data**
 
-- GitLab daily sync: stop ignoring CI-managed `data/` CSVs so `git add data/` can commit updates for Streamlit Cloud (v1.5.0 had ignored the whole `data/` tree).
+- GitLab daily sync: do not ignore CI-managed `data/` exports (only scratch under `data/`), and stage explicit CSV/`highest_activity_id.txt` paths instead of `git add data/` (which fails when `data` is gitignored).
 
 ## [1.5.1] — 2026-08-26
 

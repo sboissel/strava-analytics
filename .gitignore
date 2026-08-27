@@ -10,13 +10,12 @@ env/
 # Local pyenv pin (CI/Streamlit use 3.11 from config)
 .python-version
 
-# Keep CI-managed exports trackable for Streamlit Cloud. Parent-dir ignore of
-# `data/` (or omitting `!data/`) prevents git from descending; use contents-only
-# ignore plus re-include the directory and the files the sync job commits.
-data/*
-!data/
-!data/*.csv
-!data/highest_activity_id.txt
+# CI-managed exports under data/ must stay trackable (Streamlit Cloud + GitLab
+# sync). Never ignore `data/` or `data/*` — that makes `git add data/` / even
+# `git add data/*.csv` fail with "paths are ignored: data". Only ignore scratch.
+data/.cache/
+data/*.tmp
+data/*.temp
 
 # Secrets and local env
 .env

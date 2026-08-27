@@ -38,11 +38,32 @@ sync:
       fi
       git config user.email "gitlab-ci@${CI_SERVER_HOST}"
       git config user.name "GitLab CI"
-      # Do not `git add data/` — if data/ is ignored as a directory, git refuses
-      # the path even when CSVs inside are meant to be tracked. Stage tracked
-      # updates plus the explicit export paths the pipeline writes.
-      git add -u -- data/
-      git add -- data/*.csv data/highest_activity_id.txt
+      # Never `git add data` / `git add data/` — if anything ignores the directory,
+      # git exits 1 with "paths are ignored: data". Stage only pipeline outputs.
+      # Use -f so adds still succeed if a broad data/ ignore is reintroduced.
+      if ! git add -f -- \
+          data/strava_run_analysis.csv \
+          data/strava_run_pace_analysis.csv \
+          data/strava_ride_analysis.csv \
+          data/strava_swim_analysis.csv \
+          data/strava_hike_analysis.csv \
+          data/activities_last_week.csv \
+          data/highest_activity_id.txt
+      then
+        echo "ERROR: git add of sync data files failed. Ignore diagnostics:"
+        git check-ignore -v \
+          data \
+          data/ \
+          data/strava_run_analysis.csv \
+          data/strava_run_pace_analysis.csv \
+          data/strava_ride_analysis.csv \
+          data/strava_swim_analysis.csv \
+          data/strava_hike_analysis.csv \
+          data/activities_last_week.csv \
+          data/highest_activity_id.txt || true
+        git status --short -- data/ || true
+        exit 1
+      fi
       git commit -m "chore: daily Strava data sync"
       # Schedule may start from an older SHA while main moved (e.g. a merge).
       # Rebase the data commit onto current default branch before pushing.
@@ -50,9 +71,27 @@ sync:
       git fetch "${REMOTE_URL}" "${CI_DEFAULT_BRANCH}"
       if ! git rebase "FETCH_HEAD"; then
         echo "Rebase conflict in data/; preferring sync output."
-        git checkout --theirs -- data/ || true
-        git add -u -- data/
-        git add -- data/*.csv data/highest_activity_id.txt
+        git checkout --theirs -- \
+          data/strava_run_analysis.csv \
+          data/strava_run_pace_analysis.csv \
+          data/strava_ride_analysis.csv \
+          data/strava_swim_analysis.csv \
+          data/strava_hike_analysis.csv \
+          data/activities_last_week.csv \
+          data/highest_activity_id.txt || true
+        if ! git add -f -- \
+            data/strava_run_analysis.csv \
+            data/strava_run_pace_analysis.csv \
+            data/strava_ride_analysis.csv \
+            data/strava_swim_analysis.csv \
+            data/strava_hike_analysis.csv \
+            data/activities_last_week.csv \
+            data/highest_activity_id.txt
+        then
+          echo "ERROR: git add during rebase conflict resolution failed."
+          git check-ignore -v data data/ || true
+          exit 1
+        fi
         GIT_EDITOR=true git rebase --continue
       fi
       git push "${REMOTE_URL}" "HEAD:${CI_DEFAULT_BRANCH}"
