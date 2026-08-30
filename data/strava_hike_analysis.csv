@@ -1,4 +1,5 @@
 activity_id,name,type,gear_id,date,distance_miles,moving_time_min,elapsed_time_min,elevation_gain_ft,avg_pace,avg_pace_sec,max_pace,max_pace_sec
+19962945433,Lunch Hike,Hike,,2026-08-30T09:49:15Z,7.36,02:40:20,03:02:17,416.67,21:46,1306,11:52,712
 19864229281,Lunch Hike,Hike,,2026-08-23T09:03:52Z,7.34,02:44:19,03:20:52,1095.8,22:22,1342,09:02,542
 19668078752,Meander and dip,Hike,,2026-08-09T09:59:48Z,3.09,01:12:02,01:46:48,390.42,23:16,1396.0,04:34,274.0
 19571191507,Piedra Resbaladiza,Hike,,2026-08-02T08:49:36Z,10.1,04:18:54,05:50:50,2477.03,25:37,1537.0,02:57,177.0
