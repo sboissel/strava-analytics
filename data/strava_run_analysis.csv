@@ -1,4 +1,5 @@
 activity_id,name,type,gear_id,date,distance_miles,moving_time_min,elapsed_time_min,elevation_gain_ft,avg_pace,avg_pace_sec,max_pace,max_pace_sec,avg_hr,max_hr,%_easy,mt_min_easy,mt_min_hard,hr_zone_1_sec,hr_zone_2_sec,hr_zone_3_sec,hr_zone_4_sec,hr_zone_5_sec,race,race_distance
+19971873646,Morning Run,Run,g33031350,2026-08-31T06:02:28Z,4.01,00:43:57,00:44:01,544.62,10:58,658,08:10,490,127.7,145,98.8,43.5,0.5,518.0,2089.0,31.0,0.0,0.0,False,
 19932153065,Morning Run,Run,g33031350,2026-08-28T05:16:15Z,8.0,01:29:07,01:29:55,997.38,11:08,668,07:12,432,134.2,150,80.0,71.2,17.8,15.0,4258.0,1070.0,0.0,0.0,False,
 19918238592,Morning Run,Run,g33031356,2026-08-27T05:54:13Z,2.5,00:26:15,00:26:21,55.77,10:29,629,07:01,421,124.8,137,100.0,26.1,0.0,195.0,1368.0,0.0,0.0,0.0,False,
 19904774934,Morning Run,Run,g33031373,2026-08-26T08:15:03Z,3.81,00:41:58,00:45:20,469.16,11:00,660,06:21,381,137.1,166,73.7,29.9,10.7,67.0,1725.0,458.0,183.0,0.0,False,
