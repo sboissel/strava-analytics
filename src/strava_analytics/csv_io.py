@@ -1,12 +1,17 @@
 """CSV persistence helpers for activity analysis and sync cursor state."""
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
-from strava_analytics.activities import hr_zone_sec_columns, run_pace_columns, week_summary_bounds
+from strava_analytics.activities import (
+    extract_start_latlng,
+    hr_zone_sec_columns,
+    run_pace_columns,
+    week_summary_bounds,
+)
 
 LAST_ACTIVITY_ID_FILENAME = "highest_activity_id.txt"
 
@@ -77,6 +82,8 @@ def activity_analysis_columns(activity_type: str) -> List[str]:
         "avg_pace_sec",
         "max_pace",
         "max_pace_sec",
+        "start_lat",
+        "start_lng",
     ]
     if activity_type == "Run":
         return base_columns + [
@@ -107,6 +114,12 @@ def update_activity_analysis_csvs(
 ) -> None:
     """Merge processed activities into per-type analysis CSVs.
 
+    Always reindexes existing per-type files to the current schema so newly
+    added columns (for example ``start_lat`` / ``start_lng``) appear even when
+    no activities of that type were processed in this run. Empty ``activity_df``
+    still migrates schemas on files that already exist; it does not create new
+    empty type files.
+
     Parameters
     ----------
     activity_df : pandas.DataFrame
@@ -121,28 +134,173 @@ def update_activity_analysis_csvs(
     None
         This function does not return a value.
     """
-    if activity_df.empty:
-        return
+    has_type = not activity_df.empty and "type" in activity_df.columns
 
     for activity_type, filename in zip(
         activity_types, activity_analysis_paths(output_dir, activity_types)
     ):
-        typed_df = activity_df[activity_df["type"] == activity_type]
-        if typed_df.empty:
-            continue
+        columns = activity_analysis_columns(activity_type)
+        typed_new = (
+            activity_df[activity_df["type"] == activity_type].copy()
+            if has_type
+            else pd.DataFrame()
+        )
 
         if filename.exists():
             existing_df = pd.read_csv(filename, dtype=str, keep_default_na=False)
             existing_df = _drop_header_like_rows(existing_df)
+        elif typed_new.empty:
+            # Do not create empty analysis files for types with no new rows.
+            continue
         else:
-            existing_df = pd.DataFrame(columns=activity_analysis_columns(activity_type))
-        typed_df = pd.concat([typed_df, existing_df], axis=0, sort=False)
-        typed_df["activity_id"] = typed_df["activity_id"].astype(str)
-        typed_df = typed_df.drop_duplicates(subset=["activity_id"])
-        typed_df = typed_df.drop(columns=["zrfs", "vo2max"], errors="ignore")
-        typed_df = typed_df.reindex(columns=activity_analysis_columns(activity_type))
-        typed_df.to_csv(filename, index=False)
+            existing_df = pd.DataFrame(columns=columns)
+
+        if typed_new.empty:
+            combined = existing_df
+        else:
+            combined = pd.concat([typed_new, existing_df], axis=0, sort=False)
+            combined["activity_id"] = combined["activity_id"].astype(str)
+            combined = combined.drop_duplicates(subset=["activity_id"])
+
+        combined = combined.drop(columns=["zrfs", "vo2max"], errors="ignore")
+        combined = combined.reindex(columns=columns)
+        combined.to_csv(filename, index=False)
         print(f"Saved: {filename}")
+
+
+def _coord_missing(value: Any) -> bool:
+    """Return True when a CSV cell has no usable latitude/longitude value."""
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return text == "" or text.lower() == "nan"
+
+
+def activity_ids_missing_location(
+    output_dir: Path,
+    activity_types: Sequence[str] = ACTIVITY_TYPES,
+) -> Set[str]:
+    """Return activity IDs whose analysis rows still lack start GPS.
+
+    Parameters
+    ----------
+    output_dir : pathlib.Path
+        Directory containing ``strava_<type>_analysis.csv`` files.
+    activity_types : sequence of str, optional
+        Activity types to scan. Defaults to run, ride, swim, and hike.
+
+    Returns
+    -------
+    set of str
+        Activity IDs with missing ``start_lat`` and/or ``start_lng``.
+    """
+    missing: Set[str] = set()
+    for activity_type, filename in zip(
+        activity_types, activity_analysis_paths(output_dir, activity_types)
+    ):
+        if not filename.exists():
+            continue
+        df = pd.read_csv(filename, dtype=str, keep_default_na=False)
+        df = _drop_header_like_rows(df)
+        if df.empty or "activity_id" not in df.columns:
+            continue
+        # Older CSVs may not have location columns yet; treat those as missing.
+        if "start_lat" not in df.columns or "start_lng" not in df.columns:
+            missing.update(
+                str(activity_id).strip()
+                for activity_id in df["activity_id"].tolist()
+                if str(activity_id).strip()
+            )
+            continue
+        for _, row in df.iterrows():
+            activity_id = str(row.get("activity_id", "")).strip()
+            if not activity_id:
+                continue
+            if _coord_missing(row.get("start_lat")) or _coord_missing(row.get("start_lng")):
+                missing.add(activity_id)
+    return missing
+
+
+def backfill_location_from_summaries(
+    activities: Sequence[Dict[str, Any]],
+    output_dir: Path,
+    activity_types: Sequence[str] = ACTIVITY_TYPES,
+) -> int:
+    """Fill empty ``start_lat`` / ``start_lng`` from Strava list/summary payloads.
+
+    Incremental sync only fully processes activity IDs above the watermark.
+    When location columns are added later, already-synced rows (often recent
+    hikes/rides) keep empty coords even though the list endpoint returns them
+    again on the same page as newer activities. This patches those rows from
+    summary ``start_latlng`` without detail fetches or stream re-enrichment.
+
+    Parameters
+    ----------
+    activities : sequence of dict
+        Raw activity summaries from ``StravaClient.get_activities`` (including
+        IDs at or below the watermark that appeared on the final page).
+    output_dir : pathlib.Path
+        Directory containing ``strava_<type>_analysis.csv`` files.
+    activity_types : sequence of str, optional
+        Activity types to update. Defaults to run, ride, swim, and hike.
+
+    Returns
+    -------
+    int
+        Number of analysis rows whose coordinates were filled.
+    """
+    coords_by_id: Dict[str, Tuple[float, float]] = {}
+    for act in activities:
+        activity_id = act.get("id")
+        if activity_id is None:
+            continue
+        start_lat, start_lng = extract_start_latlng(act)
+        if start_lat is None or start_lng is None:
+            continue
+        coords_by_id[str(activity_id)] = (start_lat, start_lng)
+
+    if not coords_by_id:
+        return 0
+
+    updated = 0
+    for activity_type, filename in zip(
+        activity_types, activity_analysis_paths(output_dir, activity_types)
+    ):
+        if not filename.exists():
+            continue
+
+        columns = activity_analysis_columns(activity_type)
+        df = pd.read_csv(filename, dtype=str, keep_default_na=False)
+        df = _drop_header_like_rows(df)
+        df = df.reindex(columns=columns)
+        if df.empty or "activity_id" not in df.columns:
+            continue
+
+        changed = False
+        for idx, row in df.iterrows():
+            activity_id = str(row.get("activity_id", "")).strip()
+            if activity_id not in coords_by_id:
+                continue
+            if not _coord_missing(row.get("start_lat")) and not _coord_missing(
+                row.get("start_lng")
+            ):
+                continue
+            start_lat, start_lng = coords_by_id[activity_id]
+            df.at[idx, "start_lat"] = str(start_lat)
+            df.at[idx, "start_lng"] = str(start_lng)
+            updated += 1
+            changed = True
+
+        if changed:
+            df.to_csv(filename, index=False)
+            print(f"Backfilled location: {filename}")
+
+    return updated
 
 
 def update_run_pace_analysis_csv(pace_summaries: Sequence[Dict[str, Any]], output_path: Path) -> None:

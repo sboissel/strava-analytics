@@ -24,7 +24,7 @@ class MainPipelineTests(unittest.TestCase):
     """Test main pipeline orchestration."""
 
     def test_main_skips_writes_when_no_new_activities(self):
-        """Ensure main still writes the weekly summary when processing returns no rows."""
+        """Ensure main migrates CSV schemas and writes weekly summary with no new rows."""
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
             write_last_activity_id(data_dir, 1)
@@ -43,12 +43,15 @@ class MainPipelineTests(unittest.TestCase):
             ) as process_mock, patch(
                 "strava_analytics.pipeline.update_activity_analysis_csvs"
             ) as update_csvs_mock, patch(
+                "strava_analytics.pipeline.backfill_location_from_summaries", return_value=0
+            ) as backfill_mock, patch(
                 "strava_analytics.pipeline.update_run_pace_analysis_csv"
             ) as update_pace_mock:
                 main(data_dir=data_dir)
 
             process_mock.assert_called_once()
-            update_csvs_mock.assert_not_called()
+            update_csvs_mock.assert_called_once()
+            backfill_mock.assert_called_once_with([], data_dir)
             update_pace_mock.assert_not_called()
             self.assertTrue((data_dir / "activities_last_week.csv").exists())
             self.assertEqual(read_last_activity_id(data_dir), "1")
@@ -93,11 +96,14 @@ class MainPipelineTests(unittest.TestCase):
             ), patch(
                 "strava_analytics.pipeline.update_activity_analysis_csvs"
             ) as update_csvs_mock, patch(
+                "strava_analytics.pipeline.backfill_location_from_summaries", return_value=0
+            ) as backfill_mock, patch(
                 "strava_analytics.pipeline.update_run_pace_analysis_csv"
             ) as update_pace_mock:
                 main(data_dir=data_dir)
 
             update_csvs_mock.assert_called_once()
+            backfill_mock.assert_called_once_with([{"id": 99}], data_dir)
             update_pace_mock.assert_called_once_with(
                 pace_summaries, data_dir / "strava_run_pace_analysis.csv"
             )
@@ -125,6 +131,8 @@ class MainPipelineTests(unittest.TestCase):
                 client, "refresh_access_token", return_value={"access_token": "token"}
             ), patch.object(client, "get_activities", return_value=[]), patch(
                 "strava_analytics.pipeline.process_activities", return_value=(pd.DataFrame(), [])
+            ), patch(
+                "strava_analytics.pipeline.backfill_location_from_summaries", return_value=0
             ):
                 main()
 

@@ -12,6 +12,8 @@ from strava_analytics.activities import (
     compute_hr_zone_stats,
     compute_run_pace_summary_from_streams,
     extract_gear_id,
+    extract_location_fields,
+    extract_start_latlng,
     format_time,
     hr_zone_sec_columns,
     last_full_week_bounds,
@@ -26,6 +28,8 @@ from strava_analytics.csv_io import (
     _drop_header_like_rows,
     activity_analysis_columns,
     activity_analysis_paths,
+    activity_ids_missing_location,
+    backfill_location_from_summaries,
     save_activities_last_week,
     update_activity_analysis_csvs,
     update_run_pace_analysis_csv,
@@ -168,6 +172,20 @@ class PaceFormattingTests(unittest.TestCase):
         self.assertIn("seconds_under_700", columns)
         self.assertIn("avg_hr_over_1130", columns)
 
+    def test_activity_analysis_columns_include_location_for_all_types(self):
+        """Ensure start GPS columns are on every activity-type analysis schema."""
+        location_cols = [
+            "start_lat",
+            "start_lng",
+        ]
+        for activity_type in ("Run", "Ride", "Swim", "Hike"):
+            columns = activity_analysis_columns(activity_type)
+            for col in location_cols:
+                self.assertIn(col, columns)
+            self.assertLess(columns.index("max_pace_sec"), columns.index("start_lat"))
+        self.assertIn("race_distance", activity_analysis_columns("Run"))
+        self.assertNotIn("race_distance", activity_analysis_columns("Hike"))
+
 
 class PaceSummaryTests(unittest.TestCase):
     """Test compute_run_pace_summary_from_streams."""
@@ -286,6 +304,8 @@ class ActivityRowHelperTests(unittest.TestCase):
                 "avg_pace_sec": 600,
                 "max_pace": "08:56",
                 "max_pace_sec": 536,
+                "start_lat": None,
+                "start_lng": None,
                 "race": None,
             },
         )
@@ -314,6 +334,54 @@ class ActivityRowHelperTests(unittest.TestCase):
         self.assertEqual(extract_gear_id({"gear": {"id": "g99"}}), "g99")
         self.assertEqual(extract_gear_id({"gear_id": "g1", "gear": {"id": "g2"}}), "g1")
         self.assertEqual(extract_gear_id({}), "")
+
+    def test_extract_location_fields_when_present(self):
+        """Ensure start GPS is mapped from Strava ``start_latlng``."""
+        fields = extract_location_fields(
+            {
+                "start_latlng": [37.1773, -3.5986],
+            }
+        )
+        self.assertEqual(
+            fields,
+            {
+                "start_lat": 37.1773,
+                "start_lng": -3.5986,
+            },
+        )
+
+    def test_extract_location_fields_when_missing(self):
+        """Ensure missing GPS fields yield null coords."""
+        self.assertEqual(
+            extract_location_fields({}),
+            {
+                "start_lat": None,
+                "start_lng": None,
+            },
+        )
+        self.assertEqual(extract_start_latlng({"start_latlng": []}), (None, None))
+        self.assertEqual(extract_start_latlng({"start_latlng": [None, None]}), (None, None))
+        self.assertEqual(extract_start_latlng({"start_latlng": "bad"}), (None, None))
+
+    def test_activity_base_row_includes_location_fields(self):
+        """Ensure GPS columns are included on the shared analysis row."""
+        row = _activity_base_row(
+            {
+                "id": 456,
+                "name": "Trail Hike",
+                "type": "Hike",
+                "start_date": "2024-06-01T10:00:00Z",
+                "distance": 3218.68,
+                "moving_time": 3600,
+                "elapsed_time": 4000,
+                "total_elevation_gain": 152.4,
+                "average_speed": 0.89,
+                "max_speed": 1.5,
+                "start_latlng": [37.1, -3.6],
+            }
+        )
+        self.assertEqual(row["start_lat"], 37.1)
+        self.assertEqual(row["start_lng"], -3.6)
 
     def test_enrich_run_from_streams_adds_hr_stats_and_pace_summary(self):
         """Ensure run rows gain HR fields/zones and return a pace summary from streams."""
@@ -512,6 +580,41 @@ class ActivityProcessingTests(unittest.TestCase):
         self.assertEqual(result.loc[result["activity_id"] == 301, "race_distance"].iloc[0], "5k")
         self.assertEqual(result.loc[result["activity_id"] == 302, "race_distance"].iloc[0], "Other")
 
+    def test_process_activities_includes_location_for_hikes(self):
+        """Ensure hikes use the shared base row and keep start GPS from summaries."""
+        activities = [
+            {
+                "id": 900,
+                "name": "Trail Hike",
+                "type": "Hike",
+                "start_date": "2024-06-01T10:00:00Z",
+                "distance": 3218.68,
+                "moving_time": 3600,
+                "elapsed_time": 4000,
+                "total_elevation_gain": 152.4,
+                "average_speed": 0.89,
+                "max_speed": 1.5,
+                "start_latlng": [37.1, -3.6],
+            }
+        ]
+        get_streams = Mock()
+        get_activity_zones = Mock()
+
+        result, pace_summaries = process_activities(
+            activities,
+            get_streams,
+            last_activity_id="0",
+            get_activity_zones=get_activity_zones,
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["type"], "Hike")
+        self.assertEqual(result.iloc[0]["start_lat"], 37.1)
+        self.assertEqual(result.iloc[0]["start_lng"], -3.6)
+        self.assertEqual(pace_summaries, [])
+        get_streams.assert_not_called()
+        get_activity_zones.assert_not_called()
+
 
 class RaceDistanceLabelTests(unittest.TestCase):
     """Test race_distance_label buckets."""
@@ -683,19 +786,247 @@ class CsvProcessingTests(unittest.TestCase):
         self.assertEqual(run_df.iloc[0]["name"], "Updated Run")
         self.assertEqual(float(run_df.iloc[0]["avg_hr"]), 145.0)
 
-    def test_update_activity_analysis_csvs_skips_writes_for_empty_dataframe(self):
-        """Ensure an empty activity dataframe does not rewrite analysis files."""
+    def test_update_activity_analysis_csvs_migrates_schema_for_empty_dataframe(self):
+        """Ensure an empty activity dataframe still upgrades existing CSV headers."""
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir)
-            for activity_type in ["Run", "Ride", "Swim", "Hike"]:
-                path = output_dir / f"strava_{activity_type.lower()}_analysis.csv"
-                pd.DataFrame(columns=activity_analysis_columns(activity_type)).to_csv(path, index=False)
-                path.write_text(path.read_text() + "# sentinel\n")
+            stale_columns = [
+                "activity_id",
+                "name",
+                "type",
+                "date",
+                "distance_miles",
+                "moving_time_min",
+                "elapsed_time_min",
+                "elevation_gain_ft",
+                "avg_pace",
+                "avg_pace_sec",
+                "max_pace",
+                "max_pace_sec",
+            ]
+            ride_path = output_dir / "strava_ride_analysis.csv"
+            pd.DataFrame(
+                [
+                    {
+                        "activity_id": "1",
+                        "name": "Old Ride",
+                        "type": "Ride",
+                        "date": "2024-01-01T00:00:00Z",
+                        "distance_miles": "10.0",
+                        "moving_time_min": "00:40:00",
+                        "elapsed_time_min": "00:40:00",
+                        "elevation_gain_ft": "100",
+                        "avg_pace": "04:00",
+                        "avg_pace_sec": "240",
+                        "max_pace": "03:00",
+                        "max_pace_sec": "180",
+                    }
+                ],
+                columns=stale_columns,
+            ).to_csv(ride_path, index=False)
 
             update_activity_analysis_csvs(pd.DataFrame(), output_dir)
 
-            for path in activity_analysis_paths(output_dir):
-                self.assertIn("# sentinel", path.read_text())
+            ride_df = pd.read_csv(ride_path)
+            for col in [
+                "gear_id",
+                "start_lat",
+                "start_lng",
+            ]:
+                self.assertIn(col, ride_df.columns)
+            self.assertEqual(ride_df["activity_id"].astype(str).tolist(), ["1"])
+            # Types with no existing file and no new rows stay uncreated.
+            self.assertFalse((output_dir / "strava_run_analysis.csv").exists())
+
+    def test_update_activity_analysis_csvs_migrates_untouched_types(self):
+        """Ensure types without new rows still get schema columns when others update."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            stale_ride = pd.DataFrame(
+                [
+                    {
+                        "activity_id": "9",
+                        "name": "Old Ride",
+                        "type": "Ride",
+                        "date": "2024-01-01T00:00:00Z",
+                        "distance_miles": "10.0",
+                        "moving_time_min": "00:40:00",
+                        "elapsed_time_min": "00:40:00",
+                        "elevation_gain_ft": "100",
+                        "avg_pace": "04:00",
+                        "avg_pace_sec": "240",
+                        "max_pace": "03:00",
+                        "max_pace_sec": "180",
+                    }
+                ]
+            )
+            stale_ride.to_csv(output_dir / "strava_ride_analysis.csv", index=False)
+
+            new_df = pd.DataFrame(
+                [
+                    {
+                        "activity_id": 123,
+                        "name": "New Run",
+                        "type": "Run",
+                        "date": "2024-02-01T00:00:00Z",
+                        "distance_miles": 1.0,
+                        "moving_time_min": "00:10:00",
+                        "elapsed_time_min": "00:10:00",
+                        "elevation_gain_ft": 0.0,
+                        "avg_pace": "10:00",
+                        "avg_pace_sec": 600,
+                        "max_pace": "09:00",
+                        "max_pace_sec": 540,
+                        "start_lat": 37.1,
+                        "start_lng": -3.6,
+                        "avg_hr": 140.0,
+                        "max_hr": 160,
+                        "%_easy": 50.0,
+                        "mt_min_easy": 5.0,
+                        "mt_min_hard": 5.0,
+                        "race": False,
+                    }
+                ]
+            )
+
+            update_activity_analysis_csvs(new_df, output_dir)
+
+            ride_df = pd.read_csv(output_dir / "strava_ride_analysis.csv")
+            run_df = pd.read_csv(output_dir / "strava_run_analysis.csv")
+
+        self.assertNotIn("location_city", ride_df.columns)
+        self.assertIn("start_lat", ride_df.columns)
+        self.assertEqual(ride_df["activity_id"].astype(str).tolist(), ["9"])
+        self.assertEqual(run_df.iloc[0]["start_lat"], 37.1)
+
+    def test_backfill_location_from_summaries_fills_empty_hike_coords(self):
+        """Ensure already-synced hikes get GPS when list summaries reappear."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            hike_path = output_dir / "strava_hike_analysis.csv"
+            pd.DataFrame(
+                [
+                    {
+                        "activity_id": "20061981582",
+                        "name": "Fábrica de la Luz",
+                        "type": "Hike",
+                        "gear_id": "",
+                        "date": "2026-09-06T10:36:54Z",
+                        "distance_miles": "8.1",
+                        "moving_time_min": "03:07:08",
+                        "elapsed_time_min": "03:33:10",
+                        "elevation_gain_ft": "1866.8",
+                        "avg_pace": "23:06",
+                        "avg_pace_sec": "1386",
+                        "max_pace": "11:39",
+                        "max_pace_sec": "699",
+                        "start_lat": "",
+                        "start_lng": "",
+                    }
+                ]
+            ).to_csv(hike_path, index=False)
+
+            run_path = output_dir / "strava_run_analysis.csv"
+            pd.DataFrame(
+                [
+                    {
+                        "activity_id": "20069714807",
+                        "name": "Morning Run",
+                        "type": "Run",
+                        "gear_id": "g1",
+                        "date": "2026-09-07T05:56:22Z",
+                        "distance_miles": "3.0",
+                        "moving_time_min": "00:31:26",
+                        "elapsed_time_min": "00:32:28",
+                        "elevation_gain_ft": "387.14",
+                        "avg_pace": "10:27",
+                        "avg_pace_sec": "627",
+                        "max_pace": "07:39",
+                        "max_pace_sec": "459",
+                        "start_lat": "37.17453",
+                        "start_lng": "-3.589692",
+                        "avg_hr": "",
+                        "max_hr": "",
+                        "%_easy": "",
+                        "mt_min_easy": "",
+                        "mt_min_hard": "",
+                        "hr_zone_1_sec": "",
+                        "hr_zone_2_sec": "",
+                        "hr_zone_3_sec": "",
+                        "hr_zone_4_sec": "",
+                        "hr_zone_5_sec": "",
+                        "race": "False",
+                        "race_distance": "",
+                    }
+                ]
+            ).to_csv(run_path, index=False)
+
+            summaries = [
+                {
+                    "id": 20069714807,
+                    "type": "Run",
+                    "start_latlng": [37.17453, -3.589692],
+                },
+                {
+                    "id": 20061981582,
+                    "type": "Hike",
+                    "start_latlng": [37.05, -3.55],
+                },
+            ]
+
+            filled = backfill_location_from_summaries(summaries, output_dir)
+
+            hike_df = pd.read_csv(hike_path)
+            run_df = pd.read_csv(run_path)
+
+        self.assertEqual(filled, 1)
+        self.assertEqual(float(hike_df.iloc[0]["start_lat"]), 37.05)
+        self.assertEqual(float(hike_df.iloc[0]["start_lng"]), -3.55)
+        # Existing run coords must not be overwritten.
+        self.assertEqual(float(run_df.iloc[0]["start_lat"]), 37.17453)
+
+    def test_activity_ids_missing_location_finds_empty_coords(self):
+        """Ensure missing-location scan includes empty GPS and pre-schema files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            pd.DataFrame(
+                [
+                    {
+                        "activity_id": "1",
+                        "name": "No GPS",
+                        "type": "Hike",
+                        "date": "2024-01-01T00:00:00Z",
+                        "distance_miles": "1.0",
+                        "moving_time_min": "00:30:00",
+                        "elapsed_time_min": "00:30:00",
+                        "elevation_gain_ft": "10",
+                        "avg_pace": "30:00",
+                        "avg_pace_sec": "1800",
+                        "max_pace": "20:00",
+                        "max_pace_sec": "1200",
+                        "start_lat": "",
+                        "start_lng": "",
+                    },
+                    {
+                        "activity_id": "2",
+                        "name": "Has GPS",
+                        "type": "Hike",
+                        "date": "2024-01-02T00:00:00Z",
+                        "distance_miles": "1.0",
+                        "moving_time_min": "00:30:00",
+                        "elapsed_time_min": "00:30:00",
+                        "elevation_gain_ft": "10",
+                        "avg_pace": "30:00",
+                        "avg_pace_sec": "1800",
+                        "max_pace": "20:00",
+                        "max_pace_sec": "1200",
+                        "start_lat": "37.1",
+                        "start_lng": "-3.6",
+                    },
+                ]
+            ).to_csv(output_dir / "strava_hike_analysis.csv", index=False)
+
+            self.assertEqual(activity_ids_missing_location(output_dir), {"1"})
 
     def test_update_activity_analysis_csvs_creates_missing_file(self):
         """Ensure missing analysis CSVs are created on first update."""

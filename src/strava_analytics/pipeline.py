@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
+
+# Allow `python src/strava_analytics/pipeline.py` without installing the package.
+# Prefer: PYTHONPATH=src python -m strava_analytics.pipeline
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from strava_analytics.activities import process_activities
 from strava_analytics.client import REPO_ROOT, StravaClient
 from strava_analytics.csv_io import (
+    backfill_location_from_summaries,
     save_activities_last_week,
     update_activity_analysis_csvs,
     update_run_pace_analysis_csv,
@@ -41,10 +48,20 @@ def main(data_dir: Optional[Path] = None) -> None:
         client.get_activity_zones,
     )
 
+    # Always refresh analysis CSV schemas (e.g. new location columns) even when
+    # there are no new rows, so older type files are not left on a stale header.
+    update_activity_analysis_csvs(df, data_dir)
+
+    # List pages include activities at/below the watermark. Patch empty GPS on
+    # those already-synced rows (common after adding start_lat/start_lng) without
+    # re-fetching streams or lowering highest_activity_id.
+    filled = backfill_location_from_summaries(activities, data_dir)
+    if filled:
+        print(f"Backfilled start_lat/start_lng on {filled} existing row(s).")
+
     if df.empty:
         print("No new activities to process.")
     else:
-        update_activity_analysis_csvs(df, data_dir)
         write_last_activity_id(data_dir, df["activity_id"].max())
 
         pace_output = data_dir / "strava_run_pace_analysis.csv"

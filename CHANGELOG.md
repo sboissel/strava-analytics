@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Dashboard**
+
+- **Hiking**: new page with highlight badges (all-time miles/elevation with YTD tooltips, longest hike, greatest elevation, most miles in a consecutive-day trip), Show By period miles/elevation bars, and grade-adjusted pace (GAP) markers with a trend line.
+
+**Pipeline / data**
+
+- Activity analysis CSVs (run / ride / swim / hike) include `start_lat` and `start_lng` from Strava list/summary `start_latlng` when GPS is present. Incremental sync only fully rewrites newly processed activities; each sync also backfills empty coords on already-synced rows when those activities reappear on the fetched list pages (no extra detail calls). For a full historical GPS backfill without re-fetching streams, run `PYTHONPATH=src python -m strava_analytics.backfill_locations` locally, or play the manual GitLab CI job `backfill_locations` (commits analysis CSVs only; does not touch `highest_activity_id.txt`). Existing per-type CSVs are reindexed to the current schema even when a sync has no new rows of that type.
+
+### Fixed
+
+**Pipeline / data**
+
+- Incremental CSV merge no longer skips ride/swim/hike (or any type) schema upgrades when a run only produces new rows for another activity type.
+- Empty `start_lat` / `start_lng` on already-synced rows (e.g. recent hikes processed before GPS columns existed) are filled from list/summary payloads on later syncs, so new runs no longer look uniquely “located” versus nearby hikes.
+
 ## [1.5.4] — 2026-09-07
 
 ### Added

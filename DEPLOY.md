@@ -7,9 +7,9 @@ This repository lives on **GitLab** as the source of truth. A GitLab push mirror
 | GitLab (source) | `https://gitlab.com/sandrineboissel/strava-analytics` |
 | GitHub (mirror) | `https://github.com/sboissel/strava-analytics` |
 
-GitLab CI (`.gitlab-ci.yml`) runs tests on push and a daily scheduled sync that commits updated `data/` files back to `main`. Pushing to GitLab (including those CI commits) is enough for the mirror to update GitHub.
+GitLab CI (`.gitlab-ci.yml`) runs tests on push and a daily scheduled sync that commits updated `data/` files back to `main`. A manual `backfill_locations` job can one-shot fill historical `start_lat` / `start_lng` on those CSVs without resetting the sync watermark. Pushing to GitLab (including those CI commits) is enough for the mirror to update GitHub.
 
-See the **Daily GitLab sync** section in [README.md](README.md) for CI variables and the nightly pipeline schedule.
+See **Backfill start GPS** and **Daily GitLab sync** in [README.md](README.md) for CI variables, the nightly schedule, and how to Play the backfill job.
 
 ## 1. Create the GitHub repository
 

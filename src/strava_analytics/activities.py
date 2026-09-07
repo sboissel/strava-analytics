@@ -310,6 +310,37 @@ def extract_gear_id(act: Mapping[str, Any]) -> str:
     return ""
 
 
+def extract_start_latlng(act: Mapping[str, Any]) -> Tuple[Optional[float], Optional[float]]:
+    """Return start latitude/longitude from a Strava ``start_latlng`` value.
+
+    Strava summaries expose ``start_latlng`` as ``[lat, lng]``. Empty lists,
+    nulls, or non-numeric values yield ``(None, None)``.
+    """
+    latlng = act.get("start_latlng")
+    if not isinstance(latlng, (list, tuple)) or len(latlng) < 2:
+        return None, None
+    lat, lng = latlng[0], latlng[1]
+    if lat is None or lng is None:
+        return None, None
+    try:
+        return float(lat), float(lng)
+    except (TypeError, ValueError):
+        return None, None
+
+
+def extract_location_fields(act: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return start GPS columns from an activity list/summary payload.
+
+    Uses ``start_latlng`` only (no detail fetch). Missing or invalid coords
+    yield ``None`` for ``start_lat`` / ``start_lng``.
+    """
+    start_lat, start_lng = extract_start_latlng(act)
+    return {
+        "start_lat": start_lat,
+        "start_lng": start_lng,
+    }
+
+
 def _activity_base_row(act: Dict[str, Any]) -> Dict[str, Any]:
     """Build the shared activity row fields from a raw Strava activity payload."""
     avg_pace_sec = speed_to_pace_seconds(act["average_speed"])
@@ -328,6 +359,7 @@ def _activity_base_row(act: Dict[str, Any]) -> Dict[str, Any]:
         "avg_pace_sec": avg_pace_sec,
         "max_pace": format_time(max_pace_sec, include_hours=False),
         "max_pace_sec": max_pace_sec,
+        **extract_location_fields(act),
         "race": None,
     }
 
