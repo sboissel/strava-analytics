@@ -82,12 +82,13 @@ class ShoeWearColorTests(unittest.TestCase):
 
 
 class ShoeKpiTooltipTests(unittest.TestCase):
-    """Shoes ⓘ copy explains baseline + activity miles."""
+    """Shoes ⓘ copy explains miles run in the shoes."""
 
-    def test_definition_mentions_baseline_and_activity_gear(self):
+    def test_definition_mentions_miles_run_on_shoes(self):
         tip = shoe_kpi_tooltip()
-        self.assertIn("Baseline miles", tip)
-        self.assertIn("gear ID", tip)
+        self.assertIn("Total miles run in these shoes.", tip)
+        self.assertNotIn("Baseline", tip)
+        self.assertNotIn("gear ID", tip)
         self.assertIn("400", tip)
 
 

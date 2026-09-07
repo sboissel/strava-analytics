@@ -670,10 +670,34 @@ class TrainingChartTests(unittest.TestCase):
             self.assertNotIn("Accounted:", trace.hovertemplate)
             self.assertNotIn("HR coverage:", trace.hovertemplate)
         # First period: 8 easy / 2 hard / 0 unaccounted → 10 accounted miles.
-        self.assertEqual(list(easy.customdata[0][2:]), [8.0, 2.0, 0.0, 10.0])
+        self.assertEqual(list(easy.customdata[0][2:6]), [8.0, 2.0, 0.0, 10.0])
         self.assertIn("Easy: %{y:.0%}", easy.hovertemplate)
-        self.assertIn("Moderate/Hard: %{y:.0%}", hard.hovertemplate)
+        # Hard uses customdata[6] (hard_frac); %{y} with base would show ~100%.
+        self.assertIn("Moderate/Hard: %{customdata[6]:.0%}", hard.hovertemplate)
+        self.assertNotIn("Moderate/Hard: %{y", hard.hovertemplate)
         self.assertEqual(fig.layout.yaxis.title.text, "Fraction")
+
+    def test_compliance_hard_hover_shows_hard_frac_not_stack_top(self):
+        """Moderate/Hard hover % must be hard_frac (100 − easy%), not base+y ≈ 100%."""
+        period_df = _training_period_df()
+        # 72% easy / 28% hard — stack top is 100%; hover must show 28%, not 100%.
+        period_df.loc[0, ["easy_frac", "hard_frac"]] = [0.72, 0.28]
+        period_df.loc[1, ["easy_frac", "hard_frac"]] = [0.85, 0.15]
+        fig = compliance_chart(period_df, "Week")
+        easy, hard, coverage = fig.data[0], fig.data[1], fig.data[2]
+        self.assertIn("Easy: %{y:.0%}", easy.hovertemplate)
+        self.assertIn("Moderate/Hard: %{customdata[6]:.0%}", hard.hovertemplate)
+        self.assertNotIn("Moderate/Hard: %{y", hard.hovertemplate)
+        self.assertAlmostEqual(float(hard.customdata[0][6]), 0.28)
+        self.assertAlmostEqual(float(hard.customdata[1][6]), 0.15)
+        # hard_frac matches 1 − easy_frac when the stack fills to 1.
+        self.assertAlmostEqual(
+            float(hard.customdata[0][6]), 1.0 - float(easy.y[0])
+        )
+        # Coverage hover still uses %{y} and must not pick up hard-frac wording.
+        self.assertIn("HR coverage: %{y:.0%}", coverage.hovertemplate)
+        self.assertNotIn("Moderate/Hard:", coverage.hovertemplate)
+        self.assertNotIn("%{customdata[6]", coverage.hovertemplate)
 
     def test_compliance_chart_coverage_bar_encodes_hr_share(self):
         """Thin gray bar height = accounted/total miles; stack stays full opacity."""
@@ -703,7 +727,8 @@ class TrainingChartTests(unittest.TestCase):
         self.assertAlmostEqual(float(coverage.width), 0.08)
         self.assertAlmostEqual(float(coverage.offset), 0.42)
         self.assertAlmostEqual(float(coverage.width) * 10, float(easy.width))
-        self.assertFalse(coverage.showlegend)
+        self.assertTrue(coverage.showlegend)
+        self.assertEqual(coverage.legendrank, 3)
         self.assertAlmostEqual(float(coverage.y[0]), 0.1)
         self.assertAlmostEqual(float(coverage.y[1]), 1.0)
         self.assertIn("HR coverage: %{y:.0%}", coverage.hovertemplate)
@@ -750,8 +775,9 @@ class TrainingChartTests(unittest.TestCase):
         self.assertAlmostEqual(float(hard.y[1]), 0.3)
         # Coverage bar at 0% when all miles are unaccounted.
         self.assertAlmostEqual(float(coverage.y[0]), 0.0)
-        # Hover customdata: easy/hard/unaccounted miles + accounted miles.
-        self.assertEqual(list(easy.customdata[0][2:]), [0.0, 0.0, 10.0, 0.0])
+        # Hover customdata: easy/hard/unaccounted miles + accounted miles (+ NaN hard_frac).
+        self.assertEqual(list(easy.customdata[0][2:6]), [0.0, 0.0, 10.0, 0.0])
+        self.assertIsNone(easy.customdata[0][6])
 
     def test_compliance_legend_is_horizontal_under_title(self):
         """80:20 Easy / Moderate/Hard key sits under the HTML title, not a side legend."""
@@ -771,13 +797,16 @@ class TrainingChartTests(unittest.TestCase):
         # Room for HTML title+ⓘ above the horizontal key (was 72 when Plotly owned the title).
         self.assertGreaterEqual(COMPLIANCE_MARGIN_T, 96)
         self.assertGreater(COMPLIANCE_MARGIN_T, TRAINING_MARGIN_T)
-        # Legend order Easy → Moderate/Hard; coverage bar is hidden from the key.
+        # Legend order Easy → Moderate/Hard → HR coverage.
         bars = [t for t in fig.data if t.type == "bar"]
         self.assertEqual([t.name for t in bars], ["Easy", "Moderate/Hard", "HR coverage"])
         legend_bars = [t for t in bars if t.showlegend is not False]
-        self.assertEqual([t.name for t in legend_bars], ["Easy", "Moderate/Hard"])
-        self.assertEqual([t.legendrank for t in legend_bars], [1, 2])
-        self.assertFalse(bars[2].showlegend)
+        self.assertEqual(
+            [t.name for t in legend_bars],
+            ["Easy", "Moderate/Hard", "HR coverage"],
+        )
+        self.assertEqual([t.legendrank for t in legend_bars], [1, 2, 3])
+        self.assertTrue(bars[2].showlegend)
 
     def test_compliance_info_html_explains_8020(self):
         """ⓘ after the title covers polarized idea, zone split, and bar %."""
@@ -1073,6 +1102,13 @@ class TrainingChartThemeTests(unittest.TestCase):
         ).read_text()
         self.assertNotIn("race_weeks_snap_html", metrics)
         self.assertNotIn("race_week_strip", metrics)
+        self.assertIn("latest_activity_label", metrics)
+        self.assertIn("Latest activity", metrics)
+        self.assertLess(metrics.find("panel-title"), metrics.find("Latest activity"))
+        self.assertLess(
+            metrics.find("Latest activity"),
+            metrics.find("render_metrics_section_nav()"),
+        )
 
     def test_fitness_page_has_no_mileage_heatmap(self):
         """Mileage heatmap lives on Training, not Fitness."""
@@ -1720,7 +1756,7 @@ class FitnessPaceHrChartTests(unittest.TestCase):
         self.assertIn("aerobic_efficiency_line_chart(efficiency_periods, grain)", fitness)
 
     def test_fitness_pace_multiselect_css_uses_teal_chips_and_readable_width(self):
-        """Pace chips teal; Pace Range ~90% (Show By 75%); wrap, hug single chip."""
+        """Pace chips teal; equal-half controls fill column; wrap, hug single chip."""
         from dashboard.theme import INK, PACE_MULTISELECT_CHIP
 
         self.assertIn(".st-key-insights_pace_bins", GLOBAL_CSS)
@@ -1732,7 +1768,7 @@ class FitnessPaceHrChartTests(unittest.TestCase):
         self.assertIn(f"color: {INK} !important", chip_block)
         self.assertIn("text-overflow: clip !important", chip_block)
         self.assertIn("min-width: 0 !important", chip_block)
-        # Show By stays compact 75%; Pace Range slightly wider for “Choose options”.
+        # Shared compact panels still use 75%; Fitness overrides both halves to 100%.
         self.assertIn(
             '[data-testid="stColumn"]:has(.controls-panel--compact) [data-testid="stMultiSelect"]',
             GLOBAL_CSS,
@@ -1743,9 +1779,12 @@ class FitnessPaceHrChartTests(unittest.TestCase):
             ".st-key-insights_pace_bins [data-testid=\"stMultiSelect\"]",
             GLOBAL_CSS,
         )
-        self.assertIn("max-width: 90% !important", GLOBAL_CSS)
-        self.assertIn("width: 90% !important", GLOBAL_CSS)
         self.assertIn(".fitness-pace-bins-anchor", GLOBAL_CSS)
+        self.assertIn(
+            '[data-testid="stColumn"]:has(.insights-controls-panel) '
+            ".st-key-insights_pace_bins [data-testid=\"stMultiSelect\"]",
+            GLOBAL_CSS,
+        )
         self.assertNotIn("min-width: 11.5rem !important", GLOBAL_CSS)
         self.assertNotIn("max-width: 14.5rem", GLOBAL_CSS)
         self.assertIn("box-sizing: border-box !important", GLOBAL_CSS)
@@ -1780,6 +1819,30 @@ class FitnessPaceHrChartTests(unittest.TestCase):
         self.assertIn("border-color: rgba(80, 155, 143, 0.20) !important;", card_block)
         self.assertIn("inset 0 1px 0 rgba(255, 255, 255, 0.75)", card_block)
         self.assertIn("padding: 1.2rem 1.35rem 1.3rem !important;", card_block)
+        # Wider than shared compact 28rem so date pickers / Showing fit.
+        self.assertIn("max-width: 40rem;", card_block)
+        self.assertIn("width: 100% !important;", card_block)
+        self.assertIn("flex: 1 1 40rem !important;", card_block)
+        # Marked split row: equal tracks + geometric center divider.
+        self.assertIn(".insights-controls-split", GLOBAL_CSS)
+        self.assertIn(
+            '[data-testid="stElementContainer"]:has(.insights-controls-split)',
+            GLOBAL_CSS,
+        )
+        self.assertIn(
+            "grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;",
+            GLOBAL_CSS,
+        )
+        self.assertIn("left: 50%;", GLOBAL_CSS)
+        self.assertIn("transform: translateX(-50%);", GLOBAL_CSS)
+        self.assertNotIn(
+            "left: calc(100% + var(--layout-gap) / 2);",
+            GLOBAL_CSS,
+        )
+        self.assertNotIn(
+            "left: calc(75% + (25% + var(--layout-gap)) / 2);",
+            GLOBAL_CSS,
+        )
         # No teal keyline before the Controls label (removed; border tint is enough).
         self.assertNotIn(".controls-title::before", GLOBAL_CSS)
         # Border teal matches mileage / Form series (`MILEAGE_BAR` = #509B8F).

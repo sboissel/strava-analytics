@@ -273,13 +273,25 @@ def _compliance_hr_coverage_fracs(period_df: pd.DataFrame) -> list[float]:
 
 
 def _compliance_customdata(period_df: pd.DataFrame, grain: str) -> list[list]:
-    """80:20 hover: tip, in-progress note, easy/hard/unaccounted miles, accounted mi."""
+    """80:20 hover: tip, in-progress note, miles, accounted mi, hard share.
+
+    Indices: ``[0]`` tip, ``[1]`` in-progress HTML, ``[2]`` easy mi, ``[3]`` hard mi,
+    ``[4]`` unaccounted mi, ``[5]`` accounted mi, ``[6]`` hard_frac (0–1).
+
+    Hard share is stored explicitly because Plotly bar ``%{y}`` with ``base`` set
+    reports the stack top (base + height ≈ 100%), not the hard segment height.
+    """
     base = _bar_period_customdata(period_df, grain)
     easy, hard, unaccounted = _compliance_mile_breakdown(period_df)
+    hard_fracs = period_df["hard_frac"].tolist()
     rows: list[list] = []
-    for (tip, note), e, h, u in zip(base, easy, hard, unaccounted):
+    for (tip, note), e, h, u, hard_frac in zip(
+        base, easy, hard, unaccounted, hard_fracs
+    ):
         accounted_miles = float(e) + float(h)
-        rows.append([tip, note, e, h, u, accounted_miles])
+        # NaN hard_frac → None so Plotly omits a bogus hard % in hover.
+        hf = None if pd.isna(hard_frac) else float(hard_frac)
+        rows.append([tip, note, e, h, u, accounted_miles, hf])
     return rows
 
 
@@ -1014,7 +1026,8 @@ def compliance_chart(
             customdata=customdata,
             hovertemplate=(
                 "<b>%{customdata[0]}</b>%{customdata[1]}"
-                "<br>Moderate/Hard: %{y:.0%}"
+                # Use customdata hard_frac — %{y} with base is stack top (~100%).
+                "<br>Moderate/Hard: %{customdata[6]:.0%}"
                 f"{_COMPLIANCE_MILES_HOVER}"
             ),
         )
@@ -1030,7 +1043,8 @@ def compliance_chart(
             offset=_COMPLIANCE_COVERAGE_OFFSET,
             offsetgroup=_COMPLIANCE_COVERAGE_OFFSETGROUP,
             marker=dict(color=COMPLIANCE_COVERAGE_BAR),
-            showlegend=False,
+            legendrank=3,
+            showlegend=True,
             customdata=customdata,
             hovertemplate=(
                 "<b>%{customdata[0]}</b>%{customdata[1]}"
