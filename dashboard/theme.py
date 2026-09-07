@@ -2022,8 +2022,7 @@ GLOBAL_CSS = f"""
     max-width: 75% !important;
     width: 75% !important;
   }}
-  /* Fitness Pace Range: wider than Show By’s 75% so “Choose options” + chips
-     fit; ~90% stays inside the card (avoid 100% / min-width floors that spilled).
+  /* Fitness Pace Range: fill the equal right half (same as Show By on the left).
      Chips wrap and grow height. Streamlit tags use theme.primary (coral/red)
      — force soft teal + ink. */
   .st-key-insights_pace_bins {{
@@ -2044,8 +2043,8 @@ GLOBAL_CSS = f"""
     + [data-testid="stElementContainer"] [data-testid="stMultiSelect"] div:has(> input),
   [data-testid="stElementContainer"]:has(.fitness-pace-bins-anchor)
     + [data-testid="stElementContainer"] div[data-baseweb="select"] > div {{
-    max-width: 90% !important;
-    width: 90% !important;
+    max-width: 100% !important;
+    width: 100% !important;
     min-width: 0 !important;
     box-sizing: border-box !important;
   }}
@@ -2142,6 +2141,9 @@ GLOBAL_CSS = f"""
     overflow-y: visible;
   }}
   .controls-select-narrow {{
+    display: none;
+  }}
+  .insights-controls-split {{
     display: none;
   }}
   .controls-meta {{
@@ -2241,7 +2243,9 @@ GLOBAL_CSS = f"""
   }}
   /* Fitness Controls: same card language as the rest of the page, tuned so the
      filter card reads as chrome next to the charts — soft top-lit surface,
-     teal-tinted hairline, and a little more room around the two filter columns. */
+     teal-tinted hairline, and a little more room around the two filter columns.
+     Wider than the shared compact 28rem so Start/End pickers and Showing labels
+     fit without clipping against the center divider. */
   [data-testid="stColumn"]:has(.insights-controls-panel),
   [data-testid="column"]:has(.insights-controls-panel) {{
     background:
@@ -2255,36 +2259,115 @@ GLOBAL_CSS = f"""
       inset 0 1px 0 rgba(255, 255, 255, 0.75),
       0 10px 30px rgba(21, 32, 40, 0.05) !important;
     padding: 1.2rem 1.35rem 1.3rem !important;
+    /* Override compact fit-content/28rem: fill the page column up to this cap
+       so the two equal filter columns (and center divider) stay balanced. */
+    width: 100% !important;
+    max-width: 40rem;
+    flex: 1 1 40rem !important;
   }}
-  /* Inner 2-col row: shrink-wrap columns; divider sits in visual whitespace. */
-  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"],
-  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] {{
+  /* Marked Entire Dashboard | Average HR row only (not nested Start/End cols).
+     Equal 1fr tracks + row-centered ::after = true geometric center divider.
+     Support both Streamlit wraps: columns as next ElementContainer, or a
+     direct stHorizontalBlock sibling. */
+  [data-testid="stElementContainer"]:has(.insights-controls-split)
+    + [data-testid="stElementContainer"]
+    [data-testid="stHorizontalBlock"],
+  [data-testid="stElementContainer"]:has(.insights-controls-split)
+    + [data-testid="stHorizontalBlock"] {{
+    position: relative !important;
     display: grid !important;
-    grid-template-columns: minmax(0, max-content) minmax(0, max-content) !important;
-    width: max-content !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+    width: 100% !important;
     max-width: 100%;
     align-items: stretch !important;
     gap: var(--layout-gap) !important;
   }}
-  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
-  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"],
-  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
-  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
-    width: auto !important;
-    min-width: 10.5rem;
-    max-width: 100%;
+  [data-testid="stElementContainer"]:has(.insights-controls-split)
+    + [data-testid="stElementContainer"]
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"],
+  [data-testid="stElementContainer"]:has(.insights-controls-split)
+    + [data-testid="stElementContainer"]
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="column"],
+  [data-testid="stElementContainer"]:has(.insights-controls-split)
+    + [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"],
+  [data-testid="stElementContainer"]:has(.insights-controls-split)
+    + [data-testid="stHorizontalBlock"]
+    > [data-testid="column"] {{
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
     flex: unset !important;
     align-self: stretch !important;
   }}
-  /* Match left-column dead zone: labels/meta use same 75% width as selectboxes. */
+  /* True panel center — independent of widget widths inside each half. */
+  [data-testid="stElementContainer"]:has(.insights-controls-split)
+    + [data-testid="stElementContainer"]
+    [data-testid="stHorizontalBlock"]::after,
+  [data-testid="stElementContainer"]:has(.insights-controls-split)
+    + [data-testid="stHorizontalBlock"]::after {{
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 1px;
+    height: calc(100% + 0.2rem);
+    background: {LINE};
+    pointer-events: none;
+    z-index: 1;
+  }}
+  /* Same content width in both halves so the card does not look left-heavy. */
   [data-testid="stColumn"]:has(.insights-controls-panel) .controls-section-label,
   [data-testid="column"]:has(.insights-controls-panel) .controls-section-label,
   [data-testid="stColumn"]:has(.insights-controls-panel) .controls-filter-label,
   [data-testid="column"]:has(.insights-controls-panel) .controls-filter-label,
   [data-testid="stColumn"]:has(.insights-controls-panel) .controls-meta,
-  [data-testid="column"]:has(.insights-controls-panel) .controls-meta {{
-    width: 75%;
-    max-width: 75%;
+  [data-testid="column"]:has(.insights-controls-panel) .controls-meta,
+  [data-testid="stColumn"]:has(.insights-controls-panel) .controls-meta-divider,
+  [data-testid="column"]:has(.insights-controls-panel) .controls-meta-divider {{
+    width: 100%;
+    max-width: 100%;
+  }}
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stSelectbox"],
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stSelectbox"],
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stSelectbox"] div:has(> input),
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stMultiSelect"],
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stMultiSelect"],
+  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stMultiSelect"] div:has(> input),
+  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stMultiSelect"] div:has(> input),
+  [data-testid="stColumn"]:has(.insights-controls-panel) div[data-baseweb="select"] > div,
+  [data-testid="column"]:has(.insights-controls-panel) div[data-baseweb="select"] > div,
+  [data-testid="stColumn"]:has(.insights-controls-panel) .st-key-insights_pace_bins [data-testid="stMultiSelect"],
+  [data-testid="column"]:has(.insights-controls-panel) .st-key-insights_pace_bins [data-testid="stMultiSelect"],
+  [data-testid="stColumn"]:has(.insights-controls-panel) .st-key-insights_pace_bins [data-testid="stMultiSelect"] div:has(> input),
+  [data-testid="column"]:has(.insights-controls-panel) .st-key-insights_pace_bins [data-testid="stMultiSelect"] div:has(> input),
+  [data-testid="stColumn"]:has(.insights-controls-panel) .st-key-insights_pace_bins div[data-baseweb="select"] > div,
+  [data-testid="column"]:has(.insights-controls-panel) .st-key-insights_pace_bins div[data-baseweb="select"] > div,
+  [data-testid="stElementContainer"]:has(.fitness-pace-bins-anchor)
+    + [data-testid="stElementContainer"] [data-testid="stMultiSelect"],
+  [data-testid="stElementContainer"]:has(.fitness-pace-bins-anchor)
+    + [data-testid="stElementContainer"] [data-testid="stMultiSelect"] div:has(> input),
+  [data-testid="stElementContainer"]:has(.fitness-pace-bins-anchor)
+    + [data-testid="stElementContainer"] div[data-baseweb="select"] > div {{
+    width: 100% !important;
+    max-width: 100% !important;
+  }}
+  /* Start/End pickers fill the left half (same as Show By). */
+  [data-testid="stColumn"]:has(.insights-controls-panel)
+    [data-testid="stElementContainer"]:has(.period-range-inputs)
+    + [data-testid="stElementContainer"]
+    [data-testid="stHorizontalBlock"] {{
+    width: 100% !important;
+    max-width: 100% !important;
+  }}
+  /* Prefer one-line Showing / Latest activity dates once the card is wide enough. */
+  [data-testid="stColumn"]:has(.insights-controls-panel) .controls-meta .meta-val,
+  [data-testid="column"]:has(.insights-controls-panel) .controls-meta .meta-val {{
+    white-space: nowrap;
   }}
   /* Performance / Training / Fitness: side-by-side date (or year) pickers */
   [data-testid="stElementContainer"]:has(.race-date-inputs)
@@ -2341,34 +2424,6 @@ GLOBAL_CSS = f"""
   .race-date-inputs,
   .period-range-inputs {{
     display: none;
-  }}
-  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1),
-  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1),
-  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1),
-  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1) {{
-    position: relative !important;
-  }}
-  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2),
-  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2),
-  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2),
-  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) {{
-    border-left: none !important;
-    padding-left: 0 !important;
-    margin-left: 0 !important;
-  }}
-  /* Center between 75%-width left content and right column; row height + 0.1rem. */
-  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1)::after,
-  [data-testid="stColumn"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1)::after,
-  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1)::after,
-  [data-testid="column"]:has(.insights-controls-panel) [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1)::after {{
-    content: "";
-    position: absolute;
-    top: 0;
-    left: calc(75% + (25% + var(--layout-gap)) / 2);
-    width: 1px;
-    height: calc(100% + 0.2rem);
-    background: {LINE};
-    pointer-events: none;
   }}
   .controls-meta .meta-line {{
     display: flex;

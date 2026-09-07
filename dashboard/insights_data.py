@@ -18,7 +18,6 @@ from strava_analytics.activities import HR_ZONE_COUNT, hr_zone_sec_columns
 
 from data import (
     DATA_DIR,
-    PERIOD_CONFIG,
     PeriodGrain,
     format_full_date,
     format_full_month,
@@ -49,7 +48,8 @@ HEATMAP_WEEK_MONTHS = 24
 HEATMAP_DAY_MONTHS = 12
 
 HEATMAP_SHOWING: dict[PeriodGrain, str] = {
-    "Year": str(PERIOD_CONFIG["Year"]["showing"]),
+    # Heatmaps are fixed rolling lookbacks from today, so "Last" remains valid.
+    "Year": "Last 10 years",
     "Month": "Last 10 years × months",
     "Week": "Last 2 years",
     "Day": "Last 1 year",

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Dashboard**
+
+- **Training / Fitness**: **Start / End** period controls (date or year inputs by grain) so charts use a custom inclusive window instead of a fixed lookback only.
+- **Metrics**: **Latest activity** date under the page summary (same meta line as Training / Fitness).
+
+### Changed
+
+**Dashboard**
+
+- **Training / Fitness**: Year grain defaults to a rolling **last 10 years** (replacing the fixed “since 2016” window); other grains keep their prior default lengths.
+- **Training / Fitness**: Showing meta reads **`{N} weeks selected`** (or days / months / years), not “Last N …” or a date-span label.
+- **Fitness**: Controls card widens (up to ~40rem) with equal filter columns and a **centered** vertical divider.
+- **Metrics**: Shoes ⓘ definition is **total miles run in these shoes** (no baseline / gear-ID wording).
+
+### Fixed
+
+**Dashboard**
+
+- **Training**: 80:20 chart lists **HR coverage** in the legend; Moderate/Hard hover uses the hard segment share (not the stack top ≈ 100%).
+
 ## [1.5.3] — 2026-08-27
 
 ### Changed

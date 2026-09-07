@@ -27,6 +27,7 @@ from data import (
     build_kpi_detail,
     key_indicators,
     kpi_comparison_badges,
+    latest_activity_label,
     lifetime_achievements,
     load_gear,
     load_runs,
@@ -42,17 +43,24 @@ from ui import (
 
 _INSPECT_NONE = "Select a metric…"
 
+runs = load_runs()
+
 st.markdown(
-    """
+    f"""
     <div class="panel-title">Metrics</div>
     <div class="panel-summary">Achievements, key indicators, and shoe mileage at a glance.</div>
+    <div class="controls-meta">
+      <div class="meta-line">
+        <span class="meta-key">Latest activity</span>
+        <span class="meta-val">{latest_activity_label(runs)}</span>
+      </div>
+    </div>
     """,
     unsafe_allow_html=True,
 )
 
 render_metrics_section_nav()
 
-runs = load_runs()
 indicators = key_indicators(runs)
 comparisons = kpi_comparison_badges(runs)
 

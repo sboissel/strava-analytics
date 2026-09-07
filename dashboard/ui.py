@@ -1116,8 +1116,7 @@ def shoe_kpi_tooltip(goal: float = SHOE_MILEAGE_GOAL) -> str:
     """Return tooltip HTML for shoe mileage gauge cards."""
     return (
         "<strong>Definition</strong>"
-        "Baseline miles (before Strava shoe tracking) plus the sum of "
-        "activity distances tagged with this shoe's gear ID."
+        "Total miles run in these shoes."
         "<br><br>"
         "<strong>Target</strong>"
         f"Retire around {goal:.0f} mi."

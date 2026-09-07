@@ -953,8 +953,9 @@ class YearlyWindowTests(unittest.TestCase):
         self.assertEqual(period_count("Year", as_of), 10)
         later = pd.Timestamp("2027-08-01T12:00:00Z")
         self.assertEqual(period_count("Year", later), 10)
-        self.assertEqual(period_showing_label("Year"), "Last 10 years")
-        self.assertEqual(period_showing_label("Year", 15), "Last 15 years")
+        self.assertEqual(period_showing_label("Year"), "10 years selected")
+        self.assertEqual(period_showing_label("Year", 15), "15 years selected")
+        self.assertEqual(period_showing_label("Year", 1), "1 year selected")
 
     def test_year_index_is_rolling_ten(self):
         from dashboard.data import generate_period_index, period_count
@@ -1022,10 +1023,10 @@ class YearlyWindowTests(unittest.TestCase):
             5.0,
         )
 
-    def test_showing_label_is_last_ten_years(self):
+    def test_showing_label_is_ten_years_selected(self):
         from dashboard.data import PERIOD_CONFIG
 
-        self.assertEqual(PERIOD_CONFIG["Year"]["showing"], "Last 10 years")
+        self.assertEqual(PERIOD_CONFIG["Year"]["showing"], "10 years selected")
         self.assertEqual(int(PERIOD_CONFIG["Year"]["count"]), 10)
 
     def test_period_count_rejects_non_positive_override(self):
@@ -1099,15 +1100,35 @@ class PeriodWindowControlsTests(unittest.TestCase):
         )
         self.assertLessEqual(window.start, window.end)
 
-    def test_showing_label_uses_range(self):
+    def test_showing_label_uses_period_count(self):
         from dashboard.data import period_showing_label
 
-        label = period_showing_label(
+        default_year = period_showing_label(
             "Year",
             start=pd.Timestamp("2017-01-01T00:00:00Z"),
             end=pd.Timestamp("2026-01-01T00:00:00Z"),
         )
-        self.assertEqual(label, "2017 – 2026")
+        self.assertEqual(default_year, "10 years selected")
+
+        custom_weeks = period_showing_label(
+            "Week",
+            start=pd.Timestamp("2026-01-05T00:00:00Z"),
+            end=pd.Timestamp("2026-03-16T00:00:00Z"),
+        )
+        self.assertEqual(custom_weeks, "11 weeks selected")
+
+        self.assertEqual(
+            period_showing_label("Day", count=7),
+            "7 days selected",
+        )
+        self.assertEqual(
+            period_showing_label("Month", count=20),
+            "20 months selected",
+        )
+        self.assertEqual(
+            period_showing_label("Week", count=1),
+            "1 week selected",
+        )
 
 
 class AnnotateRacePeriodsTests(unittest.TestCase):

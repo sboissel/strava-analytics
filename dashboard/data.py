@@ -25,10 +25,10 @@ DATA_DIR = REPO_ROOT / "data"
 PeriodGrain = Literal["Day", "Week", "Month", "Year"]
 
 PERIOD_CONFIG: dict[PeriodGrain, dict[str, int | str]] = {
-    "Day": {"count": 30, "showing": "Last 30 days"},
-    "Week": {"count": 20, "showing": "Last 20 weeks"},
-    "Month": {"count": 20, "showing": "Last 20 months"},
-    "Year": {"count": 10, "showing": "Last 10 years"},
+    "Day": {"count": 30, "showing": "30 days selected"},
+    "Week": {"count": 20, "showing": "20 weeks selected"},
+    "Month": {"count": 20, "showing": "20 months selected"},
+    "Year": {"count": 10, "showing": "10 years selected"},
 }
 
 _PERIOD_UNITS: dict[PeriodGrain, str] = {
@@ -37,6 +37,12 @@ _PERIOD_UNITS: dict[PeriodGrain, str] = {
     "Month": "months",
     "Year": "years",
 }
+
+
+def _period_unit_phrase(grain: PeriodGrain, n: int) -> str:
+    """Return singular or plural unit word for ``n`` periods of ``grain``."""
+    unit = _PERIOD_UNITS[grain]
+    return unit[:-1] if n == 1 else unit
 
 # Soft caps for Training/Fitness start/end selectors (max lookback from as-of).
 PERIOD_COUNT_MAX: dict[PeriodGrain, int] = {
@@ -620,12 +626,17 @@ def period_showing_label(
 ) -> str:
     """Return the human-readable "Showing" label for a period window.
 
+    Formats as ``N days|weeks|months|years selected`` from the period count of
+    the active grain (singular when ``N`` is 1). When ``start`` and ``end`` are
+    provided, ``N`` is the number of inclusive periods in that window; otherwise
+    ``count`` (or the ``PERIOD_CONFIG`` default) is used.
+
     Parameters
     ----------
     grain : PeriodGrain
         Calendar aggregation grain.
     count : int, optional
-        Window length override for legacy "Last N …" labels.
+        Window length when ``start``/``end`` are omitted.
     start : pandas.Timestamp, optional
         Inclusive window start (preferred with ``end``).
     end : pandas.Timestamp, optional
@@ -634,46 +645,17 @@ def period_showing_label(
     Returns
     -------
     str
-        Range label such as ``"Jan 5, 2026 – May 18, 2026"``, or a legacy
-        ``"Last 20 weeks"`` / ``"Last 10 years"`` string when only ``count``
-        (or defaults) are provided.
+        Label such as ``"20 weeks selected"`` or ``"10 years selected"``.
     """
     if start is not None and end is not None:
-        return _format_period_range_label(grain, start, end)
-    n = period_count(grain, count=count)
-    if count is None or n == int(PERIOD_CONFIG[grain]["count"]):
-        return str(PERIOD_CONFIG[grain]["showing"])
-    return f"Last {n} {_PERIOD_UNITS[grain]}"
-
-
-def _format_period_range_label(
-    grain: PeriodGrain, start: pd.Timestamp, end: pd.Timestamp
-) -> str:
-    """Format an inclusive start/end pair for the Showing meta line."""
-    left = align_to_period_start(grain, start)
-    right = align_to_period_start(grain, end)
-    if left > right:
-        left, right = right, left
-    if grain == "Day":
-        if left == right:
-            return _format_short_date(left)
-        return f"{_format_short_date(left)} – {_format_short_date(right)}"
-    if grain == "Week":
-        if left == right:
-            return _format_short_date(left)
-        return f"{_format_short_date(left)} – {_format_short_date(right)}"
-    if grain == "Month":
-        if left.year == right.year and left.month == right.month:
-            return format_full_month(left)
-        if left.year == right.year:
-            return f"{left.strftime('%b')} – {right.strftime('%b')} {right.year}"
-        return (
-            f"{left.strftime('%b')} {left.year} – "
-            f"{right.strftime('%b')} {right.year}"
-        )
-    if left.year == right.year:
-        return str(left.year)
-    return f"{left.year} – {right.year}"
+        left = align_to_period_start(grain, start)
+        right = align_to_period_start(grain, end)
+        if left > right:
+            left, right = right, left
+        n = len(generate_period_index_range(grain, left, right))
+    else:
+        n = period_count(grain, count=count)
+    return f"{n} {_period_unit_phrase(grain, n)} selected"
 
 
 def generate_period_index(

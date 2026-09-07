@@ -89,7 +89,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-panel_col, _ = st.columns([1.5, 1.5], gap="medium")
+# Equal outer ratios; card width is capped in CSS (~40rem). Inner split is
+# [1, 1] plus .insights-controls-split so theme CSS can pin a true center divider.
+panel_col, _ = st.columns([1, 1], gap="medium")
 
 with panel_col:
     st.markdown(
@@ -99,7 +101,11 @@ with panel_col:
         """,
         unsafe_allow_html=True,
     )
-    col_dash, col_hr = st.columns(2, gap="medium")
+    st.markdown(
+        '<div class="insights-controls-split" aria-hidden="true"></div>',
+        unsafe_allow_html=True,
+    )
+    col_dash, col_hr = st.columns([1, 1], gap="medium")
 
     with col_dash:
         st.markdown(

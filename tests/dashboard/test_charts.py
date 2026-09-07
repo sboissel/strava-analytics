@@ -1102,6 +1102,13 @@ class TrainingChartThemeTests(unittest.TestCase):
         ).read_text()
         self.assertNotIn("race_weeks_snap_html", metrics)
         self.assertNotIn("race_week_strip", metrics)
+        self.assertIn("latest_activity_label", metrics)
+        self.assertIn("Latest activity", metrics)
+        self.assertLess(metrics.find("panel-title"), metrics.find("Latest activity"))
+        self.assertLess(
+            metrics.find("Latest activity"),
+            metrics.find("render_metrics_section_nav()"),
+        )
 
     def test_fitness_page_has_no_mileage_heatmap(self):
         """Mileage heatmap lives on Training, not Fitness."""
@@ -1749,7 +1756,7 @@ class FitnessPaceHrChartTests(unittest.TestCase):
         self.assertIn("aerobic_efficiency_line_chart(efficiency_periods, grain)", fitness)
 
     def test_fitness_pace_multiselect_css_uses_teal_chips_and_readable_width(self):
-        """Pace chips teal; Pace Range ~90% (Show By 75%); wrap, hug single chip."""
+        """Pace chips teal; equal-half controls fill column; wrap, hug single chip."""
         from dashboard.theme import INK, PACE_MULTISELECT_CHIP
 
         self.assertIn(".st-key-insights_pace_bins", GLOBAL_CSS)
@@ -1761,7 +1768,7 @@ class FitnessPaceHrChartTests(unittest.TestCase):
         self.assertIn(f"color: {INK} !important", chip_block)
         self.assertIn("text-overflow: clip !important", chip_block)
         self.assertIn("min-width: 0 !important", chip_block)
-        # Show By stays compact 75%; Pace Range slightly wider for “Choose options”.
+        # Shared compact panels still use 75%; Fitness overrides both halves to 100%.
         self.assertIn(
             '[data-testid="stColumn"]:has(.controls-panel--compact) [data-testid="stMultiSelect"]',
             GLOBAL_CSS,
@@ -1772,9 +1779,12 @@ class FitnessPaceHrChartTests(unittest.TestCase):
             ".st-key-insights_pace_bins [data-testid=\"stMultiSelect\"]",
             GLOBAL_CSS,
         )
-        self.assertIn("max-width: 90% !important", GLOBAL_CSS)
-        self.assertIn("width: 90% !important", GLOBAL_CSS)
         self.assertIn(".fitness-pace-bins-anchor", GLOBAL_CSS)
+        self.assertIn(
+            '[data-testid="stColumn"]:has(.insights-controls-panel) '
+            ".st-key-insights_pace_bins [data-testid=\"stMultiSelect\"]",
+            GLOBAL_CSS,
+        )
         self.assertNotIn("min-width: 11.5rem !important", GLOBAL_CSS)
         self.assertNotIn("max-width: 14.5rem", GLOBAL_CSS)
         self.assertIn("box-sizing: border-box !important", GLOBAL_CSS)
@@ -1809,6 +1819,30 @@ class FitnessPaceHrChartTests(unittest.TestCase):
         self.assertIn("border-color: rgba(80, 155, 143, 0.20) !important;", card_block)
         self.assertIn("inset 0 1px 0 rgba(255, 255, 255, 0.75)", card_block)
         self.assertIn("padding: 1.2rem 1.35rem 1.3rem !important;", card_block)
+        # Wider than shared compact 28rem so date pickers / Showing fit.
+        self.assertIn("max-width: 40rem;", card_block)
+        self.assertIn("width: 100% !important;", card_block)
+        self.assertIn("flex: 1 1 40rem !important;", card_block)
+        # Marked split row: equal tracks + geometric center divider.
+        self.assertIn(".insights-controls-split", GLOBAL_CSS)
+        self.assertIn(
+            '[data-testid="stElementContainer"]:has(.insights-controls-split)',
+            GLOBAL_CSS,
+        )
+        self.assertIn(
+            "grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;",
+            GLOBAL_CSS,
+        )
+        self.assertIn("left: 50%;", GLOBAL_CSS)
+        self.assertIn("transform: translateX(-50%);", GLOBAL_CSS)
+        self.assertNotIn(
+            "left: calc(100% + var(--layout-gap) / 2);",
+            GLOBAL_CSS,
+        )
+        self.assertNotIn(
+            "left: calc(75% + (25% + var(--layout-gap)) / 2);",
+            GLOBAL_CSS,
+        )
         # No teal keyline before the Controls label (removed; border tint is enough).
         self.assertNotIn(".controls-title::before", GLOBAL_CSS)
         # Border teal matches mileage / Form series (`MILEAGE_BAR` = #509B8F).
