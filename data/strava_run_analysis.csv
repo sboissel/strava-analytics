@@ -1,4 +1,5 @@
 activity_id,name,type,gear_id,date,distance_miles,moving_time_min,elapsed_time_min,elevation_gain_ft,avg_pace,avg_pace_sec,max_pace,max_pace_sec,avg_hr,max_hr,%_easy,mt_min_easy,mt_min_hard,hr_zone_1_sec,hr_zone_2_sec,hr_zone_3_sec,hr_zone_4_sec,hr_zone_5_sec,race,race_distance
+20128552997,Highest run,Run,g33031350,2026-09-11T09:34:33Z,8.0,01:32:57,01:35:57,1499.34,11:36,696,06:28,388,141.6,154,51.3,47.6,45.2,31.0,2824.0,2711.0,0.0,0.0,False,
 20112514301,Morning Run,Run,g33031356,2026-09-10T05:56:13Z,3.01,00:30:09,00:30:20,59.06,10:01,601.0,05:57,357.0,121.2,151.0,98.7,29.6,0.4,290.0,1489.0,23.0,0.0,0.0,False,
 20098518603,Morning Run,Run,g33031373,2026-09-09T05:57:39Z,3.34,00:35:12,00:37:23,406.82,10:32,632,06:52,412,130.1,164,88.4,30.9,4.0,170.0,1686.0,177.0,66.0,0.0,False,
 20069714807,Morning Run,Run,g33031350,2026-09-07T05:56:22Z,3.0,00:31:26,00:32:28,387.14,10:27,627,07:39,459,130.1,154,89.8,28.2,3.2,243.0,1449.0,193.0,0.0,0.0,False,
