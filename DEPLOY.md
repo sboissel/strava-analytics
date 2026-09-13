@@ -7,7 +7,7 @@ This repository lives on **GitLab** as the source of truth. A GitLab push mirror
 | GitLab (source) | `https://gitlab.com/sandrineboissel/strava-analytics` |
 | GitHub (mirror) | `https://github.com/sboissel/strava-analytics` |
 
-GitLab CI (`.gitlab-ci.yml`) runs tests on push and a daily scheduled sync that commits updated `data/` files back to `main`. Incremental sync captures `start_lat` / `start_lng` from Strava list/summary payloads (including filling empty coords on already-synced rows that reappear on fetched pages). Pushing to GitLab (including those CI commits) is enough for the mirror to update GitHub.
+GitLab CI (`.gitlab-ci.yml`) runs tests on push and a daily scheduled sync that commits updated `data/` files back to `main`. Incremental sync captures `start_lat` / `start_lng` from Strava list/summary payloads on newly processed activities. Pushing to GitLab (including those CI commits) is enough for the mirror to update GitHub.
 
 See **Daily GitLab sync** in [README.md](README.md) for CI variables and the nightly schedule.
 

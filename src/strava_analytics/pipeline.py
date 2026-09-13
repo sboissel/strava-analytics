@@ -14,7 +14,6 @@ if __package__ in (None, ""):
 from strava_analytics.activities import process_activities
 from strava_analytics.client import REPO_ROOT, StravaClient
 from strava_analytics.csv_io import (
-    backfill_location_from_summaries,
     save_activities_last_week,
     update_activity_analysis_csvs,
     update_run_pace_analysis_csv,
@@ -51,13 +50,6 @@ def main(data_dir: Optional[Path] = None) -> None:
     # Always refresh analysis CSV schemas (e.g. new location columns) even when
     # there are no new rows, so older type files are not left on a stale header.
     update_activity_analysis_csvs(df, data_dir)
-
-    # List pages include activities at/below the watermark. Patch empty GPS on
-    # those already-synced rows (common after adding start_lat/start_lng) without
-    # re-fetching streams or lowering highest_activity_id.
-    filled = backfill_location_from_summaries(activities, data_dir)
-    if filled:
-        print(f"Backfilled start_lat/start_lng on {filled} existing row(s).")
 
     if df.empty:
         print("No new activities to process.")

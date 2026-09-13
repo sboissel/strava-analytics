@@ -12,7 +12,7 @@ Versioning follows [Semantic Versioning](https://semver.org/); see [CHANGELOG.md
 
 The main script in [`src/strava_analytics/pipeline.py`](src/strava_analytics/pipeline.py) refreshes a Strava API token, downloads recent activities, processes each activity, and writes several CSV files into the [data](data) folder:
 
-- [data/strava_run_analysis.csv](data/strava_run_analysis.csv): run-specific enrichment including pace, HR, Strava HR-zone time in seconds (`hr_zone_1_sec`…`hr_zone_5_sec`), easy/hard time metrics (zones 1–2 vs 3+), `gear_id` for shoe mileage, and start GPS (`start_lat` / `start_lng` from summary `start_latlng` when present). Incremental sync also fills empty GPS on already-synced rows that reappear on fetched list pages.
+- [data/strava_run_analysis.csv](data/strava_run_analysis.csv): run-specific enrichment including pace, HR, Strava HR-zone time in seconds (`hr_zone_1_sec`…`hr_zone_5_sec`), easy/hard time metrics (zones 1–2 vs 3+), `gear_id` for shoe mileage, and start GPS (`start_lat` / `start_lng` from summary `start_latlng` when present).
 - [data/strava_ride_analysis.csv](data/strava_ride_analysis.csv): ride exports (same shared GPS columns)
 - [data/strava_swim_analysis.csv](data/strava_swim_analysis.csv): swim exports (same shared GPS columns)
 - [data/strava_hike_analysis.csv](data/strava_hike_analysis.csv): hike exports (same shared GPS columns)
@@ -54,7 +54,7 @@ python src/strava_analytics/pipeline.py
 
 The script will refresh the access token, fetch activities, and rewrite the CSV outputs in the data directory.
 
-Analysis CSVs include `start_lat` / `start_lng` from Strava list/summary `start_latlng` when GPS is present. Each incremental sync also fills empty coords on already-synced rows that reappear on the fetched list pages (no extra detail calls). Do **not** reset `highest_activity_id.txt` to `0` just for GPS — that re-runs stream/zone enrichment for every activity.
+Analysis CSVs include `start_lat` / `start_lng` from Strava list/summary `start_latlng` when GPS is present on newly processed activities. Existing per-type CSVs are reindexed to the current schema even when a sync has no new rows of that type. Do **not** reset `highest_activity_id.txt` to `0` just for GPS — that re-runs stream/zone enrichment for every activity.
 
 ## Daily GitLab sync
 

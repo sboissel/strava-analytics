@@ -28,7 +28,6 @@ from strava_analytics.csv_io import (
     _drop_header_like_rows,
     activity_analysis_columns,
     activity_analysis_paths,
-    backfill_location_from_summaries,
     save_activities_last_week,
     update_activity_analysis_csvs,
     update_run_pace_analysis_csv,
@@ -897,92 +896,6 @@ class CsvProcessingTests(unittest.TestCase):
         self.assertIn("start_lat", ride_df.columns)
         self.assertEqual(ride_df["activity_id"].astype(str).tolist(), ["9"])
         self.assertEqual(run_df.iloc[0]["start_lat"], 37.1)
-
-    def test_backfill_location_from_summaries_fills_empty_hike_coords(self):
-        """Ensure already-synced hikes get GPS when list summaries reappear."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_dir = Path(tmpdir)
-            hike_path = output_dir / "strava_hike_analysis.csv"
-            pd.DataFrame(
-                [
-                    {
-                        "activity_id": "20061981582",
-                        "name": "Fábrica de la Luz",
-                        "type": "Hike",
-                        "gear_id": "",
-                        "date": "2026-09-06T10:36:54Z",
-                        "distance_miles": "8.1",
-                        "moving_time_min": "03:07:08",
-                        "elapsed_time_min": "03:33:10",
-                        "elevation_gain_ft": "1866.8",
-                        "avg_pace": "23:06",
-                        "avg_pace_sec": "1386",
-                        "max_pace": "11:39",
-                        "max_pace_sec": "699",
-                        "start_lat": "",
-                        "start_lng": "",
-                    }
-                ]
-            ).to_csv(hike_path, index=False)
-
-            run_path = output_dir / "strava_run_analysis.csv"
-            pd.DataFrame(
-                [
-                    {
-                        "activity_id": "20069714807",
-                        "name": "Morning Run",
-                        "type": "Run",
-                        "gear_id": "g1",
-                        "date": "2026-09-07T05:56:22Z",
-                        "distance_miles": "3.0",
-                        "moving_time_min": "00:31:26",
-                        "elapsed_time_min": "00:32:28",
-                        "elevation_gain_ft": "387.14",
-                        "avg_pace": "10:27",
-                        "avg_pace_sec": "627",
-                        "max_pace": "07:39",
-                        "max_pace_sec": "459",
-                        "start_lat": "37.17453",
-                        "start_lng": "-3.589692",
-                        "avg_hr": "",
-                        "max_hr": "",
-                        "%_easy": "",
-                        "mt_min_easy": "",
-                        "mt_min_hard": "",
-                        "hr_zone_1_sec": "",
-                        "hr_zone_2_sec": "",
-                        "hr_zone_3_sec": "",
-                        "hr_zone_4_sec": "",
-                        "hr_zone_5_sec": "",
-                        "race": "False",
-                        "race_distance": "",
-                    }
-                ]
-            ).to_csv(run_path, index=False)
-
-            summaries = [
-                {
-                    "id": 20069714807,
-                    "type": "Run",
-                    "start_latlng": [37.17453, -3.589692],
-                },
-                {
-                    "id": 20061981582,
-                    "type": "Hike",
-                    "start_latlng": [37.05, -3.55],
-                },
-            ]
-
-            filled = backfill_location_from_summaries(summaries, output_dir)
-
-            hike_df = pd.read_csv(hike_path)
-            run_df = pd.read_csv(run_path)
-
-        self.assertEqual(filled, 1)
-        self.assertEqual(float(hike_df.iloc[0]["start_lat"]), 37.05)
-        self.assertEqual(float(hike_df.iloc[0]["start_lng"]), -3.55)
-        # Existing run coords must not be overwritten.
-        self.assertEqual(float(run_df.iloc[0]["start_lat"]), 37.17453)
 
     def test_update_activity_analysis_csvs_creates_missing_file(self):
         """Ensure missing analysis CSVs are created on first update."""

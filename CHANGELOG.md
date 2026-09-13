@@ -15,14 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Pipeline / data**
 
-- Activity analysis CSVs (run / ride / swim / hike) include `start_lat` and `start_lng` from Strava list/summary `start_latlng` when GPS is present. Incremental sync only fully rewrites newly processed activities; each sync also fills empty coords on already-synced rows when those activities reappear on the fetched list pages (no extra detail calls). Existing per-type CSVs are reindexed to the current schema even when a sync has no new rows of that type.
-
-### Fixed
-
-**Pipeline / data**
-
-- Incremental CSV merge no longer skips ride/swim/hike (or any type) schema upgrades when a run only produces new rows for another activity type.
-- Empty `start_lat` / `start_lng` on already-synced rows (e.g. recent hikes processed before GPS columns existed) are filled from list/summary payloads on later syncs, so new runs no longer look uniquely “located” versus nearby hikes.
+- Activity analysis CSVs (run / ride / swim / hike) include `start_lat` and `start_lng` from Strava list/summary `start_latlng` when GPS is present on newly processed activities.
+- Existing per-type CSVs are reindexed to the current schema even when a sync has no new rows of that type.
 
 ## [1.5.4] — 2026-09-07
 
