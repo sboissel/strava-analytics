@@ -7,16 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-09-13
+
 ### Added
 
 **Dashboard**
 
-- **Hiking**: new page with highlight badges (all-time miles/elevation with YTD tooltips, longest hike, greatest elevation, most miles in a consecutive-day trip), Show By period miles/elevation bars, and grade-adjusted pace (GAP) markers with a trend line.
+- **Hiking**: new page with highlight badges (all-time miles/elevation with YTD tooltips, longest hike, greatest elevation, most miles in a consecutive-day trip), Show By period miles/elevation bars, map drill-down, and grade-adjusted pace (GAP).
+- **Hiking GAP**: ⓘ title hover (definition, formula, marker/trend key, caveats); open markers for 0 ft elevation; dual OLS trends (all points vs elev > 0) without a Plotly legend; hover elevation in feet.
 
 **Pipeline / data**
 
 - Activity analysis CSVs (run / ride / swim / hike) include `start_lat` and `start_lng` from Strava list/summary `start_latlng` when GPS is present on newly processed activities.
 - Existing per-type CSVs are reindexed to the current schema even when a sync has no new rows of that type.
+- Manual GitLab CI job to backfill `start_lat` / `start_lng` on historical activity CSVs from Strava summaries.
+
+### Changed
+
+**Dashboard**
+
+- **Hiking GAP**: pace uses **moving time** (not elapsed time).
 
 ## [1.5.4] — 2026-09-07
 
