@@ -395,7 +395,7 @@ GLOBAL_CSS = f"""
     padding: 0.25rem 0.75rem 0.3rem;
   }}
   nav[data-testid="stSidebarNavItems"] {{
-    gap: 0.06rem;
+    gap: 0.65rem;
   }}
   section[data-testid="stSidebar"] .sidebar-nav-heading {{
     display: block;
@@ -407,8 +407,10 @@ GLOBAL_CSS = f"""
     padding: 0.25rem 0.75rem 0.3rem;
   }}
   /* Page-group headers under Navigation (Running / Other sports).
-     Keep denser page-link gaps, but give headers real line-box + padding so
-     they are not clipped/collapsed against Streamlit flex stacks. */
+     Streamlit's stMarkdownContainer uses margin-bottom: -1rem to cancel the
+     default 1rem flex gap — with our sidebar gap that pull-up stacks Running
+     under Navigation (same muted uppercase style → Running looks missing).
+     Neutralize it. */
   section[data-testid="stSidebar"] .sidebar-nav-group-label {{
     display: block;
     font-size: 0.72rem;
@@ -419,41 +421,48 @@ GLOBAL_CSS = f"""
     color: {MUTED};
     /* Bottom pad = air before Metrics / Hiking; top pad is light (margin on
        the wrapping element handles section separation). */
-    padding: 0.12rem 0.75rem 0.28rem;
+    padding: 0.2rem 0.75rem 0.35rem;
     margin: 0;
-    min-height: 1.15rem;
+    min-height: 1.25rem;
     overflow: visible;
     visibility: visible;
     opacity: 1;
   }}
   /* Wrapper for group labels: restore height/overflow after nested gap collapse
-     and give Other sports (and Running) breathing room above the first link. */
+     and separate Running block from Other sports. */
   section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-group-label) {{
     overflow: visible !important;
     height: auto !important;
     min-height: auto !important;
-    /* Default: space before a section that follows page links (Other sports). */
-    margin-top: 0.5rem !important;
-    margin-bottom: 0.12rem !important;
+    /* Section break: Navigation→Running and Performance→Other sports share
+       the same top margin (override below keeps them equal). */
+    margin-top: 1.05rem !important;
+    margin-bottom: 0.15rem !important;
   }}
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-heading)
+    [data-testid="stMarkdownContainer"],
   section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-group-label)
     [data-testid="stMarkdownContainer"],
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-heading)
+    [data-testid="stMarkdown"],
   section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-group-label)
     [data-testid="stMarkdown"] {{
     overflow: visible !important;
     height: auto !important;
+    /* Kill Streamlit's -1rem markdown pull-up in the dense sidebar stack. */
+    margin-bottom: 0 !important;
   }}
-  /* Running sits directly under Navigation — keep a modest gap, not the larger
-     inter-section margin used before Other sports. */
+  /* Navigation→Running: same section-break margin as Performance→Other sports. */
   section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-heading)
     + [data-testid="stElementContainer"]:has(.sidebar-nav-group-label) {{
-    margin-top: 0.2rem !important;
+    margin-top: 1.05rem !important;
   }}
   /* Sidebar is nav-only: collapse Streamlit stack gaps (incl. nested
-     st.container() wrappers around each page_link). Keep this tight so
-     Metrics→Training→… stay dense; headers use their own margin/padding. */
+     st.container() wrappers around each page_link). Enough air between
+     Metrics→Training→… so hover/selected highlight boxes don’t collide;
+     headers use their own margin/padding. */
   section[data-testid="stSidebar"] [data-testid="stSidebarContent"] [data-testid="stVerticalBlock"] {{
-    gap: 0.06rem !important;
+    gap: 0.65rem !important;
   }}
   section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) {{
     display: none !important;
@@ -485,8 +494,9 @@ GLOBAL_CSS = f"""
     font-weight: 600 !important;
     font-size: 0.92rem !important;
     color: {MUTED} !important;
-    /* ~32px tap height with 0.92rem type; denser than prior 0.55rem padding. */
-    padding: 0.36rem 0.75rem !important;
+    /* ~30px tap height with 0.92rem type; slightly tighter than 0.36rem so
+       gap: 0.65rem keeps hover/selected highlight boxes clearly separated. */
+    padding: 0.32rem 0.75rem !important;
     margin-bottom: 0;
     border: 1px solid transparent !important;
     background: transparent !important;

@@ -370,26 +370,40 @@ class MetricsSectionNavTests(unittest.TestCase):
         flat = [page for _label, pages in NAV_SECTIONS for page in pages]
         self.assertEqual(flat, list(NAV_PAGES))
         self.assertIn(".sidebar-nav-group-label", GLOBAL_CSS)
-        # Group headers must stay visible (not collapsed by nested gap rules).
+        # Group headers must stay visible (not collapsed by nested gap rules /
+        # Streamlit's markdown margin-bottom: -1rem pull-up).
         label_block = GLOBAL_CSS.split(".sidebar-nav-group-label {", 1)[1].split("}", 1)[0]
         self.assertIn("line-height: 1.25", label_block)
-        self.assertIn("min-height: 1.15rem", label_block)
+        self.assertIn("min-height: 1.25rem", label_block)
         self.assertIn("overflow: visible", label_block)
-        self.assertIn("padding: 0.12rem 0.75rem 0.28rem", label_block)
+        self.assertIn("padding: 0.2rem 0.75rem 0.35rem", label_block)
         self.assertIn(
             '[data-testid="stElementContainer"]:has(.sidebar-nav-group-label)',
             GLOBAL_CSS,
         )
-        self.assertIn("margin-top: 0.5rem !important", GLOBAL_CSS)
-        # First group (Running) under Navigation uses a tighter top margin.
+        self.assertIn("margin-top: 1.05rem !important", GLOBAL_CSS)
+        # Kill Streamlit's -1rem markdown pull-up on nav heading + group labels.
+        self.assertIn(
+            ':has(.sidebar-nav-heading)\n'
+            '    [data-testid="stMarkdownContainer"]',
+            GLOBAL_CSS,
+        )
+        self.assertIn("margin-bottom: 0 !important", GLOBAL_CSS)
+        # Navigation→Running matches Performance→Other sports section break.
         self.assertIn(
             ':has(.sidebar-nav-heading)\n'
             '    + [data-testid="stElementContainer"]:has(.sidebar-nav-group-label)',
             GLOBAL_CSS,
         )
-        self.assertIn("margin-top: 0.2rem !important", GLOBAL_CSS)
-        # Page-to-page density stays tight.
-        self.assertIn("gap: 0.06rem !important", GLOBAL_CSS)
+        heading_to_running = GLOBAL_CSS.split(
+            ':has(.sidebar-nav-heading)\n'
+            '    + [data-testid="stElementContainer"]:has(.sidebar-nav-group-label)',
+            1,
+        )[1].split("}", 1)[0]
+        self.assertIn("margin-top: 1.05rem !important", heading_to_running)
+        # Page-to-page air: enough that hover/selected highlights don’t collide.
+        self.assertIn("gap: 0.65rem !important", GLOBAL_CSS)
+        self.assertIn("padding: 0.32rem 0.75rem !important", GLOBAL_CSS)
 
     def test_on_this_page_has_hairline_divider(self):
         from dashboard.theme import GLOBAL_CSS, LINE
