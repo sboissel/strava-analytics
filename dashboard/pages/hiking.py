@@ -27,6 +27,7 @@ from charts import (
     PLOTLY_CONFIG,
     elevation_chart,
     hike_gap_chart,
+    hike_gap_title,
     hike_location_folium_map,
     mileage_chart,
 )
@@ -56,6 +57,7 @@ from data import (
 )
 from ui import (
     clear_hiking_map_filter,
+    hike_gap_info_html,
     hiking_badges_html,
     render_hiking_section_nav,
     render_period_range_inputs,
@@ -270,6 +272,11 @@ st.plotly_chart(
     key="hiking_elevation",
 )
 st.markdown('<div id="chart-hiking-gap" class="page-anchor"></div>', unsafe_allow_html=True)
+# Title + inline ⓘ outside the zero-height page-anchor so Streamlit does not clip them.
+st.markdown(
+    hike_gap_info_html(hike_gap_title()),
+    unsafe_allow_html=True,
+)
 st.plotly_chart(
     hike_gap_chart(gap_points),
     use_container_width=True,

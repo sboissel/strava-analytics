@@ -1596,11 +1596,49 @@ def hike_gap_title() -> str:
     return "Grade-Adjusted Pace"
 
 
+def _add_gap_trend_line(
+    fig: go.Figure,
+    dates: pd.Series,
+    gaps: pd.Series,
+    mask: pd.Series,
+    *,
+    name: str,
+    color: str,
+    dash: str,
+) -> None:
+    """Add an OLS GAP trend over date for rows where ``mask`` is true."""
+    valid = mask & gaps.notna() & dates.notna()
+    if int(valid.sum()) < 2:
+        return
+    x_ord = dates.loc[valid].astype("int64").to_numpy(dtype=float)
+    y_ord = gaps.loc[valid].to_numpy(dtype=float)
+    slope, intercept = np.polyfit(x_ord, y_ord, 1)
+    trend_y = slope * x_ord + intercept
+    trend_x = dates.loc[valid].dt.tz_convert("UTC").dt.tz_localize(None)
+    fig.add_trace(
+        go.Scatter(
+            x=trend_x,
+            y=trend_y,
+            mode="lines",
+            name=name,
+            showlegend=False,
+            line=dict(color=color, width=2, dash=dash),
+            hovertemplate=f"{name}: %{{y:.1f}} min / grade-mi<extra></extra>",
+        )
+    )
+
+
 def hike_gap_chart(gap_df: pd.DataFrame) -> go.Figure:
-    """Build a GAP scatter with activity markers and a linear trend line.
+    """Build a GAP scatter with activity markers and dual linear trend lines.
 
     Y values are minutes per grade-mile:
-    ``elapsed_min / (elevation_ft / 1000 + miles)``.
+    ``moving_min / (elevation_ft / 1000 + miles)``. Hikes with 0 ft elevation
+    use open (hollow) markers as suspect/incomplete elevation; filled markers
+    are elev > 0. Two OLS trends are drawn: all plotted points, and elev > 0
+    only. No Plotly legend — marker/trend meaning lives in
+    ``hike_gap_info_html``. Heading comes from that HTML title + inline ⓘ;
+    Plotly title stays empty so the plot domain matches other HTML-titled
+    charts.
 
     Parameters
     ----------
@@ -1611,9 +1649,8 @@ def hike_gap_chart(gap_df: pd.DataFrame) -> go.Figure:
     Returns
     -------
     plotly.graph_objects.Figure
-        Markers for individual hikes plus a dashed OLS trend over date.
+        Markers for individual hikes plus dashed/solid OLS trends over date.
     """
-    title = hike_gap_title()
     y_title = dict(
         text="GAP (min / grade-mi)",
         font=dict(size=12, color=MUTED),
@@ -1621,7 +1658,7 @@ def hike_gap_chart(gap_df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
     if gap_df.empty or "gap_min_per_grade_mi" not in gap_df.columns:
         fig.update_layout(
-            title=_title(title),
+            title=_title(""),
             xaxis=dict(
                 title=dict(text="Date", font=dict(size=12, color=MUTED)),
                 tickfont=dict(size=11, color=MUTED),
@@ -1658,61 +1695,95 @@ def hike_gap_chart(gap_df: pd.DataFrame) -> go.Figure:
         if "elevation_gain_ft" in work.columns
         else pd.Series(np.nan, index=work.index)
     )
-    customdata = [
-        [
-            format_full_date(ts) if pd.notna(ts) else "—",
-            name,
-            "—" if pd.isna(mi) else f"{float(mi):.2f}",
-            "—" if pd.isna(ft) else f"{float(ft) / 5280.0:.2f}",
+    # 0 ft (or missing elev on a plotted point) → open marker / suspect data.
+    has_elev = elev.gt(0).fillna(False)
+    zero_elev = ~has_elev
+
+    def _gap_customdata(idx: pd.Index) -> list[list[str]]:
+        return [
+            [
+                format_full_date(ts) if pd.notna(ts) else "—",
+                name,
+                "—" if pd.isna(mi) else f"{float(mi):.2f}",
+                "—" if pd.isna(ft) else f"{float(ft):,.0f}",
+            ]
+            for ts, name, mi, ft in zip(
+                dates.loc[idx],
+                names.loc[idx],
+                miles.loc[idx],
+                elev.loc[idx],
+                strict=True,
+            )
         ]
-        for ts, name, mi, ft in zip(dates, names, miles, elev, strict=True)
-    ]
-    x_vals = dates.dt.tz_convert("UTC").dt.tz_localize(None)
-    y_vals = gaps.tolist()
 
-    fig.add_trace(
-        go.Scatter(
-            x=x_vals,
-            y=y_vals,
-            mode="markers",
-            name="Hikes",
-            marker=dict(color=MILEAGE_BAR, size=8, opacity=0.88),
-            customdata=customdata,
-            hovertemplate=(
-                "<b>%{customdata[1]}</b><br>"
-                "%{customdata[0]}<br>"
-                "GAP: %{y:.1f} min / grade-mi<br>"
-                "%{customdata[2]} mi · %{customdata[3]} elev mi"
-                "<extra></extra>"
-            ),
-        )
+    hover = (
+        "<b>%{customdata[1]}</b><br>"
+        "%{customdata[0]}<br>"
+        "GAP: %{y:.1f} min / grade-mi<br>"
+        "%{customdata[2]} mi · %{customdata[3]} ft"
+        "<extra></extra>"
     )
+    x_plot = dates.dt.tz_convert("UTC").dt.tz_localize(None)
 
-    valid = gaps.notna() & dates.notna()
-    if int(valid.sum()) >= 2:
-        x_ord = dates.loc[valid].astype("int64").to_numpy(dtype=float)
-        y_ord = gaps.loc[valid].to_numpy(dtype=float)
-        slope, intercept = np.polyfit(x_ord, y_ord, 1)
-        trend_y = slope * x_ord + intercept
-        trend_x = (
-            dates.loc[valid].dt.tz_convert("UTC").dt.tz_localize(None)
-        )
+    if bool(has_elev.any()):
+        idx = work.index[has_elev]
         fig.add_trace(
             go.Scatter(
-                x=trend_x,
-                y=trend_y,
-                mode="lines",
-                name="Trend",
-                line=dict(color=ELEVATION_BAR, width=2, dash="dash"),
-                hovertemplate="Trend: %{y:.1f} min / grade-mi<extra></extra>",
+                x=x_plot.loc[idx],
+                y=gaps.loc[idx].tolist(),
+                mode="markers",
+                name="Hikes",
+                showlegend=False,
+                marker=dict(color=MILEAGE_BAR, size=8, opacity=0.88, symbol="circle"),
+                customdata=_gap_customdata(idx),
+                hovertemplate=hover,
             )
         )
+    if bool(zero_elev.any()):
+        idx = work.index[zero_elev]
+        fig.add_trace(
+            go.Scatter(
+                x=x_plot.loc[idx],
+                y=gaps.loc[idx].tolist(),
+                mode="markers",
+                name="0 ft elev",
+                showlegend=False,
+                marker=dict(
+                    color="rgba(0,0,0,0)",
+                    size=8,
+                    opacity=0.88,
+                    symbol="circle",
+                    line=dict(color=MILEAGE_BAR, width=1.75),
+                ),
+                customdata=_gap_customdata(idx),
+                hovertemplate=hover,
+            )
+        )
+
+    _add_gap_trend_line(
+        fig,
+        dates,
+        gaps,
+        gaps.notna() & dates.notna(),
+        name="Trend (all)",
+        color=ELEVATION_BAR,
+        dash="dash",
+    )
+    _add_gap_trend_line(
+        fig,
+        dates,
+        gaps,
+        has_elev & gaps.notna() & dates.notna(),
+        name="Trend (with elevation)",
+        color=MILEAGE_BAR,
+        dash="solid",
+    )
 
     y_finite = gaps[gaps.notna()]
     y_max = float(y_finite.max()) * 1.15 if len(y_finite) else 1.0
     y_min = max(0.0, float(y_finite.min()) * 0.85) if len(y_finite) else 0.0
     fig.update_layout(
-        title=_title(title),
+        title=_title(""),
         xaxis=dict(
             title=dict(text="Date", font=dict(size=12, color=MUTED)),
             tickfont=dict(size=11, color=MUTED),
@@ -1727,17 +1798,9 @@ def hike_gap_chart(gap_df: pd.DataFrame) -> go.Figure:
             range=[y_min, max(y_max, y_min + 1.0)],
             automargin=True,
         ),
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1,
-            font=dict(size=11, color=MUTED),
-        ),
+        showlegend=False,
         hoverlabel=_hoverlabel(),
-        **{**CHART_LAYOUT, "margin": dict(l=78, r=TRAINING_MARGIN_R, t=64, b=56)},
+        **{**CHART_LAYOUT, "margin": dict(l=78, r=TRAINING_MARGIN_R, t=52, b=56)},
     )
     return fig
 

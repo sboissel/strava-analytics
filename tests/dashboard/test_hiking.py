@@ -35,7 +35,13 @@ from dashboard.data import (
     select_hiking_map_cluster,
     sync_hiking_show_by_for_map_filter,
 )
-from dashboard.ui import NAV_PAGES, clear_hiking_map_filter, hiking_badges_html, sidebar_nav_entries
+from dashboard.ui import (
+    NAV_PAGES,
+    clear_hiking_map_filter,
+    hike_gap_info_html,
+    hiking_badges_html,
+    sidebar_nav_entries,
+)
 
 
 def _hikes(
@@ -43,7 +49,7 @@ def _hikes(
     *,
     distances: list[float] | None = None,
     elev: list[float] | None = None,
-    elapsed: list[float] | None = None,
+    moving: list[float] | None = None,
     names: list[str] | None = None,
     activity_ids: list[int] | None = None,
     lats: list[float | None] | None = None,
@@ -54,7 +60,7 @@ def _hikes(
         "date": pd.to_datetime(dates, utc=True),
         "distance_miles": distances or [5.0] * n,
         "elevation_gain_ft": elev or [1000.0] * n,
-        "elapsed_min": elapsed or [120.0] * n,
+        "moving_min": moving or [120.0] * n,
         "name": names or [f"Hike {i}" for i in range(n)],
         "activity_id": activity_ids or list(range(1, n + 1)),
     }
@@ -66,15 +72,19 @@ def _hikes(
 
 
 class GradeAdjustedPaceTests(unittest.TestCase):
-    """GAP = elapsed_min / (elev_ft/1000 + miles)."""
+    """GAP = moving_min / (elev_ft/1000 + miles)."""
 
     def test_gap_formula_minutes_per_grade_mile(self):
-        # 180 min, 2000 ft, 8 mi → denom = 2 + 8 = 10 → 18.0 min/grade-mi
+        # 180 moving min, 2000 ft, 8 mi → denom = 2 + 8 = 10 → 18.0 min/grade-mi
         self.assertAlmostEqual(grade_adjusted_pace(180.0, 2000.0, 8.0), 18.0)
 
     def test_gap_rejects_non_positive_denominator(self):
         self.assertIsNone(grade_adjusted_pace(60.0, 0.0, 0.0))
         self.assertIsNone(grade_adjusted_pace(60.0, -500.0, 0.0))
+
+    def test_gap_allows_zero_elevation_with_miles(self):
+        # 0 ft elev still yields GAP when miles > 0 (open-marker case).
+        self.assertAlmostEqual(grade_adjusted_pace(90.0, 0.0, 5.0), 18.0)
 
     def test_gap_rejects_missing_inputs(self):
         self.assertIsNone(grade_adjusted_pace(None, 1000.0, 5.0))
@@ -171,7 +181,7 @@ class HikeGapPointsTests(unittest.TestCase):
             ],
             distances=[5.0, 6.0, 7.0],
             elev=[1000.0, 1000.0, 1000.0],
-            elapsed=[90.0, 100.0, 110.0],
+            moving=[90.0, 100.0, 110.0],
         )
         points = hike_gap_points(
             hikes,
@@ -184,10 +194,41 @@ class HikeGapPointsTests(unittest.TestCase):
         self.assertTrue(
             (points["gap_min_per_grade_mi"] > 0).all()
         )
+        self.assertIn("moving_min", points.columns)
+        self.assertNotIn("elapsed_min", points.columns)
+        # 100 moving / (1000/1000 + 6) = 100 / 7
+        june10 = points.loc[points["name"] == "Hike 1"].iloc[0]
+        self.assertAlmostEqual(float(june10["gap_min_per_grade_mi"]), 100.0 / 7.0)
+        self.assertAlmostEqual(float(june10["moving_min"]), 100.0)
+
+    def test_includes_zero_elev_drops_missing_moving(self):
+        """0 ft elev stays (open markers); missing moving time is omitted."""
+        hikes = _hikes(
+            [
+                "2026-06-01T08:00:00Z",
+                "2026-06-08T08:00:00Z",
+                "2026-06-15T08:00:00Z",
+            ],
+            distances=[5.0, 6.0, 7.0],
+            elev=[0.0, 1000.0, 800.0],
+            moving=[90.0, float("nan"), 110.0],
+            names=["Flat", "NoMoving", "Steep"],
+        )
+        points = hike_gap_points(
+            hikes,
+            grain="Week",
+            as_of=pd.Timestamp("2026-06-20T00:00:00Z"),
+            start=pd.Timestamp("2026-06-01T00:00:00Z"),
+            end=pd.Timestamp("2026-06-20T00:00:00Z"),
+        )
+        self.assertEqual(list(points["name"]), ["Flat", "Steep"])
+        flat = points.iloc[0]
+        self.assertAlmostEqual(float(flat["elevation_gain_ft"]), 0.0)
+        self.assertAlmostEqual(float(flat["gap_min_per_grade_mi"]), 18.0)
 
 
 class HikeGapChartTests(unittest.TestCase):
-    """GAP chart carries markers and a trend when enough points exist."""
+    """GAP chart carries markers and dual trends when enough points exist."""
 
     def test_title_and_trend_trace(self):
         self.assertEqual(hike_gap_title(), "Grade-Adjusted Pace")
@@ -200,15 +241,101 @@ class HikeGapChartTests(unittest.TestCase):
                 "name": ["A", "B", "C"],
                 "distance_miles": [5.0, 6.0, 7.0],
                 "elevation_gain_ft": [1000.0, 1200.0, 800.0],
-                "elapsed_min": [100.0, 110.0, 120.0],
+                "moving_min": [100.0, 110.0, 120.0],
                 "gap_min_per_grade_mi": [16.7, 15.3, 15.4],
             }
         )
         fig = hike_gap_chart(points)
         names = [t.name for t in fig.data]
         self.assertIn("Hikes", names)
-        self.assertIn("Trend", names)
+        self.assertIn("Trend (all)", names)
+        self.assertIn("Trend (with elevation)", names)
+        self.assertNotIn("0 ft elev", names)
+        self.assertFalse(fig.layout.showlegend)
+        self.assertTrue(all(t.showlegend is False for t in fig.data))
         self.assertIn("min / grade-mi", fig.layout.yaxis.title.text)
+        # Heading comes from ``hike_gap_info_html``; Plotly title stays blank.
+        self.assertEqual(fig.layout.title.text, "")
+        hikes = next(t for t in fig.data if t.name == "Hikes")
+        self.assertIn("%{customdata[2]} mi · %{customdata[3]} ft", hikes.hovertemplate)
+        self.assertNotIn("elev mi", hikes.hovertemplate)
+        # customdata: date, name, miles, elevation_gain_ft (not elev miles).
+        self.assertEqual(hikes.customdata[0][2], "5.00")
+        self.assertEqual(hikes.customdata[0][3], "1,000")
+        self.assertEqual(hikes.customdata[1][3], "1,200")
+
+    def test_zero_elev_open_markers_and_elev_only_trend(self):
+        """0 ft elev → open markers; elev-only trend skips them."""
+        points = pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    [
+                        "2026-06-01T08:00:00Z",
+                        "2026-06-08T08:00:00Z",
+                        "2026-06-15T08:00:00Z",
+                        "2026-06-22T08:00:00Z",
+                    ],
+                    utc=True,
+                ),
+                "name": ["Flat", "A", "B", "C"],
+                "distance_miles": [5.0, 6.0, 7.0, 8.0],
+                "elevation_gain_ft": [0.0, 1000.0, 1200.0, 800.0],
+                "moving_min": [90.0, 100.0, 110.0, 120.0],
+                "gap_min_per_grade_mi": [18.0, 16.7, 15.3, 15.4],
+            }
+        )
+        fig = hike_gap_chart(points)
+        by_name = {t.name: t for t in fig.data}
+        self.assertIn("Hikes", by_name)
+        self.assertIn("0 ft elev", by_name)
+        self.assertIn("Trend (all)", by_name)
+        self.assertIn("Trend (with elevation)", by_name)
+        self.assertFalse(fig.layout.showlegend)
+        open_marker = by_name["0 ft elev"].marker
+        self.assertEqual(len(by_name["0 ft elev"].x), 1)
+        self.assertEqual(open_marker.color, "rgba(0,0,0,0)")
+        self.assertEqual(open_marker.line.color, "#509B8F")  # MILEAGE_BAR
+        self.assertEqual(len(by_name["Hikes"].x), 3)
+        self.assertIn(" ft", by_name["0 ft elev"].hovertemplate)
+        self.assertEqual(by_name["0 ft elev"].customdata[0][3], "0")
+        # Elev-only trend uses the three elev>0 points; all-trend uses four.
+        self.assertEqual(len(by_name["Trend (with elevation)"].x), 3)
+        self.assertEqual(len(by_name["Trend (all)"].x), 4)
+        self.assertEqual(by_name["Trend (all)"].line.dash, "dash")
+        self.assertEqual(by_name["Trend (with elevation)"].line.dash, "solid")
+
+    def test_gap_info_html_explains_formula(self):
+        """ⓘ after the title covers GAP definition, formula, chart key, caveats."""
+        html = hike_gap_info_html("Grade-Adjusted Pace")
+        self.assertIn("hike-gap-info", html)
+        self.assertIn("hike-gap-chart-title", html)
+        self.assertIn("kpi-info", html)
+        self.assertIn("kpi-tooltip", html)
+        self.assertIn("ⓘ", html)
+        self.assertIn("Grade-Adjusted Pace", html)
+        self.assertLess(
+            html.index("Grade-Adjusted Pace"),
+            html.index("kpi-info"),
+        )
+        self.assertIn("moving minutes", html.lower())
+        self.assertIn("elevation gain ft", html.lower())
+        self.assertIn("1000", html)
+        self.assertIn("min / grade-mi", html)
+        self.assertIn("grade-mile", html.lower())
+        self.assertIn("moving time", html.lower())
+        self.assertIn("not elapsed time", html.lower())
+        self.assertNotIn("elapsed minutes", html.lower())
+        self.assertIn("omitted", html.lower())
+        # Chart key replaces Plotly legend (filled vs open; dual trends).
+        self.assertIn("Filled circles", html)
+        self.assertIn("Open circles", html)
+        self.assertIn("0 ft elevation", html.lower())
+        self.assertIn("solid line", html.lower())
+        self.assertIn("dashed line", html.lower())
+        self.assertIn("only hikes with elevation", html.lower())
+        self.assertIn("all plotted hikes", html.lower())
+        self.assertNotIn("Trend (all)", html)
+        self.assertNotIn("Trend (with elevation)", html)
 
 
 class HikingBadgesHtmlTests(unittest.TestCase):
@@ -299,6 +426,19 @@ class HikingNavWiringTests(unittest.TestCase):
         self.assertIn(".st-key-hiking_miles", GLOBAL_CSS)
         self.assertIn(".st-key-hiking_elevation", GLOBAL_CSS)
         self.assertIn(".st-key-hiking_gap", GLOBAL_CSS)
+        self.assertIn(".hike-gap-info", GLOBAL_CSS)
+        self.assertIn(".hike-gap-info .kpi-tooltip", GLOBAL_CSS)
+        # GAP: top gap lives on the HTML title band (blank Plotly title).
+        gap_key_idx = GLOBAL_CSS.index(".st-key-hiking_gap")
+        gap_key_rule = GLOBAL_CSS[gap_key_idx : gap_key_idx + 160]
+        self.assertIn("margin-top: 0 !important", gap_key_rule)
+        info_block = GLOBAL_CSS.split(".hike-gap-info {", 1)[1].split("}", 1)[0]
+        self.assertIn("display: inline-flex;", info_block)
+        self.assertIn("align-items: center;", info_block)
+        tip_block = GLOBAL_CSS.split(".hike-gap-info .kpi-tooltip {", 1)[1].split(
+            "}", 1
+        )[0]
+        self.assertIn("left: calc(100% + 0.35rem)", tip_block)
         # Map is top-row (beside Controls): no mid-page first-chart gap.
         map_css_idx = GLOBAL_CSS.index('[class*="st-key-hiking_map"]')
         map_rule = GLOBAL_CSS[map_css_idx : map_css_idx + 180]
@@ -342,6 +482,15 @@ class HikingNavWiringTests(unittest.TestCase):
         self.assertIn("Reset map filter", page_text)
         self.assertNotIn("Show all hikes", page_text)
         self.assertIn("hiking-map-panel", page_text)
+        self.assertIn("hike_gap_info_html", page_text)
+        self.assertIn("hike_gap_info_html(hike_gap_title())", page_text)
+        gap_anchor = page_text.find('id="chart-hiking-gap"')
+        gap_info_call = page_text.find("hike_gap_info_html(hike_gap_title())")
+        gap_chart_key = page_text.find('key="hiking_gap"')
+        self.assertGreater(gap_anchor, -1)
+        self.assertGreater(gap_info_call, -1)
+        self.assertLess(gap_anchor, gap_info_call)
+        self.assertLess(gap_info_call, gap_chart_key)
         # Top row: Controls left, map right — then badges, then charts.
         self.assertIn("controls_col, map_col = st.columns([1.05, 2.35]", page_text)
         cols_idx = page_text.find("controls_col, map_col = st.columns")
@@ -412,9 +561,9 @@ class HikingNavWiringTests(unittest.TestCase):
 
 
 class LoadHikesTests(unittest.TestCase):
-    """Hike CSV loader parses elapsed minutes."""
+    """Hike CSV loader parses moving and elapsed minutes."""
 
-    def test_load_hikes_parses_elapsed(self):
+    def test_load_hikes_parses_moving_and_elapsed(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
             csv_path = data_dir / "strava_hike_analysis.csv"
@@ -428,6 +577,7 @@ class LoadHikesTests(unittest.TestCase):
             )
             df = load_hikes(data_dir)
             self.assertEqual(len(df), 1)
+            self.assertAlmostEqual(float(df.iloc[0]["moving_min"]), 90.0)
             self.assertAlmostEqual(float(df.iloc[0]["elapsed_min"]), 120.0)
             self.assertAlmostEqual(float(df.iloc[0]["distance_miles"]), 5.0)
             self.assertAlmostEqual(float(df.iloc[0]["start_lat"]), 42.3)
@@ -509,7 +659,7 @@ class PeriodWindowFromActivitiesTests(unittest.TestCase):
         self.assertTrue((metrics["total_miles"] > 0).all())
 
         filtered_gap = filtered.copy()
-        filtered_gap["elapsed_min"] = [100.0, 110.0]
+        filtered_gap["moving_min"] = [100.0, 110.0]
         gap = hike_gap_points(
             filtered_gap,
             grain="Week",

@@ -181,6 +181,10 @@ def _load_hikes_uncached(data_dir: Path) -> pd.DataFrame:
         df["elapsed_min"] = df["elapsed_time_min"].map(_parse_duration_minutes)
     else:
         df["elapsed_min"] = np.nan
+    if "moving_time_min" in df.columns:
+        df["moving_min"] = df["moving_time_min"].map(_parse_duration_minutes)
+    else:
+        df["moving_min"] = np.nan
     return df.sort_values("date")
 
 
@@ -203,7 +207,8 @@ def load_hikes(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     pandas.DataFrame
         Hike rows sorted by activity date with parsed timestamps, numeric
         distance / elevation / ``start_lat`` / ``start_lng`` when present,
-        and ``elapsed_min`` (minutes from ``elapsed_time_min``).
+        ``elapsed_min`` (from ``elapsed_time_min``), and ``moving_min``
+        (from ``moving_time_min``).
 
     Raises
     ------
@@ -1964,19 +1969,19 @@ def build_kpi_detail(
 
 
 def grade_adjusted_pace(
-    elapsed_min: float | None,
+    moving_min: float | None,
     elevation_ft: float | None,
     miles: float | None,
 ) -> float | None:
     """Return grade-adjusted pace in minutes per grade-mile.
 
-    ``GAP = elapsed_min / (elevation_ft / 1000 + miles)``, where the
+    ``GAP = moving_min / (elevation_ft / 1000 + miles)``, where the
     denominator is a “grade-mile” (flat miles plus 1000 ft of climb).
 
     Parameters
     ----------
-    elapsed_min : float or None
-        Elapsed time in minutes.
+    moving_min : float or None
+        Moving time in minutes.
     elevation_ft : float or None
         Elevation gain in feet.
     miles : float or None
@@ -1988,22 +1993,22 @@ def grade_adjusted_pace(
         Minutes per grade-mile, or ``None`` when inputs are missing or the
         denominator is non-positive.
     """
-    if elapsed_min is None or elevation_ft is None or miles is None:
+    if moving_min is None or elevation_ft is None or miles is None:
         return None
     try:
-        elapsed = float(elapsed_min)
+        moving = float(moving_min)
         elev = float(elevation_ft)
         dist = float(miles)
     except (TypeError, ValueError):
         return None
-    if not np.isfinite(elapsed) or not np.isfinite(elev) or not np.isfinite(dist):
+    if not np.isfinite(moving) or not np.isfinite(elev) or not np.isfinite(dist):
         return None
-    if elapsed < 0:
+    if moving < 0:
         return None
     denom = elev / 1000.0 + dist
     if denom <= 0:
         return None
-    return elapsed / denom
+    return moving / denom
 
 
 def consecutive_hike_trips(df: pd.DataFrame) -> pd.DataFrame:
@@ -2238,7 +2243,7 @@ def hike_gap_points(
     Parameters
     ----------
     df : pandas.DataFrame
-        Hike rows with ``date``, ``elapsed_min``, ``elevation_gain_ft``, and
+        Hike rows with ``date``, ``moving_min``, ``elevation_gain_ft``, and
         ``distance_miles``.
     grain : PeriodGrain, optional
         Show By grain used with ``start`` / ``end`` (same as bar charts).
@@ -2253,43 +2258,33 @@ def hike_gap_points(
     -------
     pandas.DataFrame
         Rows with ``date``, ``name``, ``distance_miles``, ``elevation_gain_ft``,
-        ``elapsed_min``, ``gap_min_per_grade_mi``, sorted by date. Activities
+        ``moving_min``, ``gap_min_per_grade_mi``, sorted by date. Activities
         outside the Show By window or missing GAP inputs are dropped.
     """
+    empty_cols = [
+        "date",
+        "name",
+        "distance_miles",
+        "elevation_gain_ft",
+        "moving_min",
+        "gap_min_per_grade_mi",
+    ]
     if df.empty:
-        return pd.DataFrame(
-            columns=[
-                "date",
-                "name",
-                "distance_miles",
-                "elevation_gain_ft",
-                "elapsed_min",
-                "gap_min_per_grade_mi",
-            ]
-        )
+        return pd.DataFrame(columns=empty_cols)
 
     windowed = filter_to_recent_periods(
         df, grain, as_of=as_of, start=start, end=end
     )
     if windowed.empty:
-        return pd.DataFrame(
-            columns=[
-                "date",
-                "name",
-                "distance_miles",
-                "elevation_gain_ft",
-                "elapsed_min",
-                "gap_min_per_grade_mi",
-            ]
-        )
+        return pd.DataFrame(columns=empty_cols)
 
     rows: list[dict[str, object]] = []
     for _, row in windowed.iterrows():
         elev = row.get("elevation_gain_ft")
         miles = row.get("distance_miles")
-        elapsed = row.get("elapsed_min")
+        moving = row.get("moving_min")
         gap = grade_adjusted_pace(
-            None if pd.isna(elapsed) else float(elapsed),
+            None if pd.isna(moving) else float(moving),
             None if pd.isna(elev) else float(elev),
             None if pd.isna(miles) else float(miles),
         )
@@ -2302,21 +2297,12 @@ def hike_gap_points(
                 "name": None if pd.isna(name) else str(name).strip() or None,
                 "distance_miles": float(miles) if miles is not None and pd.notna(miles) else np.nan,
                 "elevation_gain_ft": float(elev) if elev is not None and pd.notna(elev) else np.nan,
-                "elapsed_min": float(elapsed) if elapsed is not None and pd.notna(elapsed) else np.nan,
+                "moving_min": float(moving) if moving is not None and pd.notna(moving) else np.nan,
                 "gap_min_per_grade_mi": gap,
             }
         )
     if not rows:
-        return pd.DataFrame(
-            columns=[
-                "date",
-                "name",
-                "distance_miles",
-                "elevation_gain_ft",
-                "elapsed_min",
-                "gap_min_per_grade_mi",
-            ]
-        )
+        return pd.DataFrame(columns=empty_cols)
     return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
 
 

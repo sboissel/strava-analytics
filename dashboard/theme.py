@@ -1082,9 +1082,70 @@ GLOBAL_CSS = f"""
     margin-top: var(--chart-elevation-margin-top) !important;
     margin-bottom: 0 !important;
   }}
+  /* Hiking GAP: HTML title + ⓘ sit in the Plotly title band (blank Plotly
+     title); margin-top lives on the info container (Fitness/Training pattern). */
   .st-key-hiking_gap {{
-    margin-top: var(--chart-elevation-margin-top) !important;
+    margin-top: 0 !important;
     margin-bottom: 0 !important;
+  }}
+  [data-testid="stElementContainer"]:has(.hike-gap-info) {{
+    position: relative;
+    z-index: 8;
+    display: block;
+    width: 100%;
+    margin-top: var(--chart-elevation-margin-top) !important;
+    margin-bottom: -2.15rem !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    pointer-events: none;
+  }}
+  [data-testid="stElementContainer"]:has(.hike-gap-info)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(.hike-gap-info)
+    [data-testid="stMarkdown"] {{
+    overflow: visible !important;
+    width: 100% !important;
+  }}
+  [data-testid="stElementContainer"]:has(.hike-gap-info)
+    + [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]) {{
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }}
+  .hike-gap-info {{
+    position: relative;
+    top: 0.4rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    max-width: calc(100% - var(--training-plot-margin-r) - 0.75rem);
+    min-height: 1.6rem;
+    z-index: 8;
+    pointer-events: none;
+  }}
+  .hike-gap-chart-title {{
+    display: inline;
+    font-family: {FONT_BODY};
+    font-size: {CHART_TITLE_SIZE_PX}px;
+    font-weight: {CHART_TITLE_FONT_WEIGHT};
+    color: {INK};
+    line-height: 1.2;
+  }}
+  .hike-gap-info .kpi-info {{
+    position: relative;
+    flex-shrink: 0;
+    opacity: 0.85;
+    pointer-events: auto;
+    z-index: 9;
+  }}
+  .hike-gap-info .kpi-tooltip {{
+    /* Open to the right of ⓘ on hover/focus. */
+    left: calc(100% + 0.35rem);
+    right: auto;
+    bottom: auto;
+    top: 0;
+    transform: none;
+    width: min(22rem, 72vw);
+    z-index: 60;
   }}
   /* Fitness: Average HR by Pace — HTML title + rolling subtitle outside
      Plotly (blank Plotly title) so SVG margin clipping cannot cut caps.

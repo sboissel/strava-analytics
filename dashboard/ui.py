@@ -309,6 +309,57 @@ def compliance_info_html(title: str) -> str:
     )
 
 
+def hike_gap_info_html(title: str) -> str:
+    """Return the hiking GAP title with an inline ⓘ definition.
+
+    Title and info icon sit together in the Plotly title band (blank Plotly
+    title). The ``.kpi-tooltip`` opens to the right of the icon on hover/focus.
+
+    Parameters
+    ----------
+    title : str
+        Chart heading from ``hike_gap_title`` (e.g. ``Grade-Adjusted Pace``).
+
+    Returns
+    -------
+    str
+        HTML markup for the inline title + ``.kpi-info`` tooltip row.
+    """
+    tooltip = (
+        "<strong>Definition</strong>"
+        "Grade-adjusted pace (GAP) folds climb into distance so steep hikes "
+        "are comparable to flatter ones. Lower means you covered more "
+        "grade-miles per minute."
+        "<br><br>"
+        "<strong>Calculation</strong>"
+        "Per hike, GAP = moving minutes ÷ (elevation gain ft ÷ 1000 + miles), "
+        "in min / grade-mi. A grade-mile is one flat mile or 1,000 ft of climb."
+        "<br><br>"
+        "<strong>Markers</strong>"
+        "Filled circles are hikes with elevation gain. Open circles are hikes "
+        "recorded with 0 ft elevation (often suspect or incomplete GPS elev)."
+        "<br><br>"
+        "<strong>Trend lines</strong>"
+        "The solid line is the trend using only hikes with elevation. The "
+        "dashed line is the trend across all plotted hikes, including 0 ft elev."
+        "<br><br>"
+        "<strong>Caveats</strong>"
+        "Uses total elevation gain and moving time (not elapsed time or "
+        "descent). Hikes missing distance, elevation, or moving time are "
+        "omitted."
+    )
+    return (
+        '<div class="hike-gap-info" role="group" '
+        'aria-label="Grade-adjusted pace chart info">'
+        f'<span class="hike-gap-chart-title">{html.escape(title)}</span>'
+        '<span class="kpi-info" tabindex="0" role="button" '
+        'aria-label="About grade-adjusted pace">'
+        '<span aria-hidden="true">ⓘ</span>'
+        f'<span class="kpi-tooltip" role="tooltip">{tooltip}</span>'
+        "</span></div>"
+    )
+
+
 def _parse_zone_float(raw: object) -> float:
     """Coerce a zone share/seconds value to a finite float (else ``0.0``)."""
     try:
