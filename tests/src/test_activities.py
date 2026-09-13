@@ -28,7 +28,6 @@ from strava_analytics.csv_io import (
     _drop_header_like_rows,
     activity_analysis_columns,
     activity_analysis_paths,
-    activity_ids_missing_location,
     backfill_location_from_summaries,
     save_activities_last_week,
     update_activity_analysis_csvs,
@@ -984,49 +983,6 @@ class CsvProcessingTests(unittest.TestCase):
         self.assertEqual(float(hike_df.iloc[0]["start_lng"]), -3.55)
         # Existing run coords must not be overwritten.
         self.assertEqual(float(run_df.iloc[0]["start_lat"]), 37.17453)
-
-    def test_activity_ids_missing_location_finds_empty_coords(self):
-        """Ensure missing-location scan includes empty GPS and pre-schema files."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_dir = Path(tmpdir)
-            pd.DataFrame(
-                [
-                    {
-                        "activity_id": "1",
-                        "name": "No GPS",
-                        "type": "Hike",
-                        "date": "2024-01-01T00:00:00Z",
-                        "distance_miles": "1.0",
-                        "moving_time_min": "00:30:00",
-                        "elapsed_time_min": "00:30:00",
-                        "elevation_gain_ft": "10",
-                        "avg_pace": "30:00",
-                        "avg_pace_sec": "1800",
-                        "max_pace": "20:00",
-                        "max_pace_sec": "1200",
-                        "start_lat": "",
-                        "start_lng": "",
-                    },
-                    {
-                        "activity_id": "2",
-                        "name": "Has GPS",
-                        "type": "Hike",
-                        "date": "2024-01-02T00:00:00Z",
-                        "distance_miles": "1.0",
-                        "moving_time_min": "00:30:00",
-                        "elapsed_time_min": "00:30:00",
-                        "elevation_gain_ft": "10",
-                        "avg_pace": "30:00",
-                        "avg_pace_sec": "1800",
-                        "max_pace": "20:00",
-                        "max_pace_sec": "1200",
-                        "start_lat": "37.1",
-                        "start_lng": "-3.6",
-                    },
-                ]
-            ).to_csv(output_dir / "strava_hike_analysis.csv", index=False)
-
-            self.assertEqual(activity_ids_missing_location(output_dir), {"1"})
 
     def test_update_activity_analysis_csvs_creates_missing_file(self):
         """Ensure missing analysis CSVs are created on first update."""

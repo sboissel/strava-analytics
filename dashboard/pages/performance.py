@@ -43,6 +43,8 @@ from race_data import (
     race_summary_meta,
     race_table_rows,
     race_type_options,
+    races_have_start_coords,
+    reverse_geocode_error_message,
 )
 from theme import INK, RACE_TABLE_FILL
 from ui import (
@@ -121,6 +123,7 @@ def _render_race_table(table_df: pd.DataFrame) -> None:
             "activity_id": None,
             "Name": st.column_config.TextColumn("Name"),
             "Date": st.column_config.DateColumn("Date", format="MMMM D, YYYY"),
+            "Location": st.column_config.TextColumn("Location"),
             "Race Type": st.column_config.TextColumn("Race Type"),
             "Miles": st.column_config.NumberColumn("Miles", format="%.2f"),
             "Time": st.column_config.TextColumn("Time"),
@@ -531,6 +534,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown('<div class="chart-section-title">Race History</div>', unsafe_allow_html=True)
+_geocode_issue = reverse_geocode_error_message()
+if (
+    _geocode_issue
+    and races_have_start_coords(filtered)
+    and not table_df.empty
+    and (table_df["Location"] == "—").all()
+):
+    st.warning(_geocode_issue)
 _render_race_table(table_df)
 
 _render_race_buildup(all_races, runs)

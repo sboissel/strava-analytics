@@ -1,7 +1,7 @@
 """CSV persistence helpers for activity analysis and sync cursor state."""
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -179,51 +179,6 @@ def _coord_missing(value: Any) -> bool:
         pass
     text = str(value).strip()
     return text == "" or text.lower() == "nan"
-
-
-def activity_ids_missing_location(
-    output_dir: Path,
-    activity_types: Sequence[str] = ACTIVITY_TYPES,
-) -> Set[str]:
-    """Return activity IDs whose analysis rows still lack start GPS.
-
-    Parameters
-    ----------
-    output_dir : pathlib.Path
-        Directory containing ``strava_<type>_analysis.csv`` files.
-    activity_types : sequence of str, optional
-        Activity types to scan. Defaults to run, ride, swim, and hike.
-
-    Returns
-    -------
-    set of str
-        Activity IDs with missing ``start_lat`` and/or ``start_lng``.
-    """
-    missing: Set[str] = set()
-    for activity_type, filename in zip(
-        activity_types, activity_analysis_paths(output_dir, activity_types)
-    ):
-        if not filename.exists():
-            continue
-        df = pd.read_csv(filename, dtype=str, keep_default_na=False)
-        df = _drop_header_like_rows(df)
-        if df.empty or "activity_id" not in df.columns:
-            continue
-        # Older CSVs may not have location columns yet; treat those as missing.
-        if "start_lat" not in df.columns or "start_lng" not in df.columns:
-            missing.update(
-                str(activity_id).strip()
-                for activity_id in df["activity_id"].tolist()
-                if str(activity_id).strip()
-            )
-            continue
-        for _, row in df.iterrows():
-            activity_id = str(row.get("activity_id", "")).strip()
-            if not activity_id:
-                continue
-            if _coord_missing(row.get("start_lat")) or _coord_missing(row.get("start_lng")):
-                missing.add(activity_id)
-    return missing
 
 
 def backfill_location_from_summaries(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import requests
 
@@ -24,6 +24,16 @@ class StravaClient:
         refresh_token: str,
         last_activity_id: str,
     ) -> None:
+        """Initialize a client with OAuth credentials and sync watermark.
+
+        Parameters
+        ----------
+        client_id, client_secret, refresh_token :
+            Strava OAuth application credentials.
+        last_activity_id :
+            Highest activity ID already written to analysis CSVs; list
+            fetches stop after this id is seen.
+        """
         self.client_id = client_id
         self.client_secret = client_secret
         self.refresh_token = refresh_token
@@ -96,7 +106,6 @@ class StravaClient:
         self,
         *,
         stop_at_activity_id: Optional[str] = None,
-        stop_when_ids_seen: Optional[Collection[str]] = None,
         per_page: int = 100,
     ) -> List[Dict[str, Any]]:
         """Page athlete activity summaries from newest to oldest.
@@ -105,10 +114,6 @@ class StravaClient:
         ----------
         stop_at_activity_id : str, optional
             Stop after the page that contains this activity ID (incremental sync).
-        stop_when_ids_seen : collection of str, optional
-            Stop once every listed activity ID has appeared in a fetched page
-            (location backfill). IDs never returned by Strava still cause a full
-            history walk until an empty page.
         per_page : int, optional
             Page size for the list endpoint (max 200). Defaults to 100.
 
@@ -126,11 +131,6 @@ class StravaClient:
         activities: List[Dict[str, Any]] = []
         page = 1
         headers = {"Authorization": f"Bearer {access_token}"}
-        remaining: Optional[Set[str]] = (
-            {str(activity_id) for activity_id in stop_when_ids_seen}
-            if stop_when_ids_seen is not None
-            else None
-        )
         stop_id = str(stop_at_activity_id) if stop_at_activity_id is not None else None
 
         while True:
@@ -151,11 +151,6 @@ class StravaClient:
             print(f"Pulled page {page} ({len(activities)} activities)")
 
             page_ids = {str(act["id"]) for act in data}
-            if remaining is not None:
-                remaining -= page_ids
-                if not remaining:
-                    break
-
             if stop_id is not None and stop_id in page_ids:
                 break
 

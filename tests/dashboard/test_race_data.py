@@ -9,11 +9,17 @@ from dashboard.race_data import (
     ensure_race_pace_min,
     fastest_races_by_type,
     filter_race_results,
+    format_race_location,
     mark_personal_records,
     parse_duration_minutes,
+    race_location_labels,
     race_table_rows,
     race_type_options,
+    races_have_start_coords,
+    reverse_geocode_available,
+    reverse_geocode_error_message,
 )
+import dashboard.race_data as race_data_mod
 
 
 class ParseDurationTests(unittest.TestCase):
@@ -131,6 +137,185 @@ class FormatFullDateTests(unittest.TestCase):
         self.assertEqual(format_full_date(ts), "May 19, 2019")
 
 
+class FormatRaceLocationTests(unittest.TestCase):
+    """US vs non-US location label formatting for the race table."""
+
+    def test_us_uses_city_and_state(self):
+        self.assertEqual(
+            format_race_location("Boston", "Massachusetts", "United States"),
+            "Boston, Massachusetts",
+        )
+        self.assertEqual(
+            format_race_location(
+                "Cambridge",
+                "MA",
+                country_code="US",
+            ),
+            "Cambridge, MA",
+        )
+
+    def test_non_us_uses_city_and_country(self):
+        self.assertEqual(
+            format_race_location("Nice", "Provence-Alpes-Côte d'Azur", "France"),
+            "Nice, France",
+        )
+        self.assertEqual(
+            format_race_location("Órgiva", "Andalusia", "Spain"),
+            "Órgiva, Spain",
+        )
+
+    def test_missing_pieces_omit_blanks(self):
+        self.assertEqual(format_race_location("Boston", None, "United States"), "Boston")
+        self.assertEqual(
+            format_race_location(None, "Massachusetts", "United States"),
+            "Massachusetts",
+        )
+        self.assertEqual(format_race_location("Nice", None, None), "Nice")
+        self.assertEqual(format_race_location(None, None, "France"), "France")
+        self.assertEqual(
+            format_race_location(None, None, country_code="FR"),
+            "FR",
+        )
+
+    def test_empty_returns_em_dash(self):
+        self.assertEqual(format_race_location(None, None, None), "—")
+        self.assertEqual(format_race_location("", "  ", "nan"), "—")
+        self.assertEqual(format_race_location(float("nan"), None, None), "—")
+
+
+class RacesHaveStartCoordsTests(unittest.TestCase):
+    """Detect when race rows carry usable start GPS for geocoding."""
+
+    def test_true_when_any_finite_pair(self):
+        races = pd.DataFrame(
+            {
+                "start_lat": [None, 42.4, float("nan")],
+                "start_lng": [None, -71.1, -71.0],
+            }
+        )
+        self.assertTrue(races_have_start_coords(races))
+
+    def test_false_when_missing_or_all_invalid(self):
+        self.assertFalse(races_have_start_coords(pd.DataFrame()))
+        self.assertFalse(
+            races_have_start_coords(
+                pd.DataFrame({"start_lat": [None, float("nan")], "start_lng": [1.0, None]})
+            )
+        )
+        self.assertFalse(races_have_start_coords(pd.DataFrame({"name": ["A"]})))
+
+
+class RaceLocationLabelsTests(unittest.TestCase):
+    """Location labels from place columns or start GPS."""
+
+    def setUp(self):
+        race_data_mod._REVERSE_GEOCODE_AVAILABLE = None
+        race_data_mod._REVERSE_GEOCODE_ERROR = None
+        race_data_mod._cached_reverse_geocode_search.cache_clear()
+
+    def tearDown(self):
+        race_data_mod._REVERSE_GEOCODE_AVAILABLE = None
+        race_data_mod._REVERSE_GEOCODE_ERROR = None
+        race_data_mod._cached_reverse_geocode_search.cache_clear()
+
+    def test_prefers_place_columns_over_coords(self):
+        races = pd.DataFrame(
+            {
+                "location_city": ["Boston", "Nice"],
+                "location_state": ["Massachusetts", "PACA"],
+                "location_country": ["United States", "France"],
+                "start_lat": [0.0, 0.0],
+                "start_lng": [0.0, 0.0],
+            }
+        )
+        labels = race_location_labels(races)
+        self.assertEqual(list(labels), ["Boston, Massachusetts", "Nice, France"])
+
+    def test_missing_coords_yield_em_dash(self):
+        races = pd.DataFrame({"start_lat": [None, float("nan")], "start_lng": [None, 1.0]})
+        labels = race_location_labels(races)
+        self.assertEqual(list(labels), ["—", "—"])
+
+    def test_no_location_fields_yield_em_dash(self):
+        races = pd.DataFrame({"name": ["A", "B"]})
+        labels = race_location_labels(races)
+        self.assertEqual(list(labels), ["—", "—"])
+
+    def test_geocodes_from_start_latlng(self):
+        from unittest import mock
+
+        races = pd.DataFrame(
+            {
+                "start_lat": [42.39609, 43.695013],
+                "start_lng": [-71.080719, 7.266503],
+            }
+        )
+        fake = mock.Mock()
+        fake.search.return_value = [
+            {
+                "city": "Somerville",
+                "state": "Massachusetts",
+                "country": "United States",
+                "country_code": "US",
+            },
+            {
+                "city": "Nice",
+                "state": "Provence",
+                "country": "France",
+                "country_code": "FR",
+            },
+        ]
+        with mock.patch.dict("sys.modules", {"reverse_geocode": fake}):
+            race_data_mod._REVERSE_GEOCODE_AVAILABLE = None
+            labels = race_location_labels(races)
+        self.assertEqual(list(labels), ["Somerville, Massachusetts", "Nice, France"])
+        fake.search.assert_called_once()
+
+    def test_missing_package_sets_error_message(self):
+        from unittest import mock
+
+        races = pd.DataFrame({"start_lat": [42.4], "start_lng": [-71.1]})
+        with mock.patch.dict("sys.modules", {"reverse_geocode": None}):
+            # Force import to fail even if the package is installed.
+            import builtins
+
+            real_import = builtins.__import__
+
+            def _block_reverse_geocode(name, *args, **kwargs):
+                if name == "reverse_geocode" or name.startswith("reverse_geocode."):
+                    raise ImportError("blocked for test")
+                return real_import(name, *args, **kwargs)
+
+            with mock.patch("builtins.__import__", side_effect=_block_reverse_geocode):
+                race_data_mod._REVERSE_GEOCODE_AVAILABLE = None
+                labels = race_location_labels(races)
+                self.assertEqual(list(labels), ["—"])
+                self.assertFalse(reverse_geocode_available())
+                msg = reverse_geocode_error_message()
+                self.assertIsNotNone(msg)
+                self.assertIn("pip install", msg)
+
+    @unittest.skipUnless(
+        __import__("importlib.util").util.find_spec("reverse_geocode") is not None,
+        "reverse_geocode not installed",
+    )
+    def test_live_geocode_known_race_coords(self):
+        """Real library path: known GPS should not stay as em dash."""
+        races = pd.DataFrame(
+            {
+                "start_lat": [43.695013, 42.347356],
+                "start_lng": [7.266503, -71.032334],
+            }
+        )
+        labels = list(race_location_labels(races))
+        self.assertEqual(len(labels), 2)
+        self.assertNotEqual(labels[0], "—")
+        self.assertNotEqual(labels[1], "—")
+        self.assertIn("France", labels[0])
+        self.assertIn("Massachusetts", labels[1])
+        self.assertTrue(reverse_geocode_available())
+
+
 class RaceTableRowsTests(unittest.TestCase):
     """Race history table columns and default sort."""
 
@@ -159,6 +344,7 @@ class RaceTableRowsTests(unittest.TestCase):
                 "activity_id",
                 "Name",
                 "Date",
+                "Location",
                 "Race Type",
                 "Miles",
                 "Time",
@@ -169,6 +355,18 @@ class RaceTableRowsTests(unittest.TestCase):
         self.assertNotIn("Avg Pace", result.columns)
         self.assertNotIn("Day of Date", result.columns)
         self.assertEqual(list(result["activity_id"]), ["222", "111"])
+        self.assertEqual(list(result["Location"]), ["—", "—"])
+
+    def test_location_from_place_columns(self):
+        races = self._races()
+        races["location_city"] = ["Brooklyn", "Charleston"]
+        races["location_state"] = ["New York", "South Carolina"]
+        races["location_country"] = ["United States", "United States"]
+        result = race_table_rows(races)
+        self.assertEqual(
+            list(result["Location"]),
+            ["Charleston, South Carolina", "Brooklyn, New York"],
+        )
 
     def test_default_sort_is_date_ascending(self):
         result = race_table_rows(self._races())

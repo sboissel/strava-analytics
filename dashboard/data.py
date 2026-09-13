@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal, NamedTuple
 
@@ -93,6 +95,8 @@ def _load_runs_uncached(data_dir: Path) -> pd.DataFrame:
         "elevation_gain_ft",
         "avg_hr",
         "avg_pace_sec",
+        "start_lat",
+        "start_lng",
         *hr_zone_sec_columns(),
     ):
         if col in df.columns:
@@ -131,6 +135,84 @@ def load_runs(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     path = data_dir / "strava_run_analysis.csv"
     mtime = path.stat().st_mtime if path.exists() else 0.0
     return _load_runs_cached(mtime, str(data_dir))
+
+
+def _parse_duration_minutes(value: object) -> float | None:
+    """Parse ``H:MM:SS`` / ``M:SS`` duration strings into total minutes."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return None
+    parts = text.split(":")
+    try:
+        nums = [int(p) for p in parts]
+    except ValueError:
+        return None
+    if len(nums) == 3:
+        hours, minutes, seconds = nums
+    elif len(nums) == 2:
+        hours = 0
+        minutes, seconds = nums
+    else:
+        return None
+    return hours * 60.0 + minutes + seconds / 60.0
+
+
+def _load_hikes_uncached(data_dir: Path) -> pd.DataFrame:
+    """Load hike analysis rows with parsed dates and numeric fields."""
+    path = data_dir / "strava_hike_analysis.csv"
+    df = pd.read_csv(path)
+    df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
+    df = df.dropna(subset=["date"]).copy()
+    for col in (
+        "distance_miles",
+        "elevation_gain_ft",
+        "avg_pace_sec",
+        "max_pace_sec",
+        "start_lat",
+        "start_lng",
+    ):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    if "activity_id" in df.columns:
+        df["activity_id"] = pd.to_numeric(df["activity_id"], errors="coerce")
+    if "elapsed_time_min" in df.columns:
+        df["elapsed_min"] = df["elapsed_time_min"].map(_parse_duration_minutes)
+    else:
+        df["elapsed_min"] = np.nan
+    return df.sort_values("date")
+
+
+@st.cache_data(show_spinner=False)
+def _load_hikes_cached(csv_mtime: float, data_dir_str: str) -> pd.DataFrame:
+    return _load_hikes_uncached(Path(data_dir_str))
+
+
+def load_hikes(data_dir: Path = DATA_DIR) -> pd.DataFrame:
+    """Load hike analysis rows with parsed dates and numeric fields.
+
+    Parameters
+    ----------
+    data_dir : pathlib.Path, optional
+        Directory containing ``strava_hike_analysis.csv``. Defaults to the
+        repository ``data`` folder.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Hike rows sorted by activity date with parsed timestamps, numeric
+        distance / elevation / ``start_lat`` / ``start_lng`` when present,
+        and ``elapsed_min`` (minutes from ``elapsed_time_min``).
+
+    Raises
+    ------
+    FileNotFoundError
+        If the hike analysis CSV is missing from ``data_dir``.
+    """
+    path = data_dir / "strava_hike_analysis.csv"
+    mtime = path.stat().st_mtime if path.exists() else 0.0
+    return _load_hikes_cached(mtime, str(data_dir))
 
 
 def _activity_distances_for_gear(data_dir: Path) -> pd.DataFrame:
@@ -615,6 +697,69 @@ def clamp_period_window(
     if left > right:
         left = right
     return PeriodWindow(start=left, end=right)
+
+
+def period_window_from_activities(
+    df: pd.DataFrame,
+    grain: PeriodGrain,
+) -> PeriodWindow | None:
+    """Return a grain-aligned window covering activity dates in ``df``.
+
+    Used when a map (or similar) filter narrows the activity set so period
+    charts fit the filtered min..max dates instead of the global Start/End
+    controls.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Activity rows with a ``date`` column.
+    grain : PeriodGrain
+        Calendar aggregation grain (day / week / month / year).
+
+    Returns
+    -------
+    PeriodWindow or None
+        Inclusive aligned start/end from the earliest to latest activity
+        date, or ``None`` when ``df`` is empty or has no valid dates.
+    """
+    if df.empty or "date" not in df.columns:
+        return None
+    dates = pd.to_datetime(df["date"], utc=True, errors="coerce").dropna()
+    if dates.empty:
+        return None
+    start = align_to_period_start(grain, normalize_utc(dates.min()))
+    end = align_to_period_start(grain, normalize_utc(dates.max()))
+    if start > end:
+        start, end = end, start
+    return PeriodWindow(start=start, end=end)
+
+
+def period_grain_for_date_span(df: pd.DataFrame) -> PeriodGrain:
+    """Choose a Show By grain from the activity date span (max − min).
+
+    Heuristic thresholds on calendar days between earliest and latest
+    activity (``(max − min).days``):
+
+    - ≤ 14 → ``Day`` (about two weeks or less)
+    - ≤ 90 → ``Week`` (about a quarter)
+    - ≤ 730 → ``Month`` (about two years)
+    - else → ``Year``
+
+    Empty frames or missing/invalid dates default to ``Week``.
+    """
+    if df.empty or "date" not in df.columns:
+        return "Week"
+    dates = pd.to_datetime(df["date"], utc=True, errors="coerce").dropna()
+    if dates.empty:
+        return "Week"
+    span_days = int((dates.max() - dates.min()).days)
+    if span_days <= 14:
+        return "Day"
+    if span_days <= 90:
+        return "Week"
+    if span_days <= 730:
+        return "Month"
+    return "Year"
 
 
 def period_showing_label(
@@ -1816,4 +1961,1039 @@ def build_kpi_detail(
         "table": table,
         "empty_message": "No runs in the last 30 days.",
     }
+
+
+def grade_adjusted_pace(
+    elapsed_min: float | None,
+    elevation_ft: float | None,
+    miles: float | None,
+) -> float | None:
+    """Return grade-adjusted pace in minutes per grade-mile.
+
+    ``GAP = elapsed_min / (elevation_ft / 1000 + miles)``, where the
+    denominator is a “grade-mile” (flat miles plus 1000 ft of climb).
+
+    Parameters
+    ----------
+    elapsed_min : float or None
+        Elapsed time in minutes.
+    elevation_ft : float or None
+        Elevation gain in feet.
+    miles : float or None
+        Distance in miles.
+
+    Returns
+    -------
+    float or None
+        Minutes per grade-mile, or ``None`` when inputs are missing or the
+        denominator is non-positive.
+    """
+    if elapsed_min is None or elevation_ft is None or miles is None:
+        return None
+    try:
+        elapsed = float(elapsed_min)
+        elev = float(elevation_ft)
+        dist = float(miles)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(elapsed) or not np.isfinite(elev) or not np.isfinite(dist):
+        return None
+    if elapsed < 0:
+        return None
+    denom = elev / 1000.0 + dist
+    if denom <= 0:
+        return None
+    return elapsed / denom
+
+
+def consecutive_hike_trips(df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate hikes into trips of consecutive calendar days.
+
+    A trip is a maximal streak of consecutive UTC calendar days that each
+    include at least one hike. Miles (and elevation) are summed across all
+    hikes on those days. A gap of one or more calendar days without a hike
+    starts a new trip.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Hike rows with ``date`` and ``distance_miles`` (optional
+        ``elevation_gain_ft``).
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per trip with ``start_date``, ``end_date``, ``days``,
+        ``total_miles``, and ``total_elevation_ft``.
+    """
+    empty = pd.DataFrame(
+        columns=[
+            "start_date",
+            "end_date",
+            "days",
+            "total_miles",
+            "total_elevation_ft",
+        ]
+    )
+    if df.empty or "date" not in df.columns:
+        return empty
+
+    work = df.copy()
+    work["_day"] = pd.to_datetime(work["date"], utc=True, errors="coerce").dt.normalize()
+    work = work.dropna(subset=["_day"])
+    if work.empty:
+        return empty
+
+    if "distance_miles" not in work.columns:
+        work["distance_miles"] = 0.0
+    else:
+        work["distance_miles"] = pd.to_numeric(work["distance_miles"], errors="coerce").fillna(0.0)
+    if "elevation_gain_ft" not in work.columns:
+        work["elevation_gain_ft"] = 0.0
+    else:
+        work["elevation_gain_ft"] = pd.to_numeric(
+            work["elevation_gain_ft"], errors="coerce"
+        ).fillna(0.0)
+
+    daily = (
+        work.groupby("_day", as_index=True)
+        .agg(
+            total_miles=("distance_miles", "sum"),
+            total_elevation_ft=("elevation_gain_ft", "sum"),
+        )
+        .sort_index()
+    )
+    day_series = daily.index.to_series()
+    trip_breaks = day_series.diff().gt(pd.Timedelta(days=1)).fillna(False)
+    trip_id = trip_breaks.cumsum()
+    rows: list[dict[str, object]] = []
+    for _, group in daily.groupby(trip_id, sort=True):
+        rows.append(
+            {
+                "start_date": group.index.min(),
+                "end_date": group.index.max(),
+                "days": int(len(group)),
+                "total_miles": float(group["total_miles"].sum()),
+                "total_elevation_ft": float(group["total_elevation_ft"].sum()),
+            }
+        )
+    if not rows:
+        return empty
+    return pd.DataFrame(rows)
+
+
+def hiking_kpis(df: pd.DataFrame, as_of: pd.Timestamp | None = None) -> dict[str, object]:
+    """Compute Hiking page badge values from hike history.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Hike dataframe with ``date``, ``distance_miles``, ``elevation_gain_ft``,
+        and optional ``name``.
+    as_of : pandas.Timestamp, optional
+        Reference for the calendar year used as year-to-date. Defaults to the
+        latest hike (same convention as Metrics achievements).
+
+    Returns
+    -------
+    dict[str, object]
+        All-time and YTD miles / elevation miles (``elevation_gain_ft`` / 5280),
+        longest hike, greatest elevation in a hike (miles), and most miles in a
+        consecutive-day trip, plus names/dates for tooltips (including
+        ``longest_trip_hikes``).
+    """
+    ref = normalize_utc(as_of) if as_of is not None else reference_end(df)
+    this_year = int(ref.year)
+
+    empty: dict[str, object] = {
+        "total_miles": 0.0,
+        "total_elevation_miles": 0.0,
+        "this_year": this_year,
+        "ytd_miles": 0.0,
+        "ytd_elevation_miles": 0.0,
+        "longest_hike_miles": None,
+        "longest_hike_date": None,
+        "longest_hike_name": None,
+        "greatest_elevation_miles": None,
+        "greatest_elevation_date": None,
+        "greatest_elevation_name": None,
+        "longest_trip_miles": None,
+        "longest_trip_start": None,
+        "longest_trip_end": None,
+        "longest_trip_days": None,
+        "longest_trip_hikes": [],
+    }
+    if df.empty or "date" not in df.columns:
+        return empty
+
+    year_df = df.loc[df["date"].dt.year == this_year]
+    total_miles = (
+        float(df["distance_miles"].fillna(0).sum())
+        if "distance_miles" in df.columns
+        else 0.0
+    )
+    total_elevation_ft = (
+        float(df["elevation_gain_ft"].fillna(0).sum())
+        if "elevation_gain_ft" in df.columns
+        else 0.0
+    )
+    ytd_miles = (
+        float(year_df["distance_miles"].fillna(0).sum())
+        if "distance_miles" in year_df.columns and not year_df.empty
+        else 0.0
+    )
+    ytd_elevation_ft = (
+        float(year_df["elevation_gain_ft"].fillna(0).sum())
+        if "elevation_gain_ft" in year_df.columns and not year_df.empty
+        else 0.0
+    )
+
+    longest_hike_miles: float | None = None
+    longest_hike_date: pd.Timestamp | None = None
+    longest_hike_name: str | None = None
+    if "distance_miles" in df.columns and len(df):
+        dist = df["distance_miles"].fillna(0)
+        peak_idx = dist.idxmax()
+        longest_hike_miles = float(dist.loc[peak_idx])
+        if pd.notna(df.loc[peak_idx, "date"]):
+            longest_hike_date = pd.Timestamp(df.loc[peak_idx, "date"])
+        longest_hike_name = _activity_name_at(df, peak_idx)
+
+    greatest_elevation_miles: float | None = None
+    greatest_elevation_date: pd.Timestamp | None = None
+    greatest_elevation_name: str | None = None
+    if "elevation_gain_ft" in df.columns and len(df):
+        elev = df["elevation_gain_ft"].fillna(0)
+        peak_idx = elev.idxmax()
+        greatest_elevation_miles = float(elev.loc[peak_idx]) / _FEET_PER_MILE
+        if pd.notna(df.loc[peak_idx, "date"]):
+            greatest_elevation_date = pd.Timestamp(df.loc[peak_idx, "date"])
+        greatest_elevation_name = _activity_name_at(df, peak_idx)
+
+    trips = consecutive_hike_trips(df)
+    longest_trip_miles: float | None = None
+    longest_trip_start: pd.Timestamp | None = None
+    longest_trip_end: pd.Timestamp | None = None
+    longest_trip_days: int | None = None
+    longest_trip_hikes: list[dict[str, object]] = []
+    if not trips.empty:
+        trip_peak = trips["total_miles"].idxmax()
+        longest_trip_miles = float(trips.loc[trip_peak, "total_miles"])
+        longest_trip_start = pd.Timestamp(trips.loc[trip_peak, "start_date"])
+        longest_trip_end = pd.Timestamp(trips.loc[trip_peak, "end_date"])
+        longest_trip_days = int(trips.loc[trip_peak, "days"])
+        day = pd.to_datetime(df["date"], utc=True, errors="coerce").dt.normalize()
+        in_trip = day.notna() & (day >= longest_trip_start.normalize()) & (
+            day <= longest_trip_end.normalize()
+        )
+        trip_rows = df.loc[in_trip].sort_values("date")
+        for idx, row in trip_rows.iterrows():
+            miles_val = row.get("distance_miles")
+            longest_trip_hikes.append(
+                {
+                    "name": _activity_name_at(df, idx),
+                    "date": (
+                        pd.Timestamp(row["date"])
+                        if "date" in row.index and pd.notna(row["date"])
+                        else None
+                    ),
+                    "miles": (
+                        float(miles_val)
+                        if miles_val is not None and pd.notna(miles_val)
+                        else None
+                    ),
+                }
+            )
+
+    return {
+        "total_miles": total_miles,
+        "total_elevation_miles": total_elevation_ft / _FEET_PER_MILE,
+        "this_year": this_year,
+        "ytd_miles": ytd_miles,
+        "ytd_elevation_miles": ytd_elevation_ft / _FEET_PER_MILE,
+        "longest_hike_miles": longest_hike_miles,
+        "longest_hike_date": longest_hike_date,
+        "longest_hike_name": longest_hike_name,
+        "greatest_elevation_miles": greatest_elevation_miles,
+        "greatest_elevation_date": greatest_elevation_date,
+        "greatest_elevation_name": greatest_elevation_name,
+        "longest_trip_miles": longest_trip_miles,
+        "longest_trip_start": longest_trip_start,
+        "longest_trip_end": longest_trip_end,
+        "longest_trip_days": longest_trip_days,
+        "longest_trip_hikes": longest_trip_hikes,
+    }
+
+
+def hike_gap_points(
+    df: pd.DataFrame,
+    *,
+    grain: PeriodGrain = "Week",
+    as_of: pd.Timestamp | None = None,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Return per-hike grade-adjusted pace points in the selected window.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Hike rows with ``date``, ``elapsed_min``, ``elevation_gain_ft``, and
+        ``distance_miles``.
+    grain : PeriodGrain, optional
+        Show By grain used with ``start`` / ``end`` (same as bar charts).
+    as_of : pandas.Timestamp, optional
+        Reference end for the period window.
+    start : pandas.Timestamp, optional
+        Inclusive period window start.
+    end : pandas.Timestamp, optional
+        Inclusive period window end.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Rows with ``date``, ``name``, ``distance_miles``, ``elevation_gain_ft``,
+        ``elapsed_min``, ``gap_min_per_grade_mi``, sorted by date. Activities
+        outside the Show By window or missing GAP inputs are dropped.
+    """
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "date",
+                "name",
+                "distance_miles",
+                "elevation_gain_ft",
+                "elapsed_min",
+                "gap_min_per_grade_mi",
+            ]
+        )
+
+    windowed = filter_to_recent_periods(
+        df, grain, as_of=as_of, start=start, end=end
+    )
+    if windowed.empty:
+        return pd.DataFrame(
+            columns=[
+                "date",
+                "name",
+                "distance_miles",
+                "elevation_gain_ft",
+                "elapsed_min",
+                "gap_min_per_grade_mi",
+            ]
+        )
+
+    rows: list[dict[str, object]] = []
+    for _, row in windowed.iterrows():
+        elev = row.get("elevation_gain_ft")
+        miles = row.get("distance_miles")
+        elapsed = row.get("elapsed_min")
+        gap = grade_adjusted_pace(
+            None if pd.isna(elapsed) else float(elapsed),
+            None if pd.isna(elev) else float(elev),
+            None if pd.isna(miles) else float(miles),
+        )
+        if gap is None:
+            continue
+        name = row.get("name")
+        rows.append(
+            {
+                "date": row["date"],
+                "name": None if pd.isna(name) else str(name).strip() or None,
+                "distance_miles": float(miles) if miles is not None and pd.notna(miles) else np.nan,
+                "elevation_gain_ft": float(elev) if elev is not None and pd.notna(elev) else np.nan,
+                "elapsed_min": float(elapsed) if elapsed is not None and pd.notna(elapsed) else np.nan,
+                "gap_min_per_grade_mi": gap,
+            }
+        )
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "date",
+                "name",
+                "distance_miles",
+                "elevation_gain_ft",
+                "elapsed_min",
+                "gap_min_per_grade_mi",
+            ]
+        )
+    return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Hiking map: GPS start points, hierarchical clusters, and filter helpers
+# ---------------------------------------------------------------------------
+
+HIKING_MAP_FILTER_KEY = "hiking_map_activity_ids"
+HIKING_MAP_VIEW_KEY = "hiking_map_view"
+HIKING_MAP_CHART_KEY = "hiking_map"
+# Bumped when the map filter/view changes so Streamlit remounts the Folium
+# map widget (new ``st_folium`` key → fresh markers / camera).
+HIKING_MAP_CHART_REV_KEY = "hiking_map_chart_rev"
+HIKING_MAP_CLUSTERS_KEY = "hiking_map_clusters"
+# Increments on each drill click so a sole parent cluster still splits even
+# when the activity-id set (and geographic span) is unchanged.
+HIKING_MAP_DRILL_KEY = "hiking_map_drill_level"
+# Fingerprint of the last Folium marker click already applied (avoids loops).
+HIKING_MAP_LAST_CLICK_KEY = "hiking_map_last_click"
+# Machine-readable marker popup prefix: ``CLUSTER:id1,id2,…``.
+HIKING_MAP_CLUSTER_POPUP_PREFIX = "CLUSTER:"
+# Hiking Show By selectbox + map-filter auto-grain session keys.
+HIKING_SHOW_BY_KEY = "hiking_show_by"
+HIKING_MAP_PRIOR_GRAIN_KEY = "hiking_map_prior_show_by"
+HIKING_MAP_AUTO_GRAIN_IDS_KEY = "hiking_map_auto_grain_ids"
+
+# Soft cap so world-scale views stay readable (non-overlapping bubbles).
+HIKING_MAP_MAX_CLUSTERS = 12
+HIKING_MAP_TARGET_CELLS = 8
+HIKING_MAP_MIN_CELL_DEG = 0.0005  # ~50 m
+
+
+def _activity_id_str(value: object) -> str:
+    """Normalize an activity id to a stable string key."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    try:
+        as_float = float(value)
+        if as_float.is_integer():
+            return str(int(as_float))
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
+def hikes_with_start_coords(df: pd.DataFrame) -> pd.DataFrame:
+    """Return hike rows that have usable ``start_lat`` / ``start_lng``.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Hike analysis rows.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Subset with finite latitude/longitude (hikes without GPS are dropped).
+    """
+    if df.empty or "start_lat" not in df.columns or "start_lng" not in df.columns:
+        return df.iloc[0:0].copy()
+    lat = pd.to_numeric(df["start_lat"], errors="coerce")
+    lng = pd.to_numeric(df["start_lng"], errors="coerce")
+    mask = lat.notna() & lng.notna()
+    out = df.loc[mask].copy()
+    out["start_lat"] = lat.loc[mask]
+    out["start_lng"] = lng.loc[mask]
+    return out
+
+
+def _geo_span_deg(geo: pd.DataFrame) -> float:
+    """Wider-axis span in degrees for hike start coordinates."""
+    if geo.empty:
+        return 1e-6
+    lat_span = float(geo["start_lat"].max() - geo["start_lat"].min())
+    lng_span = float(geo["start_lng"].max() - geo["start_lng"].min())
+    return max(lat_span, lng_span, 1e-6)
+
+
+def hike_cluster_cell_deg(
+    df: pd.DataFrame,
+    *,
+    drill_level: int = 0,
+    target_cells: int = HIKING_MAP_TARGET_CELLS,
+) -> float:
+    """Choose a degree-sized bin edge for the current view / drill depth.
+
+    Cell size shrinks with geographic span (after a filter) and with
+    ``drill_level`` (forced refine when a parent bubble is clicked again).
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Hikes with ``start_lat`` / ``start_lng`` (or empty).
+    drill_level : int, optional
+        Non-negative refine steps beyond span-based sizing.
+    target_cells : int, optional
+        Approximate cells across the wider axis at drill level 0.
+
+    Returns
+    -------
+    float
+        Bin edge length in degrees (floored at ``HIKING_MAP_MIN_CELL_DEG``).
+    """
+    geo = hikes_with_start_coords(df)
+    span = _geo_span_deg(geo)
+    level = max(0, int(drill_level))
+    divisor = max(2, int(target_cells)) * (2**level)
+    return max(HIKING_MAP_MIN_CELL_DEG, span / float(divisor))
+
+
+def hike_cluster_precision(df: pd.DataFrame, *, drill_level: int = 0) -> int:
+    """Approximate decimal precision for the current span / drill level.
+
+    Retained for tests and callers that think in rounding decimals. Prefer
+    ``hike_cluster_cell_deg`` for clustering.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Hikes with ``start_lat`` / ``start_lng`` (or empty).
+    drill_level : int, optional
+        Passed through to ``hike_cluster_cell_deg``.
+
+    Returns
+    -------
+    int
+        Number of decimal places roughly matching the adaptive cell (0–4).
+    """
+    cell = hike_cluster_cell_deg(df, drill_level=drill_level)
+    if cell >= 5.0:
+        return 0
+    if cell >= 0.5:
+        return 1
+    if cell >= 0.05:
+        return 2
+    if cell >= 0.005:
+        return 3
+    return 4
+
+
+def _format_cluster_label(
+    lat: float,
+    lng: float,
+    count: int,
+    *,
+    name: str | None = None,
+) -> str:
+    """Human-readable cluster label for the drill-down control list."""
+    if count == 1 and name:
+        return str(name)
+    ns = "N" if lat >= 0 else "S"
+    ew = "E" if lng >= 0 else "W"
+    return f"{abs(lat):.1f}°{ns} {abs(lng):.1f}°{ew}"
+
+
+def _merge_cluster_pair(
+    a: dict[str, object], b: dict[str, object]
+) -> dict[str, object]:
+    """Merge two cluster dicts into one weighted-centroid cluster."""
+    ids_a = list(a["activity_ids"])  # type: ignore[arg-type]
+    ids_b = list(b["activity_ids"])  # type: ignore[arg-type]
+    ids = ids_a + [x for x in ids_b if x not in ids_a]
+    n_a = int(a["count"])
+    n_b = int(b["count"])
+    n = n_a + n_b
+    lat = (float(a["lat"]) * n_a + float(b["lat"]) * n_b) / n
+    lng = (float(a["lng"]) * n_a + float(b["lng"]) * n_b) / n
+    name = None
+    if n == 1:
+        name = a.get("name") or b.get("name")
+    return {
+        "lat": lat,
+        "lng": lng,
+        "count": n,
+        "activity_ids": ids,
+        "lat_bin": float(a["lat_bin"]),
+        "lng_bin": float(a["lng_bin"]),
+        "name": name,
+        "label": _format_cluster_label(lat, lng, n, name=str(name) if name else None),
+    }
+
+
+def _cap_clusters(
+    rows: list[dict[str, object]],
+    *,
+    max_clusters: int,
+) -> list[dict[str, object]]:
+    """Greedily merge nearest cluster pairs until ``max_clusters`` or fewer."""
+    if max_clusters < 1 or len(rows) <= max_clusters:
+        return rows
+    clusters = [dict(r) for r in rows]
+    while len(clusters) > max_clusters:
+        best_i, best_j = 0, 1
+        best_d = float("inf")
+        for i in range(len(clusters)):
+            lat_i = float(clusters[i]["lat"])
+            lng_i = float(clusters[i]["lng"])
+            for j in range(i + 1, len(clusters)):
+                dlat = lat_i - float(clusters[j]["lat"])
+                dlng = lng_i - float(clusters[j]["lng"])
+                d = dlat * dlat + dlng * dlng
+                if d < best_d:
+                    best_d = d
+                    best_i, best_j = i, j
+        merged = _merge_cluster_pair(clusters[best_i], clusters[best_j])
+        # Drop higher index first.
+        for idx in sorted((best_i, best_j), reverse=True):
+            clusters.pop(idx)
+        clusters.append(merged)
+    return clusters
+
+
+def cluster_hike_starts(
+    df: pd.DataFrame,
+    *,
+    precision: int | None = None,
+    cell_deg: float | None = None,
+    drill_level: int = 0,
+    max_clusters: int = HIKING_MAP_MAX_CLUSTERS,
+) -> pd.DataFrame:
+    """Aggregate hike starts into hierarchical, non-overlapping clusters.
+
+    Uses an adaptive degree cell sized from the current geographic span and
+    ``drill_level``. Nearby bins are capped/merged so markers stay readable
+    at the current zoom. Filtering to a cluster's ``activity_ids`` and
+    increasing ``drill_level`` produces child clusters (bubble split).
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Hike rows; only rows with start coordinates are included.
+    precision : int, optional
+        Legacy decimal rounding override (tests). Ignored when ``cell_deg``
+        is set. When set alone, bins with ``round(coord, precision)``.
+    cell_deg : float, optional
+        Explicit bin edge in degrees. When omitted (and ``precision`` is
+        omitted), chosen via ``hike_cluster_cell_deg``.
+    drill_level : int, optional
+        Extra refine steps for span-based cell sizing.
+    max_clusters : int, optional
+        Soft cap; nearest pairs merge until at most this many remain.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per cluster with ``lat``, ``lng``, ``count``,
+        ``activity_ids``, ``label``, ``name`` (single-hike only), and bin
+        keys ``lat_bin`` / ``lng_bin``. Sorted by ``count`` descending.
+    """
+    empty = pd.DataFrame(
+        columns=[
+            "lat",
+            "lng",
+            "count",
+            "activity_ids",
+            "label",
+            "name",
+            "lat_bin",
+            "lng_bin",
+        ]
+    )
+    geo = hikes_with_start_coords(df)
+    if geo.empty:
+        return empty
+
+    work = geo.copy()
+    if cell_deg is not None:
+        cell = max(HIKING_MAP_MIN_CELL_DEG, float(cell_deg))
+        work["_lat_bin"] = np.floor(work["start_lat"] / cell) * cell
+        work["_lng_bin"] = np.floor(work["start_lng"] / cell) * cell
+    elif precision is not None:
+        prec = max(0, min(4, int(precision)))
+        work["_lat_bin"] = work["start_lat"].round(prec)
+        work["_lng_bin"] = work["start_lng"].round(prec)
+    else:
+        cell = hike_cluster_cell_deg(work, drill_level=drill_level)
+        work["_lat_bin"] = np.floor(work["start_lat"] / cell) * cell
+        work["_lng_bin"] = np.floor(work["start_lng"] / cell) * cell
+
+    rows: list[dict[str, object]] = []
+    for (lat_bin, lng_bin), group in work.groupby(["_lat_bin", "_lng_bin"], sort=False):
+        if "activity_id" in group.columns:
+            ids = [
+                aid
+                for aid in (_activity_id_str(x) for x in group["activity_id"].tolist())
+                if aid
+            ]
+        else:
+            ids = [str(i) for i in group.index.tolist()]
+        if not ids:
+            continue
+        lat = float(group["start_lat"].mean())
+        lng = float(group["start_lng"].mean())
+        count = int(len(ids))
+        name: str | None = None
+        if count == 1 and "name" in group.columns:
+            raw_name = group.iloc[0]["name"]
+            if raw_name is not None and not (isinstance(raw_name, float) and pd.isna(raw_name)):
+                name = str(raw_name)
+        rows.append(
+            {
+                "lat": lat,
+                "lng": lng,
+                "count": count,
+                "activity_ids": ids,
+                "lat_bin": float(lat_bin),
+                "lng_bin": float(lng_bin),
+                "name": name,
+                "label": _format_cluster_label(lat, lng, count, name=name),
+            }
+        )
+    if not rows:
+        return empty
+
+    rows = _cap_clusters(rows, max_clusters=max(1, int(max_clusters)))
+    out = pd.DataFrame(rows)
+    return out.sort_values("count", ascending=False, kind="mergesort").reset_index(
+        drop=True
+    )
+
+
+def hiking_map_cluster_popup(activity_ids: Sequence[str]) -> str:
+    """Encode cluster activity ids for a Folium marker popup."""
+    ids = [aid for aid in (_activity_id_str(x) for x in activity_ids) if aid]
+    return f"{HIKING_MAP_CLUSTER_POPUP_PREFIX}{','.join(ids)}"
+
+
+def activity_ids_from_hiking_map_popup(popup: object) -> list[str]:
+    """Parse ``CLUSTER:…`` popup text from a Folium marker click."""
+    if popup is None:
+        return []
+    text = str(popup).strip()
+    if not text or HIKING_MAP_CLUSTER_POPUP_PREFIX not in text:
+        return []
+    idx = text.index(HIKING_MAP_CLUSTER_POPUP_PREFIX)
+    payload = text[idx + len(HIKING_MAP_CLUSTER_POPUP_PREFIX) :]
+    # Stop at HTML/markup or newline so ``<div>CLUSTER:1,2</div>`` still works.
+    end = len(payload)
+    for stop in ("<", "\n", "\r", "|"):
+        found = payload.find(stop)
+        if found >= 0:
+            end = min(end, found)
+    payload = payload[:end].strip()
+    return [aid for aid in (_activity_id_str(x) for x in payload.split(",")) if aid]
+
+
+def activity_ids_from_hiking_map_click(
+    event: Mapping[str, object] | None,
+    clusters: pd.DataFrame | None = None,
+) -> list[str]:
+    """Resolve activity ids from an ``st_folium`` click payload.
+
+    Prefers the machine-readable popup; falls back to nearest cluster lat/lng
+    when popup text is missing.
+    """
+    if not isinstance(event, Mapping):
+        return []
+    ids = activity_ids_from_hiking_map_popup(event.get("last_object_clicked_popup"))
+    if not ids:
+        ids = activity_ids_from_hiking_map_popup(event.get("last_object_clicked_tooltip"))
+    if ids:
+        return ids
+    clicked = event.get("last_object_clicked")
+    if not isinstance(clicked, Mapping) or clusters is None or clusters.empty:
+        return []
+    try:
+        lat = float(clicked.get("lat"))  # type: ignore[arg-type]
+        lng = float(clicked.get("lng"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return []
+    if "lat" not in clusters.columns or "lng" not in clusters.columns:
+        return []
+    best: dict[str, object] | None = None
+    best_d = float("inf")
+    for row in clusters.to_dict(orient="records"):
+        try:
+            dlat = float(row["lat"]) - lat
+            dlng = float(row["lng"]) - lng
+        except (TypeError, ValueError, KeyError):
+            continue
+        d = dlat * dlat + dlng * dlng
+        if d < best_d:
+            best_d = d
+            best = row
+    if best is None or best_d > (0.0005**2):
+        return []
+    raw = best.get("activity_ids") or []
+    if isinstance(raw, (list, tuple)):
+        return [aid for aid in (_activity_id_str(x) for x in raw) if aid]
+    return [aid for aid in [_activity_id_str(raw)] if aid]
+
+
+def hiking_map_click_fingerprint(event: Mapping[str, object] | None) -> str | None:
+    """Stable id for a Folium marker click (dedupe across Streamlit reruns)."""
+    if not isinstance(event, Mapping):
+        return None
+    clicked = event.get("last_object_clicked")
+    if not isinstance(clicked, Mapping):
+        return None
+    try:
+        lat = round(float(clicked.get("lat")), 5)  # type: ignore[arg-type]
+        lng = round(float(clicked.get("lng")), 5)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    popup = str(event.get("last_object_clicked_popup") or "").strip()
+    tooltip = str(event.get("last_object_clicked_tooltip") or "").strip()
+    return f"{lat}:{lng}:{popup}:{tooltip}"
+
+
+def consume_hiking_map_click(
+    event: Mapping[str, object] | None,
+    hikes: pd.DataFrame,
+    *,
+    current_filter_ids: Sequence[str] | None = None,
+    clusters: pd.DataFrame | None = None,
+) -> bool:
+    """Apply a new Folium cluster click once; ignore repeats / empty events.
+
+    Parameters
+    ----------
+    event : mapping or None
+        ``st_folium`` return value (or the same dict from ``st.session_state``).
+    hikes : pandas.DataFrame
+        Full hike frame for ``select_hiking_map_cluster``.
+    current_filter_ids : sequence of str or None, optional
+        Active page filter before this click.
+    clusters : pandas.DataFrame, optional
+        Current bubble table (lat/lng fallback when popup is empty).
+
+    Returns
+    -------
+    bool
+        ``True`` when a cluster selection was applied.
+    """
+    fingerprint = hiking_map_click_fingerprint(event)
+    if fingerprint is None:
+        return False
+    if st.session_state.get(HIKING_MAP_LAST_CLICK_KEY) == fingerprint:
+        return False
+    ids = activity_ids_from_hiking_map_click(event, clusters)
+    if not ids:
+        return False
+    st.session_state[HIKING_MAP_LAST_CLICK_KEY] = fingerprint
+    select_hiking_map_cluster(ids, hikes, current_filter_ids=current_filter_ids)
+    return True
+
+
+def select_hiking_map_cluster(
+    activity_ids: Sequence[str],
+    hikes: pd.DataFrame,
+    *,
+    current_filter_ids: Sequence[str] | None = None,
+) -> None:
+    """Apply a cluster drill-down: filter, zoom, refine, remount map.
+
+    Parameters
+    ----------
+    activity_ids : sequence of str
+        Activity ids in the clicked cluster.
+    hikes : pandas.DataFrame
+        Full hike frame (for camera fit on the filtered subset).
+    current_filter_ids : sequence of str or None, optional
+        Ids already driving the page filter (``None`` = all hikes). When the
+        new selection matches the current set, ``drill_level`` increments so
+        clustering still splits.
+    """
+    selected = [aid for aid in (_activity_id_str(x) for x in activity_ids) if aid]
+    if not selected:
+        return
+
+    if current_filter_ids is None:
+        geo_all = hikes_with_start_coords(hikes)
+        current_set = {
+            aid
+            for aid in (_activity_id_str(x) for x in geo_all["activity_id"].tolist())
+            if aid
+        } if "activity_id" in geo_all.columns else set()
+    else:
+        current_set = {aid for aid in (_activity_id_str(x) for x in current_filter_ids) if aid}
+
+    next_set = set(selected)
+    prev_drill = int(st.session_state.get(HIKING_MAP_DRILL_KEY, 0) or 0)
+    if next_set == current_set:
+        st.session_state[HIKING_MAP_DRILL_KEY] = prev_drill + 1
+    else:
+        st.session_state[HIKING_MAP_DRILL_KEY] = 0
+
+    st.session_state[HIKING_MAP_FILTER_KEY] = selected
+    st.session_state[HIKING_MAP_VIEW_KEY] = hike_map_view(
+        apply_hiking_map_filter(hikes, selected)
+    )
+    rev = int(st.session_state.get(HIKING_MAP_CHART_REV_KEY, 0) or 0)
+    st.session_state[HIKING_MAP_CHART_REV_KEY] = rev + 1
+
+
+def hike_map_view(
+    df: pd.DataFrame,
+    *,
+    pad_frac: float = 0.55,
+    zoom_out: float = 1.0,
+) -> dict[str, float]:
+    """Compute map center and zoom to fit hike start coordinates.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Hikes (or cluster rows with ``lat``/``lng`` / ``start_lat``/
+        ``start_lng``).
+    pad_frac : float, optional
+        Fractional padding applied to the span before choosing zoom.
+        Default ``0.55`` leaves comfortable margin around all GPS points
+        on the initial / unfiltered (and reset) map view.
+    zoom_out : float, optional
+        Extra zoom levels subtracted after the span→zoom ladder (floored
+        at 1). Keeps drill-down relatively tighter because filtered spans
+        still map to higher ladder rungs.
+
+    Returns
+    -------
+    dict[str, float]
+        ``center_lat``, ``center_lon``, and ``zoom`` suitable for Folium
+        ``location`` / ``zoom_start`` (and legacy Plotly map layout).
+    """
+    if df.empty:
+        return {"center_lat": 20.0, "center_lon": 0.0, "zoom": 1.0}
+
+    if "start_lat" in df.columns and "start_lng" in df.columns:
+        geo = hikes_with_start_coords(df)
+        lats = geo["start_lat"]
+        lngs = geo["start_lng"]
+    elif "lat" in df.columns and "lng" in df.columns:
+        lats = pd.to_numeric(df["lat"], errors="coerce").dropna()
+        lngs = pd.to_numeric(df["lng"], errors="coerce").dropna()
+    else:
+        return {"center_lat": 20.0, "center_lon": 0.0, "zoom": 1.0}
+
+    if lats.empty or lngs.empty:
+        return {"center_lat": 20.0, "center_lon": 0.0, "zoom": 1.0}
+
+    lat_min = float(lats.min())
+    lat_max = float(lats.max())
+    lng_min = float(lngs.min())
+    lng_max = float(lngs.max())
+    center_lat = (lat_min + lat_max) / 2.0
+    center_lon = (lng_min + lng_max) / 2.0
+    lat_span = max((lat_max - lat_min) * (1.0 + pad_frac), 0.02)
+    lng_span = max((lng_max - lng_min) * (1.0 + pad_frac), 0.02)
+    # Longitude span is shorter near the poles; use a simple max span heuristic.
+    span = max(lat_span, lng_span * max(0.2, abs(math.cos(math.radians(center_lat)))))
+
+    if span > 80:
+        zoom = 1.5
+    elif span > 40:
+        zoom = 2.5
+    elif span > 20:
+        zoom = 3.5
+    elif span > 10:
+        zoom = 4.5
+    elif span > 5:
+        zoom = 5.5
+    elif span > 2:
+        zoom = 6.5
+    elif span > 1:
+        zoom = 7.5
+    elif span > 0.5:
+        zoom = 8.5
+    elif span > 0.2:
+        zoom = 9.5
+    elif span > 0.1:
+        zoom = 10.5
+    elif span > 0.05:
+        zoom = 11.5
+    else:
+        zoom = 12.5
+
+    if len(lats) == 1:
+        zoom = max(zoom, 11.0)
+    else:
+        zoom = max(1.0, float(zoom) - float(zoom_out))
+
+    return {
+        "center_lat": center_lat,
+        "center_lon": center_lon,
+        "zoom": float(zoom),
+    }
+
+
+def apply_hiking_map_filter(
+    df: pd.DataFrame, activity_ids: Sequence[str] | None
+) -> pd.DataFrame:
+    """Filter hikes to ``activity_ids`` when a map selection is active.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Full hike dataframe.
+    activity_ids : sequence of str or None
+        Selected activity ids. ``None`` means no map filter (return ``df``).
+
+    Returns
+    -------
+    pandas.DataFrame
+        Filtered copy, or ``df`` unchanged when ``activity_ids`` is ``None``.
+    """
+    if activity_ids is None:
+        return df
+    if df.empty or "activity_id" not in df.columns:
+        return df.iloc[0:0].copy()
+    id_set = {str(x) for x in activity_ids}
+    ids = df["activity_id"].map(_activity_id_str)
+    return df.loc[ids.isin(id_set)].copy()
+
+
+def sync_hiking_show_by_for_map_filter(
+    page_hikes: pd.DataFrame,
+    filter_ids: Sequence[str] | None,
+) -> None:
+    """Auto-set / restore Hiking Show By when the map filter id set changes.
+
+    Call before the Show By ``st.selectbox`` (keyed by ``HIKING_SHOW_BY_KEY``).
+
+    - Filter newly active or activity-id set changes → save the current grain
+      once (if not already saved), then set Show By from
+      ``period_grain_for_date_span(page_hikes)``.
+    - After that auto-set, a manual Show By change is kept until the filter
+      id set changes again (we only re-auto when the sorted id list differs).
+    - Filter cleared (``filter_ids is None``) → restore the saved prior grain.
+
+    Does not clear prior/auto keys from ``clear_hiking_map_filter``; this
+    helper owns restore on the next run after the filter is removed.
+    """
+    if filter_ids is not None:
+        cur = sorted(
+            {_activity_id_str(x) for x in filter_ids if _activity_id_str(x)}
+        )
+        last = st.session_state.get(HIKING_MAP_AUTO_GRAIN_IDS_KEY)
+        last_list = list(last) if isinstance(last, (list, tuple)) else None
+        if last_list != cur:
+            if HIKING_MAP_PRIOR_GRAIN_KEY not in st.session_state:
+                current = st.session_state.get(HIKING_SHOW_BY_KEY, "Week")
+                if current not in PERIOD_CONFIG:
+                    current = "Week"
+                st.session_state[HIKING_MAP_PRIOR_GRAIN_KEY] = current
+            st.session_state[HIKING_SHOW_BY_KEY] = period_grain_for_date_span(
+                page_hikes
+            )
+            st.session_state[HIKING_MAP_AUTO_GRAIN_IDS_KEY] = cur
+        return
+
+    if HIKING_MAP_PRIOR_GRAIN_KEY in st.session_state:
+        restored = st.session_state.pop(HIKING_MAP_PRIOR_GRAIN_KEY)
+        if restored in PERIOD_CONFIG:
+            st.session_state[HIKING_SHOW_BY_KEY] = restored
+    if HIKING_MAP_AUTO_GRAIN_IDS_KEY in st.session_state:
+        del st.session_state[HIKING_MAP_AUTO_GRAIN_IDS_KEY]
+
+
+def hiking_map_chart_key(revision: int | None = None) -> str:
+    """Return the Streamlit widget key for the hiking map at ``revision``."""
+    rev = 0 if revision is None else int(revision)
+    return f"{HIKING_MAP_CHART_KEY}_{rev}"
+
+
+def hiking_map_view_revision(view: Mapping[str, float] | None) -> str:
+    """Stable ``uirevision`` token so Plotly applies a new camera when view changes."""
+    if not isinstance(view, Mapping):
+        return "hiking-map-default"
+    try:
+        lat = round(float(view.get("center_lat", 0.0)), 5)
+        lon = round(float(view.get("center_lon", 0.0)), 5)
+        zoom = round(float(view.get("zoom", 1.0)), 3)
+    except (TypeError, ValueError):
+        return "hiking-map-default"
+    return f"hiking-map:{lat}:{lon}:{zoom}"
 

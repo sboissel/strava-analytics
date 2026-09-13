@@ -12,7 +12,7 @@ Versioning follows [Semantic Versioning](https://semver.org/); see [CHANGELOG.md
 
 The main script in [`src/strava_analytics/pipeline.py`](src/strava_analytics/pipeline.py) refreshes a Strava API token, downloads recent activities, processes each activity, and writes several CSV files into the [data](data) folder:
 
-- [data/strava_run_analysis.csv](data/strava_run_analysis.csv): run-specific enrichment including pace, HR, Strava HR-zone time in seconds (`hr_zone_1_sec`…`hr_zone_5_sec`), easy/hard time metrics (zones 1–2 vs 3+), `gear_id` for shoe mileage, and start GPS (`start_lat` / `start_lng` from summary `start_latlng` when present). Incremental sync also backfills empty GPS on recent pages; for a full local historical backfill see below.
+- [data/strava_run_analysis.csv](data/strava_run_analysis.csv): run-specific enrichment including pace, HR, Strava HR-zone time in seconds (`hr_zone_1_sec`…`hr_zone_5_sec`), easy/hard time metrics (zones 1–2 vs 3+), `gear_id` for shoe mileage, and start GPS (`start_lat` / `start_lng` from summary `start_latlng` when present). Incremental sync also fills empty GPS on already-synced rows that reappear on fetched list pages.
 - [data/strava_ride_analysis.csv](data/strava_ride_analysis.csv): ride exports (same shared GPS columns)
 - [data/strava_swim_analysis.csv](data/strava_swim_analysis.csv): swim exports (same shared GPS columns)
 - [data/strava_hike_analysis.csv](data/strava_hike_analysis.csv): hike exports (same shared GPS columns)
@@ -54,30 +54,7 @@ python src/strava_analytics/pipeline.py
 
 The script will refresh the access token, fetch activities, and rewrite the CSV outputs in the data directory.
 
-## Backfill start GPS
-
-Analysis CSVs may have empty `start_lat` / `start_lng` for activities synced before those columns existed. Do **not** reset `highest_activity_id.txt` to `0` just for GPS — that re-runs stream/zone enrichment for every run.
-
-### One-click on GitLab (preferred)
-
-Use the manual CI job so the **committed** CSVs under [`data/`](data) on GitLab get patched (Streamlit Cloud reads those via the GitHub mirror).
-
-1. Merge the branch that adds the `backfill_locations` job into `main` (default branch).
-2. In GitLab → **Build → Pipelines**, open the latest pipeline on `main` (or **Run pipeline** for `main`).
-3. Find the **`backfill_locations`** job and click **Play** (manual).
-4. When it finishes, check the new commit on `main` (`chore: backfill start_lat/start_lng from Strava summaries`). The job only stages the four analysis CSVs — not `highest_activity_id.txt`, weekly, or pace files.
-
-Same Strava / `CI_PUSH_TOKEN` variables as the daily sync. The job is also available manually on `dev`; if CI variables are **protected**, run it on `main` (or unprotect the variables / protect `dev`).
-
-### Local `data/` only
-
-```bash
-PYTHONPATH=src python -m strava_analytics.backfill_locations
-```
-
-This pages Strava list/summary activities (100 per page, ~1s between pages), patches empty GPS on run/ride/swim/hike analysis CSVs, and stops once every missing activity ID has been seen (or history is exhausted). It does **not** fetch streams or change the sync watermark.
-
-Caveats: Strava may omit `start_latlng` for indoor/manual activities or when map/GPS privacy hides coordinates; those rows stay empty. Rate limits apply on large histories (~15–20 list requests per 1.5k activities).
+Analysis CSVs include `start_lat` / `start_lng` from Strava list/summary `start_latlng` when GPS is present. Each incremental sync also fills empty coords on already-synced rows that reappear on the fetched list pages (no extra detail calls). Do **not** reset `highest_activity_id.txt` to `0` just for GPS — that re-runs stream/zone enrichment for every activity.
 
 ## Daily GitLab sync
 
@@ -104,7 +81,7 @@ In GitLab → **Build → Pipeline schedules**:
 2. Cron: `0 23 * * *` (daily at 23:00), timezone `Europe/Paris`.
 3. Save, then use **Play** once to verify after the variables are set.
 
-The `sync` job runs only for scheduled pipelines (and web pipelines on the default branch); the manual `backfill_locations` job is Play-only; the `test` job still runs on normal pushes.
+The `sync` job runs only for scheduled pipelines (and web pipelines on the default branch); the `test` job still runs on normal pushes.
 
 ## Runner's Dashboard
 

@@ -294,25 +294,38 @@ class MetricsSectionNavTests(unittest.TestCase):
         self.assertIn("On this page", html)
 
     def test_on_this_page_follows_page_links(self):
-        from dashboard.ui import METRICS_SECTIONS, NAV_PAGES, sidebar_nav_entries
+        from dashboard.ui import METRICS_SECTIONS, NAV_PAGES, NAV_SECTIONS, sidebar_nav_entries
 
         page_titles = [title for _, title, _ in NAV_PAGES]
         entries = sidebar_nav_entries("metrics", METRICS_SECTIONS)
         labels = [label for _, _, label in entries]
         self.assertEqual(
             labels,
-            [*page_titles, "Achievements", "Key Indicators", "Shoes"],
+            [
+                "Running",
+                *page_titles[:4],
+                "Other sports",
+                page_titles[4],
+                "Achievements",
+                "Key Indicators",
+                "Shoes",
+            ],
         )
         self.assertEqual(page_titles, [
             "Metrics",
             "Training",
             "Fitness",
             "Performance",
+            "Hiking",
         ])
+        self.assertEqual(
+            [label for label, _pages in NAV_SECTIONS],
+            ["Running", "Other sports"],
+        )
         self.assertNotIn("Inspect", labels)
 
     def test_training_sections_follow_page_links(self):
-        from dashboard.ui import NAV_PAGES, sidebar_nav_entries
+        from dashboard.ui import sidebar_nav_entries
 
         sections = [
             ("chart-race-weeks", "Races"),
@@ -323,15 +336,17 @@ class MetricsSectionNavTests(unittest.TestCase):
         ]
         entries = sidebar_nav_entries("training", sections)
         kinds = [(kind, label) for kind, _, label in entries]
-        page_count = len(NAV_PAGES)
-        self.assertEqual(kinds[:page_count], [
+        self.assertEqual(kinds[:7], [
+            ("group", "Running"),
             ("page", "Metrics"),
             ("page", "Training"),
             ("page", "Fitness"),
             ("page", "Performance"),
+            ("group", "Other sports"),
+            ("page", "Hiking"),
         ])
         self.assertEqual(
-            kinds[page_count:],
+            kinds[7:],
             [
                 ("section", "Races"),
                 ("section", "Compliance"),
@@ -341,6 +356,41 @@ class MetricsSectionNavTests(unittest.TestCase):
             ],
         )
 
+    def test_nav_sections_group_run_vs_other_sports(self):
+        from dashboard.theme import GLOBAL_CSS
+        from dashboard.ui import NAV_PAGES, NAV_SECTIONS
+
+        self.assertEqual(
+            [(label, [title for _, title, _ in pages]) for label, pages in NAV_SECTIONS],
+            [
+                ("Running", ["Metrics", "Training", "Fitness", "Performance"]),
+                ("Other sports", ["Hiking"]),
+            ],
+        )
+        flat = [page for _label, pages in NAV_SECTIONS for page in pages]
+        self.assertEqual(flat, list(NAV_PAGES))
+        self.assertIn(".sidebar-nav-group-label", GLOBAL_CSS)
+        # Group headers must stay visible (not collapsed by nested gap rules).
+        label_block = GLOBAL_CSS.split(".sidebar-nav-group-label {", 1)[1].split("}", 1)[0]
+        self.assertIn("line-height: 1.25", label_block)
+        self.assertIn("min-height: 1.15rem", label_block)
+        self.assertIn("overflow: visible", label_block)
+        self.assertIn("padding: 0.12rem 0.75rem 0.28rem", label_block)
+        self.assertIn(
+            '[data-testid="stElementContainer"]:has(.sidebar-nav-group-label)',
+            GLOBAL_CSS,
+        )
+        self.assertIn("margin-top: 0.5rem !important", GLOBAL_CSS)
+        # First group (Running) under Navigation uses a tighter top margin.
+        self.assertIn(
+            ':has(.sidebar-nav-heading)\n'
+            '    + [data-testid="stElementContainer"]:has(.sidebar-nav-group-label)',
+            GLOBAL_CSS,
+        )
+        self.assertIn("margin-top: 0.2rem !important", GLOBAL_CSS)
+        # Page-to-page density stays tight.
+        self.assertIn("gap: 0.06rem !important", GLOBAL_CSS)
+
     def test_on_this_page_has_hairline_divider(self):
         from dashboard.theme import GLOBAL_CSS, LINE
         from dashboard.ui import METRICS_SECTIONS, section_nav_html
@@ -349,8 +399,8 @@ class MetricsSectionNavTests(unittest.TestCase):
         self.assertIn('class="sidebar-section-nav"', html)
         self.assertNotIn("<hr", html)
         self.assertIn(".sidebar-section-nav {", GLOBAL_CSS)
-        self.assertIn("margin: 0.85rem 0 0.75rem", GLOBAL_CSS)
-        self.assertIn("padding: 0.5rem 0 0.35rem", GLOBAL_CSS)
+        self.assertIn("margin: 0.55rem 0 0.5rem", GLOBAL_CSS)
+        self.assertIn("padding: 0.35rem 0 0.2rem", GLOBAL_CSS)
         self.assertIn(f"border-top: 1px solid {LINE}", GLOBAL_CSS)
 
     def test_page_link_labels_force_readable_colors(self):

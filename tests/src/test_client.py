@@ -129,32 +129,6 @@ class StravaClientTests(unittest.TestCase):
         self.assertEqual(len(activities), 2)
         self.assertEqual(get_mock.call_count, 2)
 
-    def test_get_activity_summaries_stops_when_target_ids_seen(self):
-        """Ensure historical summary paging can stop once needed IDs appear."""
-        client = make_client(last_activity_id="0")
-        client.access_token = "token"
-
-        first_page = Mock()
-        first_page.status_code = 200
-        first_page.json.return_value = [{"id": 300}, {"id": 200}]
-
-        second_page = Mock()
-        second_page.status_code = 200
-        second_page.json.return_value = [{"id": 100}]
-
-        third_page = Mock()
-        third_page.status_code = 200
-        third_page.json.return_value = [{"id": 50}]
-
-        with patch(
-            "strava_analytics.client.requests.get",
-            side_effect=[first_page, second_page, third_page],
-        ) as get_mock, patch("strava_analytics.client.time.sleep", return_value=None):
-            activities = client.get_activity_summaries(stop_when_ids_seen={"200", "100"})
-
-        self.assertEqual([act["id"] for act in activities], [300, 200, 100])
-        self.assertEqual(get_mock.call_count, 2)
-
     def test_get_activities_stops_on_empty_page(self):
         """Ensure activity fetch stops when a page returns no activities."""
         client = make_client(last_activity_id="999")

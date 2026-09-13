@@ -7,9 +7,9 @@ This repository lives on **GitLab** as the source of truth. A GitLab push mirror
 | GitLab (source) | `https://gitlab.com/sandrineboissel/strava-analytics` |
 | GitHub (mirror) | `https://github.com/sboissel/strava-analytics` |
 
-GitLab CI (`.gitlab-ci.yml`) runs tests on push and a daily scheduled sync that commits updated `data/` files back to `main`. A manual `backfill_locations` job can one-shot fill historical `start_lat` / `start_lng` on those CSVs without resetting the sync watermark. Pushing to GitLab (including those CI commits) is enough for the mirror to update GitHub.
+GitLab CI (`.gitlab-ci.yml`) runs tests on push and a daily scheduled sync that commits updated `data/` files back to `main`. Incremental sync captures `start_lat` / `start_lng` from Strava list/summary payloads (including filling empty coords on already-synced rows that reappear on fetched pages). Pushing to GitLab (including those CI commits) is enough for the mirror to update GitHub.
 
-See **Backfill start GPS** and **Daily GitLab sync** in [README.md](README.md) for CI variables, the nightly schedule, and how to Play the backfill job.
+See **Daily GitLab sync** in [README.md](README.md) for CI variables and the nightly schedule.
 
 ## 1. Create the GitHub repository
 
@@ -59,4 +59,4 @@ The dashboard can run publicly from the GitHub mirror without Strava API secrets
 4. Leave **Secrets** empty.
 5. Deploy and confirm **Metrics** (default), **Training**, **Fitness**, and **Performance** load.
 
-Requirements are installed from root [`requirements.txt`](requirements.txt) (includes `streamlit` and `plotly`). After the daily GitLab sync and mirror push, Streamlit Cloud redeploys with updated `data/` files.
+Requirements are installed from root [`requirements.txt`](requirements.txt) (includes `streamlit`, `plotly`, `folium`, and `streamlit-folium`). After the daily GitLab sync and mirror push, Streamlit Cloud redeploys with updated `data/` files.

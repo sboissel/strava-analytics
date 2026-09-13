@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import Literal
 
@@ -1488,8 +1489,13 @@ def race_weeks_chart(
     return fig
 
 
-def elevation_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
-    """Build a summed elevation bar chart in feet.
+def elevation_chart(
+    period_df: pd.DataFrame,
+    grain: str,
+    *,
+    unit: Literal["ft", "mi"] = "ft",
+) -> go.Figure:
+    """Build a summed elevation bar chart.
 
     Bars use a sequential heatmap (pale tint → ``ELEVATION_BAR``). No
     colorbar: ``showscale=False`` keeps the plot box aligned with the
@@ -1501,11 +1507,14 @@ def elevation_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
         Aggregated period metrics from ``aggregate_period_metrics``.
     grain : str
         Period grain label used for axis formatting.
+    unit : {"ft", "mi"}, optional
+        Display unit. ``"ft"`` (default) keeps Training feet totals;
+        ``"mi"`` converts ``total_elevation_ft / 5280`` for Hiking.
 
     Returns
     -------
     plotly.graph_objects.Figure
-        Bar chart of total elevation gain per period, in feet.
+        Bar chart of total elevation gain per period.
     """
     title = elevation_title(grain)
     fig = go.Figure()
@@ -1521,9 +1530,21 @@ def elevation_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
         return fig
 
     if "total_elevation_ft" in period_df.columns:
-        totals = period_df["total_elevation_ft"].fillna(0.0)
+        totals_ft = period_df["total_elevation_ft"].fillna(0.0)
     else:
-        totals = pd.Series([0.0] * len(period_df), index=period_df.index)
+        totals_ft = pd.Series([0.0] * len(period_df), index=period_df.index)
+    if unit == "mi":
+        totals = totals_ft / 5280.0
+        y_title = "Elevation (mi)"
+        hover_y = "%{y:.2f} mi"
+        tickformat = ".2f"
+        y_floor = 0.5
+    else:
+        totals = totals_ft
+        y_title = "Elevation (ft)"
+        hover_y = "%{y:,.0f} ft"
+        tickformat = ",.0f"
+        y_floor = 100.0
     customdata = _bar_period_customdata(period_df, grain)
     elev_values = totals.tolist()
     fig.add_trace(
@@ -1536,7 +1557,7 @@ def elevation_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
                 color=elev_values,
                 colorscale=ELEVATION_COLORSCALE,
                 cmin=0,
-                cmax=max(float(totals.max()), 1.0),
+                cmax=max(float(totals.max()), 1.0 if unit == "ft" else 0.01),
                 showscale=False,
                 pattern=_in_progress_bar_pattern(period_df),
                 cornerradius=5,
@@ -1544,20 +1565,20 @@ def elevation_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
             ),
             customdata=customdata,
             hovertemplate=(
-                "<b>%{customdata[0]}</b>%{customdata[1]}"
-                "<br>%{y:,.0f} ft<extra></extra>"
+                f"<b>%{{customdata[0]}}</b>%{{customdata[1]}}"
+                f"<br>{hover_y}<extra></extra>"
             ),
             showlegend=False,
         )
     )
-    y_max = max(float(totals.max()) * 1.18, 100.0)
+    y_max = max(float(totals.max()) * 1.18, y_floor)
     fig.update_layout(
         title=_title(title),
         showlegend=False,
         yaxis=_training_yaxis(
-            title=dict(text="Elevation (ft)", font=dict(size=12, color=MUTED)),
+            title=dict(text=y_title, font=dict(size=12, color=MUTED)),
             range=[0, y_max],
-            tickformat=",.0f",
+            tickformat=tickformat,
             gridcolor="rgba(21,32,40,0.08)",
         ),
         xaxis=_training_xaxis(labels, grain),
@@ -1570,10 +1591,265 @@ def elevation_chart(period_df: pd.DataFrame, grain: str) -> go.Figure:
     return fig
 
 
+def hike_gap_title() -> str:
+    """Return the grade-adjusted pace chart title."""
+    return "Grade-Adjusted Pace"
+
+
+def hike_gap_chart(gap_df: pd.DataFrame) -> go.Figure:
+    """Build a GAP scatter with activity markers and a linear trend line.
+
+    Y values are minutes per grade-mile:
+    ``elapsed_min / (elevation_ft / 1000 + miles)``.
+
+    Parameters
+    ----------
+    gap_df : pandas.DataFrame
+        Per-hike points from ``hike_gap_points`` with ``date`` and
+        ``gap_min_per_grade_mi``.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Markers for individual hikes plus a dashed OLS trend over date.
+    """
+    title = hike_gap_title()
+    y_title = dict(
+        text="GAP (min / grade-mi)",
+        font=dict(size=12, color=MUTED),
+    )
+    fig = go.Figure()
+    if gap_df.empty or "gap_min_per_grade_mi" not in gap_df.columns:
+        fig.update_layout(
+            title=_title(title),
+            xaxis=dict(
+                title=dict(text="Date", font=dict(size=12, color=MUTED)),
+                tickfont=dict(size=11, color=MUTED),
+                showgrid=False,
+                automargin=True,
+            ),
+            yaxis=dict(
+                title=y_title,
+                tickfont=dict(size=11, color=MUTED),
+                gridcolor="rgba(21,32,40,0.08)",
+                zeroline=False,
+                automargin=True,
+            ),
+            showlegend=False,
+            **{**CHART_LAYOUT, "margin": dict(l=78, r=TRAINING_MARGIN_R, t=52, b=56)},
+        )
+        return fig
+
+    work = gap_df.sort_values("date").copy()
+    dates = pd.to_datetime(work["date"], utc=True)
+    gaps = pd.to_numeric(work["gap_min_per_grade_mi"], errors="coerce")
+    names = (
+        work["name"].fillna("Hike").astype(str)
+        if "name" in work.columns
+        else pd.Series(["Hike"] * len(work), index=work.index)
+    )
+    miles = (
+        pd.to_numeric(work["distance_miles"], errors="coerce")
+        if "distance_miles" in work.columns
+        else pd.Series(np.nan, index=work.index)
+    )
+    elev = (
+        pd.to_numeric(work["elevation_gain_ft"], errors="coerce")
+        if "elevation_gain_ft" in work.columns
+        else pd.Series(np.nan, index=work.index)
+    )
+    customdata = [
+        [
+            format_full_date(ts) if pd.notna(ts) else "—",
+            name,
+            "—" if pd.isna(mi) else f"{float(mi):.2f}",
+            "—" if pd.isna(ft) else f"{float(ft) / 5280.0:.2f}",
+        ]
+        for ts, name, mi, ft in zip(dates, names, miles, elev, strict=True)
+    ]
+    x_vals = dates.dt.tz_convert("UTC").dt.tz_localize(None)
+    y_vals = gaps.tolist()
+
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals,
+            y=y_vals,
+            mode="markers",
+            name="Hikes",
+            marker=dict(color=MILEAGE_BAR, size=8, opacity=0.88),
+            customdata=customdata,
+            hovertemplate=(
+                "<b>%{customdata[1]}</b><br>"
+                "%{customdata[0]}<br>"
+                "GAP: %{y:.1f} min / grade-mi<br>"
+                "%{customdata[2]} mi · %{customdata[3]} elev mi"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    valid = gaps.notna() & dates.notna()
+    if int(valid.sum()) >= 2:
+        x_ord = dates.loc[valid].astype("int64").to_numpy(dtype=float)
+        y_ord = gaps.loc[valid].to_numpy(dtype=float)
+        slope, intercept = np.polyfit(x_ord, y_ord, 1)
+        trend_y = slope * x_ord + intercept
+        trend_x = (
+            dates.loc[valid].dt.tz_convert("UTC").dt.tz_localize(None)
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=trend_x,
+                y=trend_y,
+                mode="lines",
+                name="Trend",
+                line=dict(color=ELEVATION_BAR, width=2, dash="dash"),
+                hovertemplate="Trend: %{y:.1f} min / grade-mi<extra></extra>",
+            )
+        )
+
+    y_finite = gaps[gaps.notna()]
+    y_max = float(y_finite.max()) * 1.15 if len(y_finite) else 1.0
+    y_min = max(0.0, float(y_finite.min()) * 0.85) if len(y_finite) else 0.0
+    fig.update_layout(
+        title=_title(title),
+        xaxis=dict(
+            title=dict(text="Date", font=dict(size=12, color=MUTED)),
+            tickfont=dict(size=11, color=MUTED),
+            showgrid=False,
+            automargin=True,
+        ),
+        yaxis=dict(
+            title=y_title,
+            tickfont=dict(size=11, color=MUTED),
+            gridcolor="rgba(21,32,40,0.08)",
+            zeroline=False,
+            range=[y_min, max(y_max, y_min + 1.0)],
+            automargin=True,
+        ),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(size=11, color=MUTED),
+        ),
+        hoverlabel=_hoverlabel(),
+        **{**CHART_LAYOUT, "margin": dict(l=78, r=TRAINING_MARGIN_R, t=64, b=56)},
+    )
+    return fig
+
+
+def hike_map_title() -> str:
+    """Return the hiking locations map title."""
+    return "Hike locations"
+
+
+def _cluster_marker_size(count: int) -> float:
+    """Marker diameter so the count label remains readable."""
+    return float(min(52.0, max(28.0, 18.0 + 7.0 * math.log1p(max(count, 1)))))
+
+
+def _hike_count_div_icon(count: int):
+    """Folium ``DivIcon`` bubble with a visible hike count."""
+    import folium
+
+    size = int(round(_cluster_marker_size(count)))
+    html = (
+        f'<div style="width:{size}px;height:{size}px;border-radius:50%;'
+        f"background:{MILEAGE_BAR};color:#FFFFFF;font-weight:700;"
+        f"font-size:12px;line-height:{size}px;text-align:center;"
+        f"border:2px solid #FFFFFF;"
+        f'box-shadow:0 1px 4px rgba(21,32,40,0.35);'
+        f'font-family:{_plotly_font_family()};">{int(count)}</div>'
+    )
+    return folium.DivIcon(
+        html=html,
+        icon_size=(size, size),
+        icon_anchor=(size // 2, size // 2),
+    )
+
+
+def hike_location_folium_map(
+    clusters: pd.DataFrame,
+    *,
+    center_lat: float,
+    center_lon: float,
+    zoom: float,
+):
+    """Build a Folium OSM map of hike-count cluster bubbles.
+
+    Markers use teal count ``DivIcon``s. Clicks are resolved via marker
+    lat/lng against the current cluster table (and optional ``CLUSTER:…``
+    tokens in tooltip/popup text). Plotly ``on_select`` is intentionally
+    avoided (unreliable after remount).
+
+    Parameters
+    ----------
+    clusters : pandas.DataFrame
+        Rows from ``cluster_hike_starts`` with ``lat``, ``lng``, ``count``,
+        and ``activity_ids``.
+    center_lat, center_lon, zoom : float
+        Initial map camera from ``hike_map_view``.
+
+    Returns
+    -------
+    folium.Map
+        Map with clickable count markers (empty tiles when no clusters).
+    """
+    import folium
+
+    from data import hiking_map_cluster_popup
+
+    # Floor (not round): half-step zooms from ``hike_map_view`` stay on the
+    # more zoomed-out integer (e.g. 1.5 → 1), so worldwide clusters fit.
+    fmap = folium.Map(
+        location=[float(center_lat), float(center_lon)],
+        zoom_start=max(1, int(float(zoom))),
+        tiles="OpenStreetMap",
+        control_scale=True,
+    )
+    if clusters.empty or "lat" not in clusters.columns:
+        return fmap
+
+    for row in clusters.to_dict(orient="records"):
+        try:
+            lat = float(row["lat"])
+            lng = float(row["lng"])
+            count = int(row.get("count") or 0)
+        except (TypeError, ValueError):
+            continue
+        raw_ids = row.get("activity_ids") or []
+        ids = (
+            list(raw_ids)
+            if isinstance(raw_ids, (list, tuple))
+            else [str(raw_ids)]
+        )
+        label = str(row.get("label") or "")
+        tip = f"{count} hike{'s' if count != 1 else ''}"
+        if label:
+            tip = f"{tip} · {label}"
+        tip = f"{tip} — click to filter"
+        # Invisible id token for st_folium tooltip extraction (lat/lng fallback too).
+        tip_html = (
+            f'<div>{tip}</div>'
+            f'<div style="display:none">{hiking_map_cluster_popup(ids)}</div>'
+        )
+        folium.Marker(
+            location=[lat, lng],
+            tooltip=folium.Tooltip(tip_html, sticky=True),
+            icon=_hike_count_div_icon(count),
+        ).add_to(fmap)
+    return fmap
+
+
 def _hex_to_rgb(color: str) -> tuple[int, int, int]:
     """Parse a ``#RRGGBB`` color into 0–255 RGB components."""
     value = color.removeprefix("#")
     return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
+
 
 
 def _rgb_to_hex(r: float, g: float, b: float) -> str:

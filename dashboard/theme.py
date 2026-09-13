@@ -223,6 +223,9 @@ CHART_RACE_WEEKS_MARGIN_TOP = "3rem"        # Training: gap above first race-wee
 CHART_COMPLIANCE_MARGIN_TOP = "1.4rem"      # Training: 80:20 compliance (races strip → chart)
 CHART_MILEAGE_MARGIN_TOP = "1.85rem"        # Training: mileage
 CHART_ELEVATION_MARGIN_TOP = "1.85rem"      # Training: elevation
+# Hiking: extra air after highlights before the first full-width chart
+# (map sits beside Controls in the top row — not a mid-page first chart).
+CHART_HIKING_FIRST_MARGIN_TOP = "2.5rem"
 # Header offset for Training section jumps.
 RACE_STRIP_SCROLL_MARGIN_TOP = "3.75rem"
 # Compact strip width: past the last marker; matches Training bar-chart right pad.
@@ -259,6 +262,7 @@ GLOBAL_CSS = f"""
     --chart-compliance-margin-top: {CHART_COMPLIANCE_MARGIN_TOP};
     --chart-mileage-margin-top: {CHART_MILEAGE_MARGIN_TOP};
     --chart-elevation-margin-top: {CHART_ELEVATION_MARGIN_TOP};
+    --chart-hiking-first-margin-top: {CHART_HIKING_FIRST_MARGIN_TOP};
     --race-strip-scroll-margin-top: {RACE_STRIP_SCROLL_MARGIN_TOP};
     --training-plot-margin-l: 78px;
     --training-plot-margin-r: {TRAINING_PLOT_MARGIN_R_PX}px;
@@ -388,10 +392,10 @@ GLOBAL_CSS = f"""
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: {MUTED};
-    padding: 0.35rem 0.85rem 0.55rem;
+    padding: 0.25rem 0.75rem 0.3rem;
   }}
   nav[data-testid="stSidebarNavItems"] {{
-    gap: 0.2rem;
+    gap: 0.06rem;
   }}
   section[data-testid="stSidebar"] .sidebar-nav-heading {{
     display: block;
@@ -400,10 +404,56 @@ GLOBAL_CSS = f"""
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: {MUTED};
-    padding: 0.35rem 0.85rem 0.55rem;
+    padding: 0.25rem 0.75rem 0.3rem;
   }}
-  section[data-testid="stSidebar"] [data-testid="stSidebarContent"] > div > [data-testid="stVerticalBlock"] {{
-    gap: 0.2rem !important;
+  /* Page-group headers under Navigation (Running / Other sports).
+     Keep denser page-link gaps, but give headers real line-box + padding so
+     they are not clipped/collapsed against Streamlit flex stacks. */
+  section[data-testid="stSidebar"] .sidebar-nav-group-label {{
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    line-height: 1.25;
+    color: {MUTED};
+    /* Bottom pad = air before Metrics / Hiking; top pad is light (margin on
+       the wrapping element handles section separation). */
+    padding: 0.12rem 0.75rem 0.28rem;
+    margin: 0;
+    min-height: 1.15rem;
+    overflow: visible;
+    visibility: visible;
+    opacity: 1;
+  }}
+  /* Wrapper for group labels: restore height/overflow after nested gap collapse
+     and give Other sports (and Running) breathing room above the first link. */
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-group-label) {{
+    overflow: visible !important;
+    height: auto !important;
+    min-height: auto !important;
+    /* Default: space before a section that follows page links (Other sports). */
+    margin-top: 0.5rem !important;
+    margin-bottom: 0.12rem !important;
+  }}
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-group-label)
+    [data-testid="stMarkdownContainer"],
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-group-label)
+    [data-testid="stMarkdown"] {{
+    overflow: visible !important;
+    height: auto !important;
+  }}
+  /* Running sits directly under Navigation — keep a modest gap, not the larger
+     inter-section margin used before Other sports. */
+  section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-heading)
+    + [data-testid="stElementContainer"]:has(.sidebar-nav-group-label) {{
+    margin-top: 0.2rem !important;
+  }}
+  /* Sidebar is nav-only: collapse Streamlit stack gaps (incl. nested
+     st.container() wrappers around each page_link). Keep this tight so
+     Metrics→Training→… stay dense; headers use their own margin/padding. */
+  section[data-testid="stSidebar"] [data-testid="stSidebarContent"] [data-testid="stVerticalBlock"] {{
+    gap: 0.06rem !important;
   }}
   section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sidebar-nav-current-marker) {{
     display: none !important;
@@ -431,12 +481,13 @@ GLOBAL_CSS = f"""
   section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"] {{
     display: flex !important;
     align-items: center !important;
-    border-radius: 10px !important;
+    border-radius: 8px !important;
     font-weight: 600 !important;
     font-size: 0.92rem !important;
     color: {MUTED} !important;
-    padding: 0.55rem 0.85rem !important;
-    margin-bottom: 0.15rem;
+    /* ~32px tap height with 0.92rem type; denser than prior 0.55rem padding. */
+    padding: 0.36rem 0.75rem !important;
+    margin-bottom: 0;
     border: 1px solid transparent !important;
     background: transparent !important;
     text-decoration: none !important;
@@ -499,8 +550,8 @@ GLOBAL_CSS = f"""
 
   /* In-page section navigation (On this page block below page links) */
   section[data-testid="stSidebar"] .sidebar-section-nav {{
-    margin: 0.85rem 0 0.75rem;
-    padding: 0.5rem 0 0.35rem;
+    margin: 0.55rem 0 0.5rem;
+    padding: 0.35rem 0 0.2rem;
     border-top: 1px solid {LINE};
   }}
   section[data-testid="stSidebar"] .sidebar-section-nav-label {{
@@ -509,21 +560,21 @@ GLOBAL_CSS = f"""
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: {MUTED};
-    padding: 0.15rem 0.85rem 0.4rem;
+    padding: 0.1rem 0.75rem 0.25rem;
   }}
   section[data-testid="stSidebar"] .sidebar-section-nav-links {{
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
-    padding: 0 0.35rem;
+    gap: 0.06rem;
+    padding: 0 0.25rem;
   }}
   section[data-testid="stSidebar"] .sidebar-section-nav-links a {{
     display: block;
-    border-radius: 10px;
+    border-radius: 8px;
     font-weight: 600;
     font-size: 0.86rem;
     color: {MUTED};
-    padding: 0.48rem 0.85rem 0.48rem 1.35rem;
+    padding: 0.32rem 0.75rem 0.32rem 1.15rem;
     margin-bottom: 0;
     border: 1px solid transparent;
     background: transparent;
@@ -552,6 +603,10 @@ GLOBAL_CSS = f"""
   #chart-fitness-freshness,
   #chart-race-results,
   #chart-race-buildup,
+  #chart-hiking-miles,
+  #chart-hiking-elevation,
+  #chart-hiking-gap,
+  #chart-hiking-map,
   #race-results-table {{
     scroll-margin-top: 1.25rem;
     height: 0;
@@ -670,6 +725,22 @@ GLOBAL_CSS = f"""
   [data-testid="stElementContainer"]:has(.panel-summary)
     + [data-testid="stElementContainer"]:has(#achievements) {{
     margin-top: 0 !important;
+  }}
+  /* Hiking highlights: same section gap as Achievements / Shoes panels. */
+  #hiking-kpis {{
+    scroll-margin-top: 1.25rem;
+    overflow: visible;
+  }}
+  [data-testid="stElementContainer"]:has(#hiking-kpis) {{
+    margin-top: var(--layout-gap) !important;
+    margin-bottom: 0 !important;
+    overflow: visible !important;
+  }}
+  [data-testid="stElementContainer"]:has(#hiking-kpis)
+    [data-testid="stMarkdownContainer"],
+  [data-testid="stElementContainer"]:has(#hiking-kpis)
+    [data-testid="stMarkdown"] {{
+    overflow: visible !important;
   }}
   /* Performance: Personal Records sit under the page summary, above Controls. */
   [data-testid="stElementContainer"]:has(.panel-summary)
@@ -966,6 +1037,42 @@ GLOBAL_CSS = f"""
     box-shadow: none !important;
   }}
   .st-key-training_elevation {{
+    margin-top: var(--chart-elevation-margin-top) !important;
+    margin-bottom: 0 !important;
+  }}
+  /* Hiking: map is fitted beside Controls (top row). Chart key is
+     ``hiking_map_<rev>`` so the widget remounts on filter/zoom — no mid-page
+     first-chart top gap. Miles gets the larger gap after highlights. */
+  [class*="st-key-hiking_map"] {{
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }}
+  /* Map column: flush with the Controls card; soft-clip Folium iframe. */
+  [data-testid="stColumn"]:has(.hiking-map-panel),
+  [data-testid="column"]:has(.hiking-map-panel) {{
+    padding-top: 0 !important;
+  }}
+  [data-testid="stColumn"]:has(.hiking-map-panel) [data-testid="stVerticalBlock"],
+  [data-testid="column"]:has(.hiking-map-panel) [data-testid="stVerticalBlock"] {{
+    gap: 0.35rem !important;
+  }}
+  [data-testid="stColumn"]:has(.hiking-map-panel) iframe,
+  [data-testid="column"]:has(.hiking-map-panel) iframe {{
+    border-radius: 16px !important;
+    overflow: hidden !important;
+  }}
+  .hiking-map-panel {{
+    display: none;
+  }}
+  .st-key-hiking_miles {{
+    margin-top: var(--chart-hiking-first-margin-top) !important;
+    margin-bottom: 0 !important;
+  }}
+  .st-key-hiking_elevation {{
+    margin-top: var(--chart-elevation-margin-top) !important;
+    margin-bottom: 0 !important;
+  }}
+  .st-key-hiking_gap {{
     margin-top: var(--chart-elevation-margin-top) !important;
     margin-bottom: 0 !important;
   }}

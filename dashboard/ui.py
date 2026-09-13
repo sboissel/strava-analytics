@@ -16,6 +16,8 @@ from charts import (
     compliance_title,
     elevation_title,
     fitness_freshness_title,
+    hike_gap_title,
+    hike_map_title,
     hr_zones_title,
     mileage_title,
     pace_hr_title,
@@ -1112,6 +1114,191 @@ def achievements_html(achievements: dict) -> str:
     )
 
 
+def _hiking_ytd_tooltip(
+    all_time: object | None,
+    ytd_value: object | None,
+    year: object | None,
+) -> str | None:
+    """Build tooltip HTML for all-time hiking totals with a YTD line."""
+    if all_time is None:
+        return None
+    all_time_label = _format_achievement_miles(float(all_time), large=True)
+    ytd_label = (
+        _format_achievement_miles(float(ytd_value), large=True)
+        if ytd_value is not None
+        else None
+    )
+    body = f"<strong>All-time</strong>{html.escape(all_time_label)}"
+    if year is not None and ytd_label is not None:
+        body += (
+            f"<br><strong>Year-to-date ({html.escape(str(int(year)))})</strong>"
+            f"{html.escape(ytd_label)}"
+        )
+    return body
+
+
+def _hiking_trip_tooltip(kpis: dict) -> str | None:
+    """Build tooltip HTML for the consecutive-day trip badge."""
+    miles = kpis.get("longest_trip_miles")
+    start = kpis.get("longest_trip_start")
+    end = kpis.get("longest_trip_end")
+    days = kpis.get("longest_trip_days")
+    hikes = kpis.get("longest_trip_hikes") or []
+    if miles is None:
+        return None
+    body = (
+        "<strong>Trip rule</strong>"
+        "A trip is a streak of consecutive calendar days that each include "
+        "at least one hike."
+    )
+    if start is not None and end is not None and days is not None:
+        if int(days) > 1:
+            span = _format_week_span(start, end)
+            if span:
+                body += (
+                    f"<br><br><strong>Longest trip</strong>"
+                    f"{html.escape(span)}"
+                    f"<br>{html.escape(f'{float(miles):,.2f} mi over {int(days)} days')}"
+                )
+            else:
+                body += (
+                    f"<br><br><strong>Longest trip</strong>"
+                    f"{html.escape(f'{float(miles):,.2f} mi over {int(days)} days')}"
+                )
+        else:
+            date_text = ""
+            try:
+                date_text = format_full_date(start)
+            except (TypeError, ValueError):
+                date_text = ""
+            detail = f"{float(miles):,.2f} mi"
+            if date_text:
+                detail = f"{date_text} · {detail}"
+            body += f"<br><br><strong>Longest trip</strong>{html.escape(detail)}"
+    for hike in hikes:
+        hike_name = (hike.get("name") or "Untitled").strip() or "Untitled"
+        hike_date = hike.get("date")
+        hike_miles = hike.get("miles")
+        date_part = ""
+        if hike_date is not None:
+            short = _format_short_month_day(hike_date)
+            if short:
+                date_part = f" ({short})"
+        miles_part = (
+            f"{float(hike_miles):,.2f} mi" if hike_miles is not None else "—"
+        )
+        body += f"<br>{html.escape(f'{hike_name}{date_part}: {miles_part}')}"
+    return body
+
+
+def hiking_badges_html(kpis: dict) -> str:
+    """Render Hiking highlights as Metrics-style achievement badges.
+
+    Parameters
+    ----------
+    kpis : dict
+        Output of ``hiking_kpis`` with all-time / YTD totals, longest hike,
+        greatest elevation, and longest consecutive-day trip.
+
+    Returns
+    -------
+    str
+        HTML markup for the Hiking KPI badge row.
+    """
+    total_miles = kpis.get("total_miles")
+    total_elev = kpis.get("total_elevation_miles")
+    longest = kpis.get("longest_hike_miles")
+    longest_date = kpis.get("longest_hike_date")
+    greatest = kpis.get("greatest_elevation_miles")
+    greatest_date = kpis.get("greatest_elevation_date")
+    trip_miles = kpis.get("longest_trip_miles")
+    trip_start = kpis.get("longest_trip_start")
+    trip_end = kpis.get("longest_trip_end")
+
+    trip_sub = "—"
+    if trip_start is not None and trip_end is not None:
+        days = kpis.get("longest_trip_days")
+        if days is not None and int(days) > 1:
+            span = _format_week_span(trip_start, trip_end)
+            trip_sub = span.upper() if span else _format_achievement_month(trip_start)
+        else:
+            trip_sub = _format_achievement_month(trip_start)
+
+    badges = [
+        _achievement_badge(
+            "🥾",
+            "Total Miles",
+            _format_achievement_miles(
+                None if total_miles is None else float(total_miles), large=True
+            ),
+            "ALL-TIME",
+            "miles",
+            tooltip=_hiking_ytd_tooltip(
+                total_miles,
+                kpis.get("ytd_miles"),
+                kpis.get("this_year"),
+            ),
+        ),
+        _achievement_badge(
+            "⛰",
+            "Total Elevation",
+            _format_achievement_miles(
+                None if total_elev is None else float(total_elev), large=True
+            ),
+            "ALL-TIME",
+            "elevation",
+            tooltip=_hiking_ytd_tooltip(
+                total_elev,
+                kpis.get("ytd_elevation_miles"),
+                kpis.get("this_year"),
+            ),
+        ),
+        _achievement_badge(
+            "🏅",
+            "Longest Hike",
+            _format_achievement_miles(
+                None if longest is None else float(longest)
+            ),
+            _format_achievement_month(longest_date),
+            "longest",
+            tooltip=_run_achievement_tooltip(
+                kpis.get("longest_hike_name"),
+                longest_date,
+            ),
+        ),
+        _achievement_badge(
+            "🔺",
+            "Greatest Elevation",
+            _format_achievement_miles(
+                None if greatest is None else float(greatest)
+            ),
+            _format_achievement_month(greatest_date),
+            "peak",
+            tooltip=_run_achievement_tooltip(
+                kpis.get("greatest_elevation_name"),
+                greatest_date,
+            ),
+        ),
+        _achievement_badge(
+            "↗",
+            "Most Miles in a Trip",
+            _format_achievement_miles(
+                None if trip_miles is None else float(trip_miles)
+            ),
+            trip_sub,
+            "week",
+            tooltip=_hiking_trip_tooltip(kpis),
+        ),
+    ]
+
+    return (
+        '<div class="panel" id="hiking-kpis">'
+        '<div class="panel-label">Highlights</div>'
+        f'<div class="achievement-grid">{"".join(badges)}</div>'
+        "</div>"
+    )
+
+
 def shoe_kpi_tooltip(goal: float = SHOE_MILEAGE_GOAL) -> str:
     """Return tooltip HTML for shoe mileage gauge cards."""
     return (
@@ -1192,13 +1379,29 @@ def shoe_kpi_cards_html(gear, goal: float = SHOE_MILEAGE_GOAL) -> str:
     )
 
 
-# Page key, sidebar label, path relative to ``dashboard/streamlit_app.py``.
-# Labels follow ``st.Page`` titles in the entrypoint.
-NAV_PAGES: tuple[tuple[str, str, str], ...] = (
-    ("metrics", "Metrics", "pages/metrics.py"),
-    ("training", "Training", "pages/training.py"),
-    ("fitness", "Fitness", "pages/fitness.py"),
-    ("performance", "Performance", "pages/performance.py"),
+# Sidebar page groups: section label → (key, sidebar label, page path).
+# Paths are relative to ``dashboard/streamlit_app.py``. Labels match ``st.Page``
+# titles in the entrypoint. Flat page order is Metrics → Training → Fitness →
+# Performance → Hiking (Hiking last under Other sports).
+NAV_SECTIONS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
+    (
+        "Running",
+        (
+            ("metrics", "Metrics", "pages/metrics.py"),
+            ("training", "Training", "pages/training.py"),
+            ("fitness", "Fitness", "pages/fitness.py"),
+            ("performance", "Performance", "pages/performance.py"),
+        ),
+    ),
+    (
+        "Other sports",
+        (("hiking", "Hiking", "pages/hiking.py"),),
+    ),
+)
+
+# Flat page list derived from ``NAV_SECTIONS`` (preserves overall order).
+NAV_PAGES: tuple[tuple[str, str, str], ...] = tuple(
+    page for _label, pages in NAV_SECTIONS for page in pages
 )
 
 METRICS_SECTIONS: list[tuple[str, str]] = [
@@ -1212,7 +1415,7 @@ def sidebar_nav_entries(
     current_page: str,
     sections: list[tuple[str, str]],
 ) -> list[tuple[str, str, str]]:
-    """Return left-nav entries: page links first, then On this page jumps.
+    """Return left-nav entries: group headers, page links, then On this page jumps.
 
     Parameters
     ----------
@@ -1225,11 +1428,14 @@ def sidebar_nav_entries(
     Returns
     -------
     list[tuple[str, str, str]]
-        ``(kind, key, label)`` rows. ``kind`` is ``"page"`` or ``"section"``.
+        ``(kind, key, label)`` rows. ``kind`` is ``"group"``, ``"page"``,
+        or ``"section"``.
     """
-    entries: list[tuple[str, str, str]] = [
-        ("page", key, title) for key, title, _path in NAV_PAGES
-    ]
+    entries: list[tuple[str, str, str]] = []
+    for section_label, pages in NAV_SECTIONS:
+        group_key = section_label.lower().replace(" ", "-")
+        entries.append(("group", group_key, section_label))
+        entries.extend(("page", key, title) for key, title, _path in pages)
     if any(key == current_page for key, _title, _path in NAV_PAGES):
         entries.extend(("section", anchor, label) for anchor, label in sections)
     return entries
@@ -1270,10 +1476,11 @@ def render_section_nav(
     aria_label: str,
     current_page: str,
 ) -> None:
-    """Render page links, then ``On this page`` jumps as a separate block.
+    """Render page links grouped by section, then ``On this page`` jumps.
 
     Native ``st.navigation`` is hidden; this helper draws the full left nav
-    so page links come first and ``On this page`` sits at the bottom.
+    so page links (under Running / Other sports headers) come first and
+    ``On this page`` sits at the bottom.
 
     Parameters
     ----------
@@ -1297,14 +1504,21 @@ def render_section_nav(
             '<div class="sidebar-nav-heading">Navigation</div>',
             unsafe_allow_html=True,
         )
-        for key, title, path in NAV_PAGES:
-            with st.container():
-                if key == current_page:
-                    st.markdown(
-                        '<div class="sidebar-nav-current-marker" aria-hidden="true"></div>',
-                        unsafe_allow_html=True,
-                    )
-                st.page_link(path, label=title, use_container_width=True)
+        for section_label, pages in NAV_SECTIONS:
+            st.markdown(
+                f'<div class="sidebar-nav-group-label">'
+                f"{html.escape(section_label)}</div>",
+                unsafe_allow_html=True,
+            )
+            for key, title, path in pages:
+                with st.container():
+                    if key == current_page:
+                        st.markdown(
+                            '<div class="sidebar-nav-current-marker" '
+                            'aria-hidden="true"></div>',
+                            unsafe_allow_html=True,
+                        )
+                    st.page_link(path, label=title, use_container_width=True)
         st.markdown(jumps, unsafe_allow_html=True)
 
 
@@ -1509,6 +1723,70 @@ def render_sidebar_section_nav(grain: str) -> None:
         aria_label="Training sections",
         current_page="training",
     )
+
+
+def render_hiking_section_nav(grain: str) -> None:
+    """Render in-page section links for Hiking.
+
+    Parameters
+    ----------
+    grain : str
+        Period grain used for chart section titles.
+
+    Returns
+    -------
+    None
+        Renders sidebar navigation links via Streamlit.
+    """
+    render_section_nav(
+        [
+            ("chart-hiking-map", hike_map_title()),
+            ("hiking-kpis", "Highlights"),
+            ("chart-hiking-miles", mileage_title(grain)),
+            ("chart-hiking-elevation", elevation_title(grain)),
+            ("chart-hiking-gap", hike_gap_title()),
+        ],
+        aria_label="Hiking sections",
+        current_page="hiking",
+    )
+
+
+def clear_hiking_map_filter() -> None:
+    """Reset map activity filter, camera, drill level, and remount keys."""
+    import streamlit as st
+
+    from data import (
+        HIKING_MAP_CHART_KEY,
+        HIKING_MAP_CHART_REV_KEY,
+        HIKING_MAP_CLUSTERS_KEY,
+        HIKING_MAP_DRILL_KEY,
+        HIKING_MAP_FILTER_KEY,
+        HIKING_MAP_LAST_CLICK_KEY,
+        HIKING_MAP_VIEW_KEY,
+    )
+
+    for key in (
+        HIKING_MAP_FILTER_KEY,
+        HIKING_MAP_VIEW_KEY,
+        HIKING_MAP_CHART_REV_KEY,
+        HIKING_MAP_CLUSTERS_KEY,
+        HIKING_MAP_DRILL_KEY,
+        HIKING_MAP_LAST_CLICK_KEY,
+        HIKING_MAP_CHART_KEY,
+    ):
+        if key in st.session_state:
+            del st.session_state[key]
+    # Remounted Folium keys look like ``hiking_map_0``, ``hiking_map_1``, …
+    # (digits only — do not wipe other ``hiking_map_*`` session keys such as
+    # prior Show By grain used to restore after clear).
+    prefix = f"{HIKING_MAP_CHART_KEY}_"
+    for key in list(st.session_state.keys()):
+        if (
+            isinstance(key, str)
+            and key.startswith(prefix)
+            and key[len(prefix) :].isdigit()
+        ):
+            del st.session_state[key]
 
 
 def fastest_race_cards_html(races) -> str:

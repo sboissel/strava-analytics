@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Pipeline / data**
 
-- Activity analysis CSVs (run / ride / swim / hike) include `start_lat` and `start_lng` from Strava list/summary `start_latlng` when GPS is present. Incremental sync only fully rewrites newly processed activities; each sync also backfills empty coords on already-synced rows when those activities reappear on the fetched list pages (no extra detail calls). For a full historical GPS backfill without re-fetching streams, run `PYTHONPATH=src python -m strava_analytics.backfill_locations` locally, or play the manual GitLab CI job `backfill_locations` (commits analysis CSVs only; does not touch `highest_activity_id.txt`). Existing per-type CSVs are reindexed to the current schema even when a sync has no new rows of that type.
+- Activity analysis CSVs (run / ride / swim / hike) include `start_lat` and `start_lng` from Strava list/summary `start_latlng` when GPS is present. Incremental sync only fully rewrites newly processed activities; each sync also fills empty coords on already-synced rows when those activities reappear on the fetched list pages (no extra detail calls). Existing per-type CSVs are reindexed to the current schema even when a sync has no new rows of that type.
 
 ### Fixed
 
