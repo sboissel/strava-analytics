@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 try:
     from . import _bootstrap  # noqa: F401
@@ -817,9 +821,222 @@ def _race_table_date(series: pd.Series) -> pd.Series:
     return series.dt.tz_convert("UTC").dt.tz_localize(None).dt.normalize()
 
 
+_MISSING_LOCATION = "—"
+_US_COUNTRY_CODES = frozenset({"US", "USA"})
+_US_COUNTRY_NAMES = frozenset(
+    {
+        "united states",
+        "united states of america",
+        "usa",
+        "u.s.",
+        "u.s.a.",
+        "us",
+    }
+)
+_CITY_COLUMN_CANDIDATES = ("location_city", "city")
+_STATE_COLUMN_CANDIDATES = ("location_state", "state")
+_COUNTRY_COLUMN_CANDIDATES = ("location_country", "country")
+
+
+def _clean_location_part(value: object) -> str:
+    """Return a stripped location fragment, or empty when missing."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "null"}:
+        return ""
+    return text
+
+
+def _is_united_states(country: str, country_code: str = "") -> bool:
+    """True when country name or ISO code refers to the United States."""
+    if country_code and country_code.upper() in _US_COUNTRY_CODES:
+        return True
+    return bool(country) and country.lower() in _US_COUNTRY_NAMES
+
+
+def format_race_location(
+    city: object = None,
+    state: object = None,
+    country: object = None,
+    *,
+    country_code: object = None,
+) -> str:
+    """Format a race location for the Performance race table.
+
+    United States rows use ``city, state``. All other countries use
+    ``city, country``. Missing pieces are omitted; when nothing usable
+    remains, returns ``"—"``.
+
+    Parameters
+    ----------
+    city, state, country :
+        Place-name fragments (Strava-style or reverse-geocoded).
+    country_code :
+        Optional ISO country code (e.g. ``"US"``) used when detecting the
+        United States formatting rule.
+    """
+    city_s = _clean_location_part(city)
+    state_s = _clean_location_part(state)
+    country_s = _clean_location_part(country)
+    code_s = _clean_location_part(country_code)
+
+    if _is_united_states(country_s, code_s):
+        parts = [part for part in (city_s, state_s) if part]
+    else:
+        country_display = country_s or code_s
+        parts = [part for part in (city_s, country_display) if part]
+    return ", ".join(parts) if parts else _MISSING_LOCATION
+
+
+def _place_column_names(
+    races: pd.DataFrame,
+) -> tuple[str | None, str | None, str | None]:
+    """Return city/state/country column names when present on ``races``."""
+    city = next((c for c in _CITY_COLUMN_CANDIDATES if c in races.columns), None)
+    state = next((c for c in _STATE_COLUMN_CANDIDATES if c in races.columns), None)
+    country = next(
+        (c for c in _COUNTRY_COLUMN_CANDIDATES if c in races.columns), None
+    )
+    return city, state, country
+
+
+# Cached import probe: None = not tried, True/False after first attempt.
+_REVERSE_GEOCODE_AVAILABLE: bool | None = None
+_REVERSE_GEOCODE_ERROR: str | None = None
+
+
+def reverse_geocode_available() -> bool:
+    """True when the offline ``reverse_geocode`` backend can be imported."""
+    global _REVERSE_GEOCODE_AVAILABLE, _REVERSE_GEOCODE_ERROR
+    if _REVERSE_GEOCODE_AVAILABLE is not None:
+        return _REVERSE_GEOCODE_AVAILABLE
+    try:
+        import reverse_geocode  # noqa: F401
+    except ImportError as exc:
+        _REVERSE_GEOCODE_AVAILABLE = False
+        _REVERSE_GEOCODE_ERROR = (
+            "Location needs the reverse_geocode package. "
+            "Run `pip install -r requirements.txt` and restart Streamlit."
+        )
+        logger.warning(
+            "Race Location column unavailable: cannot import reverse_geocode (%s). "
+            "Install requirements and restart the app.",
+            exc,
+        )
+        return False
+    _REVERSE_GEOCODE_AVAILABLE = True
+    _REVERSE_GEOCODE_ERROR = None
+    return True
+
+
+def reverse_geocode_error_message() -> str | None:
+    """User-facing install hint when reverse geocoding is unavailable."""
+    reverse_geocode_available()
+    return _REVERSE_GEOCODE_ERROR
+
+
+def races_have_start_coords(races: pd.DataFrame) -> bool:
+    """True when at least one race row has usable start GPS."""
+    if races.empty or "start_lat" not in races.columns or "start_lng" not in races.columns:
+        return False
+    lat = pd.to_numeric(races["start_lat"], errors="coerce")
+    lng = pd.to_numeric(races["start_lng"], errors="coerce")
+    return bool((lat.notna() & lng.notna()).any())
+
+
+@lru_cache(maxsize=64)
+def _cached_reverse_geocode_search(
+    coords: tuple[tuple[float, float], ...],
+) -> tuple[dict[str, object], ...]:
+    """Batch reverse-geocode coordinates (cached within the process)."""
+    import reverse_geocode
+
+    results = reverse_geocode.search(list(coords))
+    return tuple(dict(item) if isinstance(item, dict) else {} for item in results)
+
+
+def _geocode_race_locations(lats: pd.Series, lngs: pd.Series) -> list[str]:
+    """Reverse-geocode start coordinates into race-table location labels."""
+    global _REVERSE_GEOCODE_AVAILABLE, _REVERSE_GEOCODE_ERROR
+
+    out = [_MISSING_LOCATION] * len(lats)
+    if not reverse_geocode_available():
+        return out
+
+    valid_idx: list[int] = []
+    coords: list[tuple[float, float]] = []
+    for i, (lat, lng) in enumerate(zip(lats.tolist(), lngs.tolist(), strict=True)):
+        if lat is None or lng is None:
+            continue
+        try:
+            if pd.isna(lat) or pd.isna(lng):
+                continue
+            coords.append((float(lat), float(lng)))
+            valid_idx.append(i)
+        except (TypeError, ValueError):
+            continue
+    if not coords:
+        return out
+
+    try:
+        results = _cached_reverse_geocode_search(tuple(coords))
+    except Exception as exc:
+        _REVERSE_GEOCODE_AVAILABLE = False
+        _REVERSE_GEOCODE_ERROR = (
+            f"Location reverse-geocode failed ({type(exc).__name__}: {exc}). "
+            "Check that reverse_geocode and scipy are installed, then restart Streamlit."
+        )
+        logger.exception("Race Location reverse-geocode search failed")
+        return out
+
+    for i, info in zip(valid_idx, results, strict=True):
+        if not info:
+            continue
+        out[i] = format_race_location(
+            info.get("city"),
+            info.get("state"),
+            info.get("country"),
+            country_code=info.get("country_code"),
+        )
+    return out
+
+
+def race_location_labels(races: pd.DataFrame) -> pd.Series:
+    """Build Location labels for race rows (place columns or start GPS).
+
+    Prefers ``location_city`` / ``location_state`` / ``location_country``
+    (or ``city`` / ``state`` / ``country``) when any of those columns exist.
+    Otherwise reverse-geocodes ``start_lat`` / ``start_lng`` offline.
+    """
+    if races.empty:
+        return pd.Series(dtype=str)
+
+    city_col, state_col, country_col = _place_column_names(races)
+    if city_col or state_col or country_col:
+        labels = [
+            format_race_location(
+                row[city_col] if city_col else None,
+                row[state_col] if state_col else None,
+                row[country_col] if country_col else None,
+            )
+            for _, row in races.iterrows()
+        ]
+        return pd.Series(labels, index=races.index, dtype=str)
+
+    if "start_lat" in races.columns and "start_lng" in races.columns:
+        labels = _geocode_race_locations(races["start_lat"], races["start_lng"])
+        return pd.Series(labels, index=races.index, dtype=str)
+
+    return pd.Series(
+        [_MISSING_LOCATION] * len(races), index=races.index, dtype=str
+    )
+
+
 RACE_TABLE_DISPLAY_COLUMNS = [
     "Name",
     "Date",
+    "Location",
     "Race Type",
     "Miles",
     "Time",
@@ -852,11 +1069,13 @@ def race_table_rows(races: pd.DataFrame) -> pd.DataFrame:
         activity_ids = display["activity_id"].astype(str)
     else:
         activity_ids = pd.Series([""] * len(display), index=display.index, dtype=str)
+    locations = race_location_labels(display)
     return pd.DataFrame(
         {
             "activity_id": activity_ids,
             "Name": display["name"],
             "Date": _race_table_date(display["date"]),
+            "Location": locations,
             "Race Type": display["race_type"],
             "Miles": display["distance_miles"],
             "Time": display["elapsed_time_min"].fillna("—"),

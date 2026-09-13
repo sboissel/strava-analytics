@@ -221,6 +221,15 @@ class TrainingChartTests(unittest.TestCase):
         self.assertIn("Elevation (ft)", fig.layout.yaxis.title.text)
         self.assertIn("Weekly Elevation", fig.layout.title.text)
 
+    def test_elevation_chart_miles_unit(self):
+        fig = elevation_chart(_training_period_df(), "Week", unit="mi")
+        self.assertIn("Elevation (mi)", fig.layout.yaxis.title.text)
+        y_vals = list(fig.data[0].y)
+        self.assertAlmostEqual(float(y_vals[0]), 200.0 / 5280.0, places=5)
+        self.assertAlmostEqual(float(y_vals[1]), 350.0 / 5280.0, places=5)
+        self.assertIn("mi", fig.data[0].hovertemplate)
+        self.assertNotIn(" ft", fig.data[0].hovertemplate)
+
     def test_main_charts_have_race_diamonds_at_bar_tops(self):
         period_df = _training_period_df()
         # Bar tops (race week) and chart-wide max used for the above-bar pad.

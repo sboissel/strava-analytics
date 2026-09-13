@@ -6,7 +6,11 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 import numpy as np
 import pandas as pd
 
-from strava_analytics.activities import hr_zone_sec_columns, run_pace_columns, week_summary_bounds
+from strava_analytics.activities import (
+    hr_zone_sec_columns,
+    run_pace_columns,
+    week_summary_bounds,
+)
 
 LAST_ACTIVITY_ID_FILENAME = "highest_activity_id.txt"
 
@@ -77,6 +81,8 @@ def activity_analysis_columns(activity_type: str) -> List[str]:
         "avg_pace_sec",
         "max_pace",
         "max_pace_sec",
+        "start_lat",
+        "start_lng",
     ]
     if activity_type == "Run":
         return base_columns + [
@@ -107,6 +113,12 @@ def update_activity_analysis_csvs(
 ) -> None:
     """Merge processed activities into per-type analysis CSVs.
 
+    Always reindexes existing per-type files to the current schema so newly
+    added columns (for example ``start_lat`` / ``start_lng``) appear even when
+    no activities of that type were processed in this run. Empty ``activity_df``
+    still migrates schemas on files that already exist; it does not create new
+    empty type files.
+
     Parameters
     ----------
     activity_df : pandas.DataFrame
@@ -121,27 +133,37 @@ def update_activity_analysis_csvs(
     None
         This function does not return a value.
     """
-    if activity_df.empty:
-        return
+    has_type = not activity_df.empty and "type" in activity_df.columns
 
     for activity_type, filename in zip(
         activity_types, activity_analysis_paths(output_dir, activity_types)
     ):
-        typed_df = activity_df[activity_df["type"] == activity_type]
-        if typed_df.empty:
-            continue
+        columns = activity_analysis_columns(activity_type)
+        typed_new = (
+            activity_df[activity_df["type"] == activity_type].copy()
+            if has_type
+            else pd.DataFrame()
+        )
 
         if filename.exists():
             existing_df = pd.read_csv(filename, dtype=str, keep_default_na=False)
             existing_df = _drop_header_like_rows(existing_df)
+        elif typed_new.empty:
+            # Do not create empty analysis files for types with no new rows.
+            continue
         else:
-            existing_df = pd.DataFrame(columns=activity_analysis_columns(activity_type))
-        typed_df = pd.concat([typed_df, existing_df], axis=0, sort=False)
-        typed_df["activity_id"] = typed_df["activity_id"].astype(str)
-        typed_df = typed_df.drop_duplicates(subset=["activity_id"])
-        typed_df = typed_df.drop(columns=["zrfs", "vo2max"], errors="ignore")
-        typed_df = typed_df.reindex(columns=activity_analysis_columns(activity_type))
-        typed_df.to_csv(filename, index=False)
+            existing_df = pd.DataFrame(columns=columns)
+
+        if typed_new.empty:
+            combined = existing_df
+        else:
+            combined = pd.concat([typed_new, existing_df], axis=0, sort=False)
+            combined["activity_id"] = combined["activity_id"].astype(str)
+            combined = combined.drop_duplicates(subset=["activity_id"])
+
+        combined = combined.drop(columns=["zrfs", "vo2max"], errors="ignore")
+        combined = combined.reindex(columns=columns)
+        combined.to_csv(filename, index=False)
         print(f"Saved: {filename}")
 
 

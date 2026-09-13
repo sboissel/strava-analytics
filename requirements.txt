@@ -1,3 +1,8 @@
 -r requirements-pipeline.txt
 streamlit>=1.36.0
 plotly>=5.18.0
+folium>=0.15.0
+streamlit-folium>=0.20.0
+# Offline city/state/country for Performance race Location column.
+reverse_geocode>=1.6.0
+scipy>=1.10.0

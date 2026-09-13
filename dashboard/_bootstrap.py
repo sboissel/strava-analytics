@@ -31,6 +31,8 @@ _REQUIRED_RACE_DATA_ATTRS = (
     "race_summary_meta",
     "race_table_rows",
     "race_type_options",
+    "races_have_start_coords",
+    "reverse_geocode_error_message",
 )
 
 

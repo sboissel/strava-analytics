@@ -24,7 +24,7 @@ class MainPipelineTests(unittest.TestCase):
     """Test main pipeline orchestration."""
 
     def test_main_skips_writes_when_no_new_activities(self):
-        """Ensure main still writes the weekly summary when processing returns no rows."""
+        """Ensure main migrates CSV schemas and writes weekly summary with no new rows."""
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
             write_last_activity_id(data_dir, 1)
@@ -48,7 +48,7 @@ class MainPipelineTests(unittest.TestCase):
                 main(data_dir=data_dir)
 
             process_mock.assert_called_once()
-            update_csvs_mock.assert_not_called()
+            update_csvs_mock.assert_called_once()
             update_pace_mock.assert_not_called()
             self.assertTrue((data_dir / "activities_last_week.csv").exists())
             self.assertEqual(read_last_activity_id(data_dir), "1")

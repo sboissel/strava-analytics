@@ -24,6 +24,16 @@ class StravaClient:
         refresh_token: str,
         last_activity_id: str,
     ) -> None:
+        """Initialize a client with OAuth credentials and sync watermark.
+
+        Parameters
+        ----------
+        client_id, client_secret, refresh_token :
+            Strava OAuth application credentials.
+        last_activity_id :
+            Highest activity ID already written to analysis CSVs; list
+            fetches stop after this id is seen.
+        """
         self.client_id = client_id
         self.client_secret = client_secret
         self.refresh_token = refresh_token
@@ -92,23 +102,40 @@ class StravaClient:
             raise RuntimeError("Failed to obtain an access token.")
         return self.access_token
 
-    def get_activities(self) -> List[Dict[str, Any]]:
-        """Fetch athlete activities until the last known activity ID is reached.
+    def get_activity_summaries(
+        self,
+        *,
+        stop_at_activity_id: Optional[str] = None,
+        per_page: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Page athlete activity summaries from newest to oldest.
+
+        Parameters
+        ----------
+        stop_at_activity_id : str, optional
+            Stop after the page that contains this activity ID (incremental sync).
+        per_page : int, optional
+            Page size for the list endpoint (max 200). Defaults to 100.
 
         Returns
         -------
         list[dict]
-            Activity dictionaries returned by the Strava athlete activities endpoint.
+            Activity summary dictionaries from ``GET /athlete/activities``.
+
+        Raises
+        ------
+        RuntimeError
+            If the API request fails.
         """
         access_token = self._require_access_token()
-        activities = []
+        activities: List[Dict[str, Any]] = []
         page = 1
         headers = {"Authorization": f"Bearer {access_token}"}
+        stop_id = str(stop_at_activity_id) if stop_at_activity_id is not None else None
 
         while True:
-            # Fetch one page of activities at a time until we hit the last known activity.
             url = "https://www.strava.com/api/v3/athlete/activities"
-            params = {"per_page": 100, "page": page}
+            params = {"per_page": per_page, "page": page}
 
             res = requests.get(url, headers=headers, params=params, timeout=30)
             if res.status_code != 200:
@@ -123,14 +150,24 @@ class StravaClient:
             activities.extend(data)
             print(f"Pulled page {page} ({len(activities)} activities)")
 
-            # Stop early once the latest known activity appears in the current page.
-            if self.last_activity_id in [str(act["id"]) for act in data]:
+            page_ids = {str(act["id"]) for act in data}
+            if stop_id is not None and stop_id in page_ids:
                 break
 
             page += 1
             time.sleep(1)
 
         return activities
+
+    def get_activities(self) -> List[Dict[str, Any]]:
+        """Fetch athlete activities until the last known activity ID is reached.
+
+        Returns
+        -------
+        list[dict]
+            Activity dictionaries returned by the Strava athlete activities endpoint.
+        """
+        return self.get_activity_summaries(stop_at_activity_id=self.last_activity_id)
 
     def get_streams(self, activity_id: Union[int, str], streams: Sequence[str]) -> Dict[str, Any]:
         """Retrieve one or more Strava activity streams for a given activity.
