@@ -36,15 +36,15 @@ sync:
       fi
     - PYTHONPATH=src python -m strava_analytics.pipeline
     - |
-      # sync-data-v3
+      # sync-data-v4
       set -- \
-        data/strava_run_analysis.csv \
-        data/strava_run_pace_analysis.csv \
-        data/strava_ride_analysis.csv \
-        data/strava_swim_analysis.csv \
-        data/strava_hike_analysis.csv \
-        data/activities_last_week.csv \
-        data/highest_activity_id.txt
+        data/activities/strava_run_analysis.csv \
+        data/activities/strava_run_pace_analysis.csv \
+        data/activities/strava_ride_analysis.csv \
+        data/activities/strava_swim_analysis.csv \
+        data/activities/strava_hike_analysis.csv \
+        data/activities/activities_last_week.csv \
+        data/activities/highest_activity_id.txt
       # Refresh ignore rules from default-branch tip. Retries keep the original
       # SHA; an old `.gitignore` with `data/` would still be in the checkout.
       git fetch origin "${CI_DEFAULT_BRANCH}" || true

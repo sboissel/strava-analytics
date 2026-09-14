@@ -23,6 +23,8 @@ from theme import LONGEST_RUN_GOAL, WEEKLY_MILES_GOAL
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"
+# Sync-generated activity CSVs and watermark (plans / hand-authored files stay under DATA_DIR).
+ACTIVITIES_DIR = DATA_DIR / "activities"
 
 PeriodGrain = Literal["Day", "Week", "Month", "Year"]
 
@@ -111,14 +113,14 @@ def _load_runs_cached(csv_mtime: float, data_dir_str: str) -> pd.DataFrame:
     return _load_runs_uncached(Path(data_dir_str))
 
 
-def load_runs(data_dir: Path = DATA_DIR) -> pd.DataFrame:
+def load_runs(data_dir: Path = ACTIVITIES_DIR) -> pd.DataFrame:
     """Load run analysis rows with parsed dates and numeric fields.
 
     Parameters
     ----------
     data_dir : pathlib.Path, optional
         Directory containing ``strava_run_analysis.csv``. Defaults to the
-        repository ``data`` folder.
+        repository ``data/activities`` folder.
 
     Returns
     -------
@@ -193,14 +195,14 @@ def _load_hikes_cached(csv_mtime: float, data_dir_str: str) -> pd.DataFrame:
     return _load_hikes_uncached(Path(data_dir_str))
 
 
-def load_hikes(data_dir: Path = DATA_DIR) -> pd.DataFrame:
+def load_hikes(data_dir: Path = ACTIVITIES_DIR) -> pd.DataFrame:
     """Load hike analysis rows with parsed dates and numeric fields.
 
     Parameters
     ----------
     data_dir : pathlib.Path, optional
         Directory containing ``strava_hike_analysis.csv``. Defaults to the
-        repository ``data`` folder.
+        repository ``data/activities`` folder.
 
     Returns
     -------
@@ -254,7 +256,7 @@ def _load_gear_cached(csv_mtime: float, data_dir_str: str) -> pd.DataFrame:
     return _load_gear_uncached(Path(data_dir_str))
 
 
-def load_gear(data_dir: Path = DATA_DIR) -> pd.DataFrame:
+def load_gear(data_dir: Path = ACTIVITIES_DIR) -> pd.DataFrame:
     """Load shoe mileage for tracked gear from activity analysis CSVs.
 
     Mileage is each shoe's ``TRACKED_GEAR`` baseline plus the sum of
@@ -264,7 +266,7 @@ def load_gear(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     ----------
     data_dir : pathlib.Path, optional
         Directory containing ``strava_*_analysis.csv`` files. Defaults to the
-        repository ``data`` folder.
+        repository ``data/activities`` folder.
 
     Returns
     -------

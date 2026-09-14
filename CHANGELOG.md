@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+**Pipeline / data**
+
+- Sync-generated activity CSVs and `highest_activity_id.txt` moved from `data/` to [`data/activities/`](data/activities). Hand-authored assets (e.g. plans under `data/plans/`) stay outside that folder. Pipeline, dashboard loaders, and GitLab CI sync paths updated accordingly.
+
 ## [1.6.0] — 2026-09-13
 
 ### Added

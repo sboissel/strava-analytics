@@ -39,12 +39,12 @@ class StravaClientTests(unittest.TestCase):
         self.assertEqual(client.refresh_token, "env_refresh")
         self.assertEqual(client.last_activity_id, "42")
 
-    def test_from_env_defaults_data_dir_to_repo_data(self):
-        """Ensure from_env uses the repo data directory when none is provided."""
+    def test_from_env_defaults_data_dir_to_repo_activities(self):
+        """Ensure from_env uses the repo activities directory when none is provided."""
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir)
-            data_dir = repo_root / "data"
-            data_dir.mkdir()
+            data_dir = repo_root / "data" / "activities"
+            data_dir.mkdir(parents=True)
             (data_dir / "highest_activity_id.txt").write_text("7\n")
             env = {
                 "CLIENT_ID": "env_client",
