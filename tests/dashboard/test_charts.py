@@ -479,14 +479,22 @@ class TrainingChartTests(unittest.TestCase):
         ).customdata]
         self.assertEqual(multi_hover[1][1], "Town 5k<br>5k<br>Odd Race<br>12.4 mi")
 
-    def test_mileage_bars_use_solid_fill_by_default(self):
+    def test_mileage_bars_use_teal_heatmap_without_colorbar(self):
         fig = mileage_chart(_training_period_df(), "Week")
         marker = fig.data[0].marker
-        self.assertEqual(marker.color, MILEAGE_BAR)
-        self.assertFalse(marker.colorscale)
+        self.assertEqual(list(marker.color), [10.0, 20.0])
+        self.assertNotEqual(list(marker.color), [MILEAGE_BAR, MILEAGE_BAR])
+        scale = [(float(stop), color.lower()) for stop, color in marker.colorscale]
+        expected = [(float(stop), color.lower()) for stop, color in MILEAGE_COLORSCALE]
+        self.assertEqual(scale, expected)
+        self.assertEqual(MILEAGE_COLORSCALE[0][1], "#E8F2F0")
+        self.assertEqual(MILEAGE_COLORSCALE[-1][1], MILEAGE_BAR)
         self.assertEqual(MILEAGE_BAR, "#509B8F")
         self.assertEqual(MILES, "#3A4A55")
         self.assertNotEqual(MILEAGE_BAR, MILES)
+        self.assertFalse(marker.showscale)
+        coloraxis = fig.layout.coloraxis
+        self.assertTrue(coloraxis is None or coloraxis.showscale in (None, False))
         # Full-width paper shape (layer above bars); pre-scatter stroke look.
         goal_shapes = _goal_line_shapes(fig)
         self.assertEqual(len(goal_shapes), 1)
@@ -1085,12 +1093,34 @@ class TrainingChartThemeTests(unittest.TestCase):
         self.assertIn('id="chart-hr-zones"', page)
         self.assertIn('id="chart-mileage"', page)
         self.assertIn('id="chart-elevation"', page)
+        self.assertNotIn('id="chart-plan-vs-actual"', page)
+        self.assertNotIn("plan_vs_actual_combined_chart", page)
+        self.assertNotIn("plan_vs_actual_distance_chart", page)
+        self.assertIn("plan_vs_actual_all_plans", page)
+        self.assertIn("attach_plan_targets_to_periods", page)
+        self.assertIn("plan_targets_overlap_periods", page)
+        self.assertNotIn("select_plan_for_charts", page)
+        self.assertIn("training_plans_max_end", page)
+        self.assertIn("max_end=plan_max_end", page)
+        self.assertIn("_with_plan_targets", page)
+        self.assertNotIn('key="training_plan_vs_actual_combined"', page)
+        self.assertNotIn('key="training_plan_vs_actual_distance"', page)
+        self.assertNotIn('key="plan_vs_actual"', page)
         self.assertNotIn("race_weeks_snap_html", page)
         self.assertNotIn("unsafe_allow_javascript", page)
-        self.assertLess(page.find("race_week_strip"), page.find("chart-compliance"))
-        self.assertLess(page.find("chart-compliance"), page.find("chart-mileage"))
-        self.assertLess(page.find("chart-mileage"), page.find("chart-elevation"))
-        self.assertLess(page.find("chart-elevation"), page.find("chart-hr-zones"))
+        # Page body order (helper defs sit above; assert call sites / unique keys).
+        self.assertLess(
+            page.find("render_training_plans(plans, today=today)"),
+            page.find("_race_week_strip(period_metrics, grain)"),
+        )
+        self.assertLess(
+            page.find("_race_week_strip(period_metrics, grain)"),
+            page.find('key="training_compliance"'),
+        )
+        self.assertLess(page.find('key="training_compliance"'), page.find('key="training_mileage"'))
+        self.assertLess(page.find('key="training_mileage"'), page.find('key="training_mileage_heatmap"'))
+        self.assertLess(page.find('key="training_mileage_heatmap"'), page.find('key="training_elevation"'))
+        self.assertLess(page.find('key="training_elevation"'), page.find('key="training_hr_zones"'))
         self.assertLess(page.find("training_compliance"), page.find("training_mileage"))
         self.assertLess(page.find("training_mileage"), page.find("training_mileage_heatmap"))
         self.assertLess(page.find("training_mileage_heatmap"), page.find("training_elevation"))
@@ -1099,10 +1129,31 @@ class TrainingChartThemeTests(unittest.TestCase):
             page.find("mileage_heatmap_chart"),
             page.find("training_elevation"),
         )
+        self.assertLess(
+            page.find("_with_plan_targets("),
+            page.find('key="training_mileage"'),
+        )
         self.assertIn("hr_zones_stacked_area_chart", page)
         self.assertIn("hr_zones_week_to_date_pie_html", page)
         self.assertIn("aggregate_hr_zones_by_period", page)
         self.assertIn("week_to_date_hr_zone_shares", page)
+        ui = (
+            Path(__file__).resolve().parents[2]
+            / "dashboard"
+            / "ui.py"
+        ).read_text()
+        nav_start = ui.find("def render_sidebar_section_nav")
+        self.assertGreaterEqual(nav_start, 0)
+        nav_chunk = ui[nav_start : nav_start + 900]
+        self.assertNotIn('("chart-plan-vs-actual", "Plan vs actual")', nav_chunk)
+        self.assertLess(
+            nav_chunk.find('("training-plans", "Training plans")'),
+            nav_chunk.find('("chart-race-weeks"'),
+        )
+        self.assertLess(
+            nav_chunk.find('("chart-race-weeks"'),
+            nav_chunk.find('("chart-mileage"'),
+        )
         metrics = (
             Path(__file__).resolve().parents[2]
             / "dashboard"
@@ -2412,6 +2463,117 @@ class RaceResultsScatterTests(unittest.TestCase):
         self.assertIn(f"--gdg-bg-group-header-hovered: {RACE_TABLE_FILL}", GLOBAL_CSS)
         self.assertIn("--chart-race-table-title-gap:", GLOBAL_CSS)
         self.assertIn("width: 100% !important;", GLOBAL_CSS)
+
+
+class PlanVsActualChartTests(unittest.TestCase):
+    def _period_with_plan(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "period_key": ["2026-38", "2026-39", "2026-40"],
+                "period_label": ["Sep 14, 26", "Sep 21, 26", "Sep 28, 26"],
+                "period_tooltip": [
+                    "Sep 14, 2026 - Sep 20, 2026",
+                    "Sep 21, 2026 - Sep 27, 2026",
+                    "Sep 28, 2026 - Oct 4, 2026",
+                ],
+                "total_miles": [16.5, 5.0, 8.0],
+                "total_elevation_ft": [350.0, 400.0, 100.0],
+                "plan_miles": [17.8, 12.0, np.nan],
+                "plan_elevation_ft": [np.nan, 800.0, np.nan],
+                "plan_name": ["Sample", "Sample", pd.NA],
+                "plan_week": [1, 2, np.nan],
+                "in_progress": [True, False, False],
+                "is_race_period": [False, False, False],
+            }
+        )
+
+    def test_mileage_grouped_plan_vs_actual(self):
+        fig = mileage_chart(self._period_with_plan(), "Week")
+        self.assertEqual(fig.layout.barmode, "group")
+        self.assertTrue(fig.layout.showlegend)
+        bar_traces = [t for t in fig.data if t.type == "bar"]
+        self.assertEqual(len(bar_traces), 2)
+        self.assertEqual(bar_traces[0].name, "Plan")
+        self.assertEqual(bar_traces[1].name, "Actual")
+        self.assertEqual(list(bar_traces[0].y), [17.8, 12.0, None])
+        self.assertEqual(list(bar_traces[1].y), [16.5, 5.0, 8.0])
+        self.assertEqual(fig.layout.title.text, "Weekly Mileage")
+        # Plan stays muted solid; actuals use mileage heatmap by miles.
+        self.assertEqual(bar_traces[0].marker.color, "rgba(80, 155, 143, 0.35)")
+        self.assertFalse(bar_traces[0].marker.colorscale)
+        self.assertEqual(list(bar_traces[1].marker.color), [16.5, 5.0, 8.0])
+        scale = [
+            (float(stop), color.lower())
+            for stop, color in bar_traces[1].marker.colorscale
+        ]
+        expected = [
+            (float(stop), color.lower()) for stop, color in MILEAGE_COLORSCALE
+        ]
+        self.assertEqual(scale, expected)
+        self.assertFalse(bar_traces[1].marker.showscale)
+
+    def test_plan_hover_includes_name_and_week(self):
+        fig_mi = mileage_chart(self._period_with_plan(), "Week")
+        fig_el = elevation_chart(self._period_with_plan(), "Week")
+        for fig, value_line in (
+            (fig_mi, "Plan: %{y:.1f} miles"),
+            (fig_el, "Plan: %{y:,.0f} ft"),
+        ):
+            plan = next(t for t in fig.data if t.type == "bar" and t.name == "Plan")
+            actual = next(t for t in fig.data if t.type == "bar" and t.name == "Actual")
+            self.assertIn("%{customdata[0]}", plan.hovertemplate)
+            self.assertIn("%{customdata[1]}", plan.hovertemplate)
+            self.assertIn("%{customdata[2]}", plan.hovertemplate)
+            self.assertIn(value_line, plan.hovertemplate)
+            self.assertNotIn("%{customdata[2]}", actual.hovertemplate)
+            # Plan identity line: name · Week N (date span stays in customdata[0]).
+            self.assertEqual(plan.customdata[0][2], "<br>Sample · Week 1")
+            self.assertEqual(plan.customdata[1][2], "<br>Sample · Week 2")
+            self.assertEqual(plan.customdata[2][2], "")
+            self.assertEqual(plan.customdata[0][0], "Sep 14, 2026 - Sep 20, 2026")
+            self.assertIn("<br>Week in progress", plan.customdata[0][1])
+
+    def test_elevation_grouped_plan_vs_actual(self):
+        fig = elevation_chart(self._period_with_plan(), "Week")
+        self.assertEqual(fig.layout.barmode, "group")
+        self.assertTrue(fig.layout.showlegend)
+        bar_traces = [t for t in fig.data if t.type == "bar"]
+        self.assertEqual(len(bar_traces), 2)
+        self.assertEqual(bar_traces[0].name, "Plan")
+        self.assertEqual(bar_traces[1].name, "Actual")
+        self.assertEqual(list(bar_traces[0].y), [None, 800.0, None])
+        self.assertEqual(list(bar_traces[1].y), [350.0, 400.0, 100.0])
+
+    def test_elevation_miles_unit_ignores_plan_columns(self):
+        """Hiking elevation (unit=mi) stays actual-only even with plan elev."""
+        fig = elevation_chart(self._period_with_plan(), "Week", unit="mi")
+        bar_traces = [t for t in fig.data if t.type == "bar"]
+        self.assertEqual(len(bar_traces), 1)
+        self.assertFalse(fig.layout.showlegend)
+        self.assertNotEqual(fig.layout.barmode, "group")
+
+    def test_plan_hover_joined_multi_plan_name_without_week(self):
+        """Collapsed overlap attach sets plan_name join and clears plan_week."""
+        period = self._period_with_plan().copy()
+        period.loc[0, "plan_name"] = "Plan A · Week 1 / Plan B · Week 1"
+        period.loc[0, "plan_week"] = np.nan
+        fig = mileage_chart(period, "Week")
+        plan = next(t for t in fig.data if t.type == "bar" and t.name == "Plan")
+        self.assertEqual(
+            plan.customdata[0][2],
+            "<br>Plan A · Week 1 / Plan B · Week 1",
+        )
+
+    def test_mileage_without_plan_stays_actual_only(self):
+        fig = mileage_chart(_training_period_df(), "Week")
+        bar_traces = [t for t in fig.data if t.type == "bar"]
+        self.assertEqual(len(bar_traces), 1)
+        self.assertFalse(fig.layout.showlegend)
+
+    def test_theme_has_no_standalone_plan_vs_actual(self):
+        self.assertNotIn("chart-plan-vs-actual", GLOBAL_CSS)
+        self.assertNotIn("--chart-plan-vs-actual-margin-top:", GLOBAL_CSS)
+        self.assertNotIn(".st-key-plan_vs_actual", GLOBAL_CSS)
 
 
 if __name__ == "__main__":

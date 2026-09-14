@@ -48,7 +48,7 @@ class StravaClient:
         ----------
         data_dir : pathlib.Path, optional
             Directory containing ``highest_activity_id.txt``. Defaults to
-            ``data`` under the repository root.
+            ``data/activities`` under the repository root.
 
         Returns
         -------
@@ -56,7 +56,7 @@ class StravaClient:
             A configured client instance whose ``last_activity_id`` is the value
             stored in that file.
         """
-        data_dir = data_dir or (REPO_ROOT / "data")
+        data_dir = data_dir or (REPO_ROOT / "data" / "activities")
         return cls(
             client_id=os.environ["CLIENT_ID"],
             client_secret=os.environ["CLIENT_SECRET"],

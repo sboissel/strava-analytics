@@ -17,7 +17,7 @@ except ImportError:
 from strava_analytics.activities import HR_ZONE_COUNT, hr_zone_sec_columns
 
 from data import (
-    DATA_DIR,
+    ACTIVITIES_DIR,
     PeriodGrain,
     format_full_date,
     format_full_month,
@@ -169,14 +169,14 @@ def _load_pace_runs_cached(csv_mtime: float, runs_mtime: float, data_dir_str: st
     return _load_pace_runs_uncached(Path(data_dir_str))
 
 
-def load_pace_runs(data_dir: Path = DATA_DIR) -> pd.DataFrame:
+def load_pace_runs(data_dir: Path = ACTIVITIES_DIR) -> pd.DataFrame:
     """Load pace analysis rows merged with activity dates and elevation.
 
     Parameters
     ----------
     data_dir : pathlib.Path, optional
         Directory containing pace and run analysis CSVs. Defaults to the
-        repository ``data`` folder.
+        repository ``data/activities`` folder.
 
     Returns
     -------

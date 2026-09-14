@@ -38,9 +38,14 @@ from data import (
     PeriodGrain,
     aggregate_period_metrics,
     annotate_race_periods,
+    attach_plan_targets_to_periods,
     latest_activity_label,
     load_runs,
+    load_training_plans,
     period_showing_label,
+    plan_targets_overlap_periods,
+    plan_vs_actual_all_plans,
+    training_plans_max_end,
 )
 from insights_data import (
     aggregate_hr_zones_by_period,
@@ -54,6 +59,8 @@ from ui import (
     race_weeks_legend_html,
     render_period_range_inputs,
     render_sidebar_section_nav,
+    render_training_plan_zoom_select,
+    render_training_plans,
 )
 
 
@@ -69,6 +76,16 @@ def _race_week_strip(period_metrics, grain: str) -> None:
         )
 
 
+def _with_plan_targets(period_metrics, plans, runs, *, grain: str, today: pd.Timestamp):
+    """Attach plan miles/elevation when Week grain overlaps any loaded plan."""
+    if grain != "Week" or not plans:
+        return period_metrics
+    comparison = plan_vs_actual_all_plans(plans, runs, as_of=today)
+    if not plan_targets_overlap_periods(comparison, period_metrics):
+        return period_metrics
+    return attach_plan_targets_to_periods(period_metrics, comparison)
+
+
 st.markdown(
     """
     <div class="panel-title">Training</div>
@@ -77,8 +94,16 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+plans = load_training_plans()
 runs = load_runs()
-as_of = runs["date"].max() if not runs.empty else pd.Timestamp.now(tz="UTC")
+today = pd.Timestamp.now(tz="UTC")
+as_of = runs["date"].max() if not runs.empty else today
+# Allow End past latest activity so plan-vs-actual can show future plan weeks.
+plan_max_end = training_plans_max_end(plans)
+
+st.markdown('<div id="training-plans" class="page-anchor"></div>', unsafe_allow_html=True)
+render_training_plans(plans, today=today)
+
 controls_col, _ = st.columns([1.05, 2.35], gap="medium")
 
 with controls_col:
@@ -96,7 +121,13 @@ with controls_col:
         index=1,
         label_visibility="collapsed",
     )
-    window = render_period_range_inputs(grain, as_of=as_of, page_key="training")
+    # Zoom writes Start/End session keys before the date widgets mount.
+    render_training_plan_zoom_select(
+        plans, grain, as_of=as_of, page_key="training", max_end=plan_max_end
+    )
+    window = render_period_range_inputs(
+        grain, as_of=as_of, page_key="training", max_end=plan_max_end
+    )
     st.markdown(
         f"""
         <div class="controls-meta">
@@ -120,6 +151,9 @@ period_metrics = aggregate_period_metrics(
     runs, grain, as_of=as_of, start=window.start, end=window.end
 )
 period_metrics = annotate_race_periods(period_metrics, load_race_results(), grain)
+period_metrics = _with_plan_targets(
+    period_metrics, plans, runs, grain=grain, today=today
+)
 zone_periods = aggregate_hr_zones_by_period(
     runs, grain, as_of=as_of, start=window.start, end=window.end
 )
@@ -146,7 +180,7 @@ st.plotly_chart(
     config=PLOTLY_CONFIG,
     key="training_mileage",
 )
-# Insights-style calendar heatmap under the solid mileage bars.
+# Insights-style calendar heatmap under the weekly mileage bars.
 with st.expander(
     "Mileage heatmap",
     expanded=False,

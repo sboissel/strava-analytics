@@ -18,7 +18,7 @@ except ImportError:
     import _bootstrap  # noqa: F401
 
 from data import (
-    DATA_DIR,
+    ACTIVITIES_DIR,
     aggregate_period_metrics,
     annotate_race_periods,
     current_period_key,
@@ -682,14 +682,14 @@ def _load_race_results_cached(
     return _load_race_results_uncached(Path(data_dir_str))
 
 
-def load_race_results(data_dir: Path = DATA_DIR) -> pd.DataFrame:
+def load_race_results(data_dir: Path = ACTIVITIES_DIR) -> pd.DataFrame:
     """Load race activities with parsed times, types, and PR flags.
 
     Parameters
     ----------
     data_dir : pathlib.Path, optional
         Directory containing ``strava_run_analysis.csv``. Defaults to the
-        repository ``data`` folder.
+        repository ``data/activities`` folder.
 
     Returns
     -------

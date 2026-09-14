@@ -10,14 +10,16 @@ Versioning follows [Semantic Versioning](https://semver.org/); see [CHANGELOG.md
 
 ## What the pipeline does
 
-The main script in [`src/strava_analytics/pipeline.py`](src/strava_analytics/pipeline.py) refreshes a Strava API token, downloads recent activities, processes each activity, and writes several CSV files into the [data](data) folder:
+The main script in [`src/strava_analytics/pipeline.py`](src/strava_analytics/pipeline.py) refreshes a Strava API token, downloads recent activities, processes each activity, and writes several CSV files into the [data/activities](data/activities) folder:
 
-- [data/strava_run_analysis.csv](data/strava_run_analysis.csv): run-specific enrichment including pace, HR, Strava HR-zone time in seconds (`hr_zone_1_sec`…`hr_zone_5_sec`), easy/hard time metrics (zones 1–2 vs 3+), `gear_id` for shoe mileage, and start GPS (`start_lat` / `start_lng` from summary `start_latlng` when present).
-- [data/strava_ride_analysis.csv](data/strava_ride_analysis.csv): ride exports (same shared GPS columns)
-- [data/strava_swim_analysis.csv](data/strava_swim_analysis.csv): swim exports (same shared GPS columns)
-- [data/strava_hike_analysis.csv](data/strava_hike_analysis.csv): hike exports (same shared GPS columns)
-- [data/strava_run_pace_analysis.csv](data/strava_run_pace_analysis.csv): per-run pace-bin summaries keyed by activity ID
-- [data/activities_last_week.csv](data/activities_last_week.csv): a rolling 7-day summary of recent activity data
+- [data/activities/strava_run_analysis.csv](data/activities/strava_run_analysis.csv): run-specific enrichment including pace, HR, Strava HR-zone time in seconds (`hr_zone_1_sec`…`hr_zone_5_sec`), easy/hard time metrics (zones 1–2 vs 3+), `gear_id` for shoe mileage, and start GPS (`start_lat` / `start_lng` from summary `start_latlng` when present).
+- [data/activities/strava_ride_analysis.csv](data/activities/strava_ride_analysis.csv): ride exports (same shared GPS columns)
+- [data/activities/strava_swim_analysis.csv](data/activities/strava_swim_analysis.csv): swim exports (same shared GPS columns)
+- [data/activities/strava_hike_analysis.csv](data/activities/strava_hike_analysis.csv): hike exports (same shared GPS columns)
+- [data/activities/strava_run_pace_analysis.csv](data/activities/strava_run_pace_analysis.csv): per-run pace-bin summaries keyed by activity ID
+- [data/activities/activities_last_week.csv](data/activities/activities_last_week.csv): a rolling 7-day summary of recent activity data
+
+Hand-authored assets (for example training plans) stay under [`data/`](data) or [`data/plans/`](data/plans); only sync-generated activity exports live in `data/activities/`.
 
 Shoe mileage on the dashboard is computed from activity `gear_id` values: for each shoe in `TRACKED_GEAR`, miles = baseline + sum of `distance_miles` for activities with that `gear_id` (baseline defaults to 0 when unset).
 
@@ -52,13 +54,13 @@ You can also run the file directly; it bootstraps `sys.path` so the package reso
 python src/strava_analytics/pipeline.py
 ```
 
-The script will refresh the access token, fetch activities, and rewrite the CSV outputs in the data directory.
+The script will refresh the access token, fetch activities, and rewrite the CSV outputs in `data/activities/`.
 
 Analysis CSVs include `start_lat` / `start_lng` from Strava list/summary `start_latlng` when GPS is present on newly processed activities. Existing per-type CSVs are reindexed to the current schema even when a sync has no new rows of that type. Do **not** reset `highest_activity_id.txt` to `0` just for GPS — that re-runs stream/zone enrichment for every activity.
 
 ## Daily GitLab sync
 
-A scheduled GitLab CI job runs the pipeline every night and commits updated files under [`data/`](data) back to `main`.
+A scheduled GitLab CI job runs the pipeline every night and commits updated files under [`data/activities/`](data/activities) back to `main`.
 
 ### 1. CI/CD variables
 
@@ -111,7 +113,7 @@ Hosted at [strava-analytics-sboissel.streamlit.app](https://strava-analytics-sbo
 | Branch | `main` |
 | Main file | `dashboard/streamlit_app.py` |
 | Python | 3.11 |
-| Secrets | None required (reads committed CSVs in `data/`) |
+| Secrets | None required (reads committed CSVs in `data/activities/`) |
 
 Data updates when the GitLab daily sync commits to `main` and the GitLab→GitHub mirror pushes. See [DEPLOY.md](DEPLOY.md).
 

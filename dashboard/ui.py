@@ -23,12 +23,19 @@ from charts import (
     pace_hr_title,
 )
 from data import (
+    PLAN_ZOOM_NONE,
     PeriodGrain,
     PeriodWindow,
     clamp_period_window,
+    current_plan_week_index,
     default_period_bounds,
     format_full_date,
+    format_week_range_short,
+    normalize_utc,
     period_window_limits,
+    plan_focus_session_date,
+    plan_week_index_for_date,
+    sync_training_plan_zoom_window,
 )
 from race_data import (
     easy_hard_ratio_from_pct,
@@ -1611,11 +1618,96 @@ def render_metrics_section_nav() -> None:
     )
 
 
+def render_training_plan_zoom_select(
+    plans: Sequence[Mapping[str, object]],
+    grain: PeriodGrain,
+    *,
+    as_of: pd.Timestamp,
+    page_key: str = "training",
+    max_end: pd.Timestamp | None = None,
+) -> str:
+    """Render Training Controls **Zoom to plan** and sync Start/End keys.
+
+    Options are ``None`` (default) plus each loaded plan name. Selecting a
+    plan writes grain-aligned Start/End from that plan's dates; selecting
+    ``None`` again restores ``default_period_bounds``. Must run **before**
+    ``render_period_range_inputs`` so session keys update prior to widgets.
+
+    Parameters
+    ----------
+    plans :
+        Output of ``load_training_plans``.
+    grain : PeriodGrain
+        Current Show By grain.
+    as_of : pandas.Timestamp
+        Reference end for defaults and clamping.
+    page_key : str
+        Page namespace (default ``"training"``).
+    max_end : pandas.Timestamp, optional
+        Later selectable End (latest plan session).
+
+    Returns
+    -------
+    str
+        Selected option (``None`` or a plan name).
+    """
+    import streamlit as st
+    import pandas as pd
+
+    as_of_ts = pd.Timestamp(as_of)
+    if as_of_ts.tzinfo is None:
+        as_of_ts = as_of_ts.tz_localize("UTC")
+    max_end_ts = None
+    if max_end is not None:
+        max_end_ts = pd.Timestamp(max_end)
+        if max_end_ts.tzinfo is None:
+            max_end_ts = max_end_ts.tz_localize("UTC")
+
+    names = []
+    for plan in plans:
+        name = str(plan.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    options = [PLAN_ZOOM_NONE, *names]
+    zoom_key = f"{page_key}_plan_zoom"
+    if zoom_key not in st.session_state:
+        st.session_state[zoom_key] = PLAN_ZOOM_NONE
+    # Drop a stale selection if the plan file disappeared.
+    if st.session_state[zoom_key] not in options:
+        st.session_state[zoom_key] = PLAN_ZOOM_NONE
+
+    st.markdown(
+        '<div class="controls-filter-label">Zoom to plan</div>',
+        unsafe_allow_html=True,
+    )
+    selected = st.selectbox(
+        "Zoom to plan",
+        options=options,
+        key=zoom_key,
+        label_visibility="collapsed",
+        help=(
+            "Set Start/End to a training plan's dates (aligned to Show By). "
+            "None keeps or restores the default period window."
+        ),
+    )
+    sync_training_plan_zoom_window(
+        st.session_state,
+        selected=str(selected),
+        grain=grain,
+        plans=plans,
+        as_of=as_of_ts,
+        page_key=page_key,
+        max_end=max_end_ts,
+    )
+    return str(selected)
+
+
 def render_period_range_inputs(
     grain: PeriodGrain,
     *,
     as_of: pd.Timestamp,
     page_key: str,
+    max_end: pd.Timestamp | None = None,
 ) -> PeriodWindow:
     """Render start/end controls for the Show By window.
 
@@ -1634,6 +1726,9 @@ def render_period_range_inputs(
         Reference end date (typically latest activity).
     page_key : str
         Page namespace such as ``"training"`` or ``"fitness"``.
+    max_end : pandas.Timestamp, optional
+        When later than ``as_of``, extends the selectable End (e.g. last
+        training-plan session). Defaults still end at ``as_of``.
 
     Returns
     -------
@@ -1646,8 +1741,13 @@ def render_period_range_inputs(
     as_of_ts = pd.Timestamp(as_of)
     if as_of_ts.tzinfo is None:
         as_of_ts = as_of_ts.tz_localize("UTC")
+    max_end_ts = None
+    if max_end is not None:
+        max_end_ts = pd.Timestamp(max_end)
+        if max_end_ts.tzinfo is None:
+            max_end_ts = max_end_ts.tz_localize("UTC")
     defaults = default_period_bounds(grain, as_of_ts)
-    limits = period_window_limits(grain, as_of_ts)
+    limits = period_window_limits(grain, as_of_ts, max_end=max_end_ts)
 
     start_key = f"{page_key}_period_start_{grain}"
     end_key = f"{page_key}_period_end_{grain}"
@@ -1747,7 +1847,9 @@ def render_period_range_inputs(
         raw_start = pd.Timestamp(range_start, tz="UTC")
         raw_end = pd.Timestamp(range_end, tz="UTC")
 
-    return clamp_period_window(grain, raw_start, raw_end, as_of=as_of_ts)
+    return clamp_period_window(
+        grain, raw_start, raw_end, as_of=as_of_ts, max_end=max_end_ts
+    )
 
 
 def render_sidebar_section_nav(grain: str) -> None:
@@ -1765,6 +1867,7 @@ def render_sidebar_section_nav(grain: str) -> None:
     """
     render_section_nav(
         [
+            ("training-plans", "Training plans"),
             ("chart-race-weeks", RACE_EVENTS_TITLE),
             ("chart-compliance", compliance_title(grain)),
             ("chart-mileage", mileage_title(grain)),
@@ -1774,6 +1877,306 @@ def render_sidebar_section_nav(grain: str) -> None:
         aria_label="Training sections",
         current_page="training",
     )
+
+
+def _training_plan_session_row_html(
+    session: Mapping[str, object],
+    *,
+    focus_date: object | None = None,
+    today: object | None = None,
+) -> str:
+    """Return one session row for the expandable plan table."""
+    date_raw = session.get("date")
+    session_day = None
+    try:
+        if date_raw is not None:
+            import pandas as pd
+
+            session_day = normalize_utc(pd.Timestamp(date_raw))  # type: ignore[arg-type]
+            date_label = format_full_date(session_day)
+        else:
+            date_label = "—"
+    except (TypeError, ValueError):
+        date_label = "—"
+        session_day = None
+    name = str(session.get("session") or "").strip() or "—"
+    miles_label = str(session.get("miles_label") or "—").strip() or "—"
+    elev = session.get("elevation_ft")
+    if elev is None:
+        elev_label = "—"
+    else:
+        try:
+            elev_label = f"{float(elev):,.0f}"  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            elev_label = "—"
+    is_race = bool(session.get("is_race"))
+    row_class = "training-plan-session-row"
+    if is_race:
+        row_class += " is-race"
+    if focus_date is not None and session_day is not None:
+        import pandas as pd
+
+        focus_day = normalize_utc(pd.Timestamp(focus_date))  # type: ignore[arg-type]
+        if session_day == focus_day:
+            as_of = (
+                normalize_utc(pd.Timestamp(today))  # type: ignore[arg-type]
+                if today is not None
+                else None
+            )
+            row_class += " is-today" if as_of is not None and focus_day == as_of else " is-next"
+    badge = (
+        '<span class="training-plan-race-badge">Race</span>' if is_race else ""
+    )
+    return (
+        f'<div class="{row_class}" role="row">'
+        f'<span class="training-plan-date">{html.escape(date_label)}</span>'
+        f'<span class="training-plan-session">'
+        f"{html.escape(name)}{badge}</span>"
+        f'<span class="training-plan-num">{html.escape(miles_label)}</span>'
+        f'<span class="training-plan-num">{html.escape(elev_label)}</span>'
+        "</div>"
+    )
+
+
+def _training_plan_miles_label(miles: float) -> str:
+    """Format week-total miles for plan table cells."""
+    if abs(miles - round(miles)) < 1e-9:
+        return f"{miles:.0f}"
+    label = f"{miles:.2f}".rstrip("0").rstrip(".")
+    return label or "0"
+
+
+def _training_plan_week_summary_cells(week: Mapping[str, object]) -> tuple[str, str, str]:
+    """Return week-range, miles, and elevation labels for a summary row."""
+    label = str(week.get("week_label") or "").strip()
+    if not label:
+        start = week.get("week_start")
+        if start is not None:
+            try:
+                import pandas as pd
+
+                label = format_week_range_short(pd.Timestamp(start))
+            except (TypeError, ValueError):
+                label = "Week"
+        else:
+            label = "Week"
+
+    miles = week.get("total_miles")
+    try:
+        miles_val = 0.0 if miles is None else float(miles)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        miles_val = 0.0
+    miles_label = _training_plan_miles_label(miles_val)
+
+    elev = week.get("total_elevation_ft")
+    if elev is None:
+        elev_label = "—"
+    else:
+        try:
+            elev_label = f"{float(elev):,.0f}"  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            elev_label = "—"
+    return label, miles_label, elev_label
+
+
+def training_plan_table_html(
+    weeks: Sequence[Mapping[str, object]],
+    *,
+    expanded_week_index: int | None = None,
+    today: object | None = None,
+) -> str:
+    """Return one cohesive plan table with expandable week-total rows.
+
+    Each week is a JS-free ``<details>`` block: the summary row shows the week
+    range plus target miles/elevation; opening it reveals individual sessions.
+    Race sessions use muted-gold text for the whole row (bold session name +
+    Race badge). The focus day — today when a session falls on it, otherwise
+    the next upcoming session day — gets a cool row wash distinct from race
+    text styling.
+
+    Parameters
+    ----------
+    weeks :
+        Plan week dicts from ``parse_training_plan_file`` / loaders.
+    expanded_week_index : int, optional
+        Week row that starts open (``current_plan_week_index``).
+    today :
+        Reference day for focus highlighting (defaults to now UTC).
+
+    Returns
+    -------
+    str
+        HTML fragment for one plan table (or an empty-state message).
+    """
+    if not weeks:
+        return (
+            '<div class="race-results-empty">This plan has no dated sessions.</div>'
+        )
+
+    import pandas as pd
+
+    as_of = normalize_utc(
+        pd.Timestamp(today)
+        if today is not None
+        else pd.Timestamp.now(tz="UTC")
+    )
+    focus_date = plan_focus_session_date(weeks, as_of)
+
+    week_blocks: list[str] = []
+    for week_i, week in enumerate(weeks):
+        week_label, miles_label, elev_label = _training_plan_week_summary_cells(week)
+        open_attr = " open" if week_i == expanded_week_index else ""
+        sessions = list(week.get("sessions") or [])
+        if sessions:
+            body = "".join(
+                _training_plan_session_row_html(
+                    s, focus_date=focus_date, today=as_of
+                )
+                for s in sessions
+            )
+        else:
+            body = (
+                '<div class="race-results-empty">'
+                "No sessions in this week."
+                "</div>"
+            )
+        week_blocks.append(
+            f'<details class="training-plan-week"{open_attr}>'
+            f'<summary class="training-plan-week-sum" role="row">'
+            f'<span class="training-plan-week-range">'
+            f"{html.escape(week_label)}</span>"
+            f'<span class="training-plan-week-session">Week {week_i + 1} total</span>'
+            f'<span class="training-plan-num">{html.escape(miles_label)}</span>'
+            f'<span class="training-plan-num">{html.escape(elev_label)}</span>'
+            "</summary>"
+            f'<div class="training-plan-sessions">{body}</div>'
+            "</details>"
+        )
+
+    return (
+        '<div class="training-plan-table-wrap">'
+        '<div class="training-plan-table" role="table">'
+        '<div class="training-plan-head" role="row">'
+        "<span>Week / Date</span>"
+        "<span>Session</span>"
+        "<span>Miles</span>"
+        "<span>Elev (ft)</span>"
+        "</div>"
+        f"{''.join(week_blocks)}"
+        "</div></div>"
+    )
+
+
+def training_plan_week_table_html(
+    sessions: Sequence[Mapping[str, object]],
+    *,
+    today: object | None = None,
+) -> str:
+    """Return session rows for one week (compat wrapper around the plan table).
+
+    Prefer ``training_plan_table_html`` for the Training page. This helper
+    keeps race-row tests and callers that only have session lists working.
+
+    Parameters
+    ----------
+    sessions :
+        Session dicts for a single synthetic week.
+    today :
+        Reference day for focus highlighting (defaults to now UTC).
+
+    Returns
+    -------
+    str
+        HTML from ``training_plan_table_html`` with the week row open.
+    """
+    week = {
+        "week_label": "Week",
+        "total_miles": 0.0,
+        "total_elevation_ft": None,
+        "sessions": list(sessions),
+    }
+    return training_plan_table_html(
+        [week], expanded_week_index=0, today=today
+    )
+
+
+def render_training_plans(
+    plans: Sequence[Mapping[str, object]],
+    *,
+    today: object | None = None,
+) -> None:
+    """Render Training plans: plan expanders with one expandable-row table each.
+
+    Each plan is an ``st.expander`` (CSV header name). Inside, weeks are
+    ``<details>`` summary rows in a single table; only the current week opens
+    by default.
+
+    Parameters
+    ----------
+    plans :
+        Output of ``load_training_plans`` (chronological).
+    today :
+        Reference date for which plan opens and which week-sum row is open.
+
+    Returns
+    -------
+    None
+        Renders into the Streamlit page.
+    """
+    import pandas as pd
+    import streamlit as st
+
+    from data import default_expanded_plan_index
+
+    with st.expander(
+        "Training plans",
+        expanded=False,
+        type="compact",
+        key="training_plans",
+    ):
+        if not plans:
+            st.markdown(
+                '<div class="race-results-empty">'
+                "No training plans in data/plans yet."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            return
+
+        as_of = None if today is None else pd.Timestamp(today)
+        expand_plan_idx = default_expanded_plan_index(plans, as_of)
+        for plan_i, plan in enumerate(plans):
+            name = str(plan.get("name") or "Training plan").strip() or "Training plan"
+            plan_open = plan_i == expand_plan_idx
+            weeks = list(plan.get("weeks") or [])
+            with st.expander(
+                name,
+                expanded=plan_open,
+                type="compact",
+                key=f"training_plan_{plan_i}",
+            ):
+                if not weeks:
+                    st.markdown(
+                        '<div class="race-results-empty">'
+                        "This plan has no dated sessions."
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+                    continue
+                # Open the calendar week containing today when present; otherwise
+                # open the week that holds the focus (today/next) session day.
+                expand_week = current_plan_week_index(weeks, as_of)
+                if expand_week is None:
+                    focus_day = plan_focus_session_date(weeks, as_of)
+                    expand_week = plan_week_index_for_date(weeks, focus_day)
+                st.markdown(
+                    training_plan_table_html(
+                        weeks,
+                        expanded_week_index=expand_week,
+                        today=as_of,
+                    ),
+                    unsafe_allow_html=True,
+                )
 
 
 def render_hiking_section_nav(grain: str) -> None:

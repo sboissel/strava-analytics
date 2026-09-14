@@ -28,9 +28,9 @@ def main(data_dir: Optional[Path] = None) -> None:
     ----------
     data_dir : pathlib.Path, optional
         Directory for activity CSVs and the last-activity-id file. Defaults to
-        ``data`` under the repository root.
+        ``data/activities`` under the repository root.
     """
-    data_dir = data_dir or (REPO_ROOT / "data")
+    data_dir = data_dir or (REPO_ROOT / "data" / "activities")
 
     client = StravaClient.from_env(data_dir=data_dir)
     client.refresh_access_token()

@@ -104,12 +104,12 @@ class MainPipelineTests(unittest.TestCase):
             self.assertEqual(read_last_activity_id(data_dir), "99")
             self.assertTrue((data_dir / "activities_last_week.csv").exists())
 
-    def test_main_defaults_data_dir_to_repo_data(self):
-        """Ensure main uses the repo data directory when none is provided."""
+    def test_main_defaults_data_dir_to_repo_activities(self):
+        """Ensure main uses the repo activities directory when none is provided."""
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir)
-            data_dir = repo_root / "data"
-            data_dir.mkdir()
+            data_dir = repo_root / "data" / "activities"
+            data_dir.mkdir(parents=True)
             write_last_activity_id(data_dir, 1)
             for activity_type in ["run", "ride", "swim", "hike"]:
                 (data_dir / f"strava_{activity_type}_analysis.csv").write_text(
