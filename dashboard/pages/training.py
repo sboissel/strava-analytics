@@ -40,6 +40,7 @@ from data import (
     annotate_race_periods,
     latest_activity_label,
     load_runs,
+    load_training_plans,
     period_showing_label,
 )
 from insights_data import (
@@ -54,6 +55,7 @@ from ui import (
     race_weeks_legend_html,
     render_period_range_inputs,
     render_sidebar_section_nav,
+    render_training_plans,
 )
 
 
@@ -76,6 +78,9 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+st.markdown('<div id="training-plans" class="page-anchor"></div>', unsafe_allow_html=True)
+render_training_plans(load_training_plans())
 
 runs = load_runs()
 as_of = runs["date"].max() if not runs.empty else pd.Timestamp.now(tz="UTC")

@@ -251,6 +251,8 @@ CHART_RACE_TABLE_TITLE_GAP = "0.75rem"          # Performance: Race History titl
 CHART_RACE_BUILDUP_MARGIN_TOP = LAYOUT_GAP      # Performance: Race Build-up section
 # Subtle athletic purple for Total Elevation achievement badge.
 ELEVATION_PURPLE = "#6F5F8D"
+# Training plan race session rows: muted gold text (whole row, no wash).
+TRAINING_PLAN_RACE_TEXT = "#A67C2D"
 
 GLOBAL_CSS = f"""
 <style>
@@ -2646,6 +2648,13 @@ GLOBAL_CSS = f"""
   [data-testid="stElementContainer"]:has(.panel-summary) {{
     margin-bottom: calc(var(--layout-gap) * 1.5) !important;
   }}
+  /* Training: plans sit under the title — keep that gap tight; section break
+     moves to plans → Controls (.st-key-training_plans margin-bottom). */
+  [data-testid="stElementContainer"]:has(.panel-summary):has(
+    + [data-testid="stElementContainer"]:has(#training-plans)
+  ) {{
+    margin-bottom: 0.35rem !important;
+  }}
   .panel-label {{
     font-size: 0.72rem;
     font-weight: 600;
@@ -3344,6 +3353,151 @@ GLOBAL_CSS = f"""
     text-align: center;
     color: {MUTED};
     font-size: 0.92rem;
+  }}
+
+  /* Training plans: collapsed section near top of Training page.
+     Top: tight under title (panel-summary override above). Bottom: full
+     section gap before Controls (same token as other page section breaks). */
+  .st-key-training_plans {{
+    margin-top: 0 !important;
+    margin-bottom: calc(var(--layout-gap) * 1.5) !important;
+    --secondary-background-color: {BG};
+  }}
+  .st-key-training_plans,
+  .st-key-training_plans [data-testid="stExpander"],
+  .st-key-training_plans [data-testid="stExpander"] details,
+  .st-key-training_plans [data-testid="stExpander"] summary,
+  .st-key-training_plans [data-testid="stExpanderDetails"],
+  .st-key-training_plans [data-testid="stVerticalBlockBorderWrapper"],
+  .st-key-training_plans [data-testid="stVerticalBlock"],
+  .st-key-training_plans [data-testid="stLayoutWrapper"],
+  .st-key-training_plans [data-testid="stElementContainer"] {{
+    background: transparent !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+  }}
+  [class*="st-key-training_plan_"] {{
+    --secondary-background-color: {BG};
+    margin-top: 0.35rem !important;
+    margin-bottom: 0.15rem !important;
+  }}
+  .training-plan-table-wrap {{
+    width: 100%;
+    overflow-x: auto;
+    margin: 0.15rem 0 0.35rem 0;
+  }}
+  .training-plan-table {{
+    width: 100%;
+    font-family: {FONT_BODY};
+    font-size: 0.88rem;
+    color: {INK};
+  }}
+  .training-plan-head,
+  .training-plan-week-sum,
+  .training-plan-session-row {{
+    display: grid;
+    grid-template-columns: minmax(9.5rem, 1.5fr) minmax(8rem, 2fr) 4.5rem 5rem;
+    column-gap: 0.35rem;
+    align-items: center;
+  }}
+  .training-plan-head {{
+    font-size: 0.72rem;
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: {MUTED};
+    border-bottom: 1px solid rgba(21, 32, 40, 0.10);
+    padding: 0.4rem 0.55rem;
+  }}
+  .training-plan-head > span:nth-child(3),
+  .training-plan-head > span:nth-child(4),
+  .training-plan-num {{
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }}
+  .training-plan-week {{
+    border-bottom: 1px solid rgba(21, 32, 40, 0.06);
+  }}
+  .training-plan-week > summary {{
+    list-style: none;
+    cursor: pointer;
+  }}
+  .training-plan-week > summary::-webkit-details-marker {{
+    display: none;
+  }}
+  .training-plan-week-sum {{
+    padding: 0.48rem 0.55rem 0.48rem 1.55rem;
+    position: relative;
+    font-weight: 600;
+    color: {INK};
+  }}
+  .training-plan-week-sum::before {{
+    content: "▸";
+    position: absolute;
+    left: 0.45rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: {MUTED};
+    font-size: 0.8rem;
+    line-height: 1;
+  }}
+  .training-plan-week[open] > .training-plan-week-sum::before {{
+    content: "▾";
+  }}
+  .training-plan-week-range {{
+    min-width: 0;
+  }}
+  .training-plan-week-session {{
+    color: {MUTED};
+    font-weight: 550;
+    font-size: 0.82rem;
+  }}
+  .training-plan-sessions {{
+    padding: 0 0 0.2rem 0;
+  }}
+  .training-plan-sessions > .race-results-empty {{
+    padding: 0.35rem 0.55rem 0.45rem 2.75rem;
+  }}
+  .training-plan-session-row {{
+    /* Nest under week-total rows (week-sum left pad is 1.55rem for the chevron). */
+    padding: 0.38rem 0.55rem 0.38rem 2.75rem;
+    border-top: 1px solid rgba(21, 32, 40, 0.04);
+    font-weight: 400;
+  }}
+  /* Today / next session day: cool wash (distinct from race text cue). */
+  .training-plan-session-row.is-today,
+  .training-plan-session-row.is-next {{
+    background: rgba(91, 155, 213, 0.18);
+    box-shadow: inset 3px 0 0 {EASY};
+  }}
+  /* Races: muted-gold text on the whole row (date/session/miles/elev/badge).
+     No gold background wash — today/next cool wash may still apply. */
+  .training-plan-session-row.is-race {{
+    color: {TRAINING_PLAN_RACE_TEXT};
+  }}
+  .training-plan-session-row.is-race .training-plan-session {{
+    font-weight: 700;
+  }}
+  .training-plan-session {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+  }}
+  .training-plan-race-badge {{
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: inherit;
+    background: transparent;
+    border: 1px solid rgba(166, 124, 45, 0.40);
+    border-radius: 4px;
+    padding: 0.1rem 0.35rem;
+    line-height: 1.2;
   }}
 
   /* Kill Streamlit structural borders that read as white section dividers */

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Dashboard**
+
+- **Training**: collapsed **Training plans** section at the top of the page (after title; before Controls/charts), listing `data/plans/*.csv` (plan name from file header, weeks nested and collapsible with indented session rows; race sessions use muted-gold text across the whole row; today or next session day highlighted; current/focus week expanded by default).
+
 ### Changed
 
 **Pipeline / data**

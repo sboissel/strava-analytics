@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal, NamedTuple
@@ -25,6 +26,24 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"
 # Sync-generated activity CSVs and watermark (plans / hand-authored files stay under DATA_DIR).
 ACTIVITIES_DIR = DATA_DIR / "activities"
+PLANS_DIR = DATA_DIR / "plans"
+
+# Plan CSV column aliases (case-insensitive header → canonical name).
+_PLAN_COL_ALIASES: dict[str, str] = {
+    "date": "date",
+    "target miles": "target_miles",
+    "target_miles": "target_miles",
+    "miles": "target_miles",
+    "session": "session",
+    "target elevation": "target_elevation_ft",
+    "target_elevation": "target_elevation_ft",
+    "target elevation ft": "target_elevation_ft",
+    "target_elevation_ft": "target_elevation_ft",
+    "elevation": "target_elevation_ft",
+}
+_PLAN_MILES_RANGE_RE = re.compile(
+    r"^(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)$"
+)
 
 PeriodGrain = Literal["Day", "Week", "Month", "Year"]
 
@@ -2984,4 +3003,516 @@ def hiking_map_view_revision(view: Mapping[str, float] | None) -> str:
     except (TypeError, ValueError):
         return "hiking-map-default"
     return f"hiking-map:{lat}:{lon}:{zoom}"
+
+
+def parse_plan_header_name(raw: object | None, *, fallback: str = "") -> str:
+    """Extract a plan display name from a ``#Plan name`` header line.
+
+    Parameters
+    ----------
+    raw :
+        First line of a plan CSV (often ``#November halves``).
+    fallback : str, optional
+        Name used when ``raw`` is empty or not a usable header.
+
+    Returns
+    -------
+    str
+        Trimmed plan name without the leading ``#``.
+    """
+    fallback_text = str(fallback or "").strip() or "Training plan"
+    if raw is None:
+        return fallback_text
+    text = str(raw).strip()
+    if text.startswith("#"):
+        text = text[1:].lstrip()
+    return text.strip() or fallback_text
+
+
+def is_plan_race_session(session: object) -> bool:
+    """Return whether a plan session label marks a race.
+
+    Matches case-insensitive substrings such as ``Race day``, ``RACE DAY``,
+    or ``12.5K trail race``.
+    """
+    text = str(session or "").strip().lower()
+    if not text:
+        return False
+    return "race" in text
+
+
+def parse_plan_miles(value: object) -> tuple[float | None, str]:
+    """Parse a plan miles cell into a numeric total and display label.
+
+    Supports plain numbers and inclusive ranges such as ``3-4`` (midpoint is
+    used for week totals; the original range text is kept for display).
+    """
+    if value is None:
+        return None, "—"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and math.isnan(value):
+            return None, "—"
+        number = float(value)
+        return number, _format_plan_miles_label(number)
+
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "nat"}:
+        return None, "—"
+    try:
+        number = float(text)
+        return number, _format_plan_miles_label(number)
+    except ValueError:
+        pass
+    match = _PLAN_MILES_RANGE_RE.fullmatch(text)
+    if match is None:
+        return None, text
+    low = float(match.group(1))
+    high = float(match.group(2))
+    return (low + high) / 2.0, text
+
+
+def _format_plan_miles_label(miles: float) -> str:
+    """Format a miles value for plan tables (trim trailing zeros)."""
+    if abs(miles - round(miles)) < 1e-9:
+        return f"{miles:.0f}"
+    label = f"{miles:.2f}".rstrip("0").rstrip(".")
+    return label or "0"
+
+
+def parse_plan_elevation(value: object) -> float | None:
+    """Parse optional plan elevation (feet); empty cells become ``None``."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and math.isnan(value):
+            return None
+        return float(value)
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "nat"}:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def plan_week_totals(
+    sessions: Sequence[Mapping[str, object]],
+) -> tuple[float, float | None]:
+    """Sum target miles and elevation for a plan week.
+
+    Elevation is ``None`` when no session in the week has an elevation value.
+    """
+    total_miles = 0.0
+    elev_sum = 0.0
+    elev_any = False
+    for session in sessions:
+        miles = session.get("miles")
+        if miles is not None:
+            try:
+                total_miles += float(miles)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                pass
+        elev = session.get("elevation_ft")
+        if elev is not None:
+            try:
+                elev_sum += float(elev)  # type: ignore[arg-type]
+                elev_any = True
+            except (TypeError, ValueError):
+                pass
+    return total_miles, (elev_sum if elev_any else None)
+
+
+def _plan_week_contains_today(
+    week: Mapping[str, object], as_of: pd.Timestamp
+) -> bool:
+    """Return True when ``as_of`` falls in the Mon–Sun span of ``week``."""
+    start = week.get("week_start")
+    if start is None:
+        return False
+    monday = normalize_utc(pd.Timestamp(start))  # type: ignore[arg-type]
+    sunday = monday + pd.Timedelta(days=6)
+    return bool(monday <= as_of <= sunday)
+
+
+def current_plan_week_index(
+    weeks: Sequence[Mapping[str, object]],
+    today: pd.Timestamp | None = None,
+) -> int | None:
+    """Return the index of the week containing ``today``, else ``None``.
+
+    Used for default-open week summary rows in the plan table (only “this
+    week” opens; other weeks stay collapsed).
+    """
+    if not weeks:
+        return None
+    as_of = pd.Timestamp.now(tz="UTC") if today is None else pd.Timestamp(today)
+    as_of = normalize_utc(as_of)
+    for idx, week in enumerate(weeks):
+        if _plan_week_contains_today(week, as_of):
+            return idx
+    return None
+
+
+def _plan_session_dates(
+    weeks: Sequence[Mapping[str, object]],
+) -> list[tuple[int, pd.Timestamp]]:
+    """Return ``(week_index, UTC midnight date)`` for each dated session."""
+    out: list[tuple[int, pd.Timestamp]] = []
+    for week_i, week in enumerate(weeks):
+        for session in week.get("sessions") or []:
+            raw = session.get("date") if isinstance(session, Mapping) else None
+            if raw is None:
+                continue
+            try:
+                out.append((week_i, normalize_utc(pd.Timestamp(raw))))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def plan_focus_session_date(
+    weeks: Sequence[Mapping[str, object]],
+    today: pd.Timestamp | None = None,
+) -> pd.Timestamp | None:
+    """Return the calendar day to highlight in a plan table.
+
+    Prefers a session on ``today``. When none exist, returns the nearest
+    future session day (preferring remaining sessions in the current plan
+    week when that week has any, otherwise the soonest across the plan).
+    Returns ``None`` when every session is in the past or the plan is empty.
+    """
+    if not weeks:
+        return None
+    as_of = pd.Timestamp.now(tz="UTC") if today is None else pd.Timestamp(today)
+    as_of = normalize_utc(as_of)
+    dated = _plan_session_dates(weeks)
+    if not dated:
+        return None
+
+    if any(day == as_of for _, day in dated):
+        return as_of
+
+    current_idx = current_plan_week_index(weeks, as_of)
+    if current_idx is not None:
+        in_week = [day for week_i, day in dated if week_i == current_idx and day > as_of]
+        if in_week:
+            return min(in_week)
+
+    future = [day for _, day in dated if day > as_of]
+    if future:
+        return min(future)
+    return None
+
+
+def plan_week_index_for_date(
+    weeks: Sequence[Mapping[str, object]],
+    day: pd.Timestamp | None,
+) -> int | None:
+    """Return the week index that contains a session on ``day``, else ``None``."""
+    if day is None or not weeks:
+        return None
+    target = normalize_utc(pd.Timestamp(day))
+    for week_i, session_day in _plan_session_dates(weeks):
+        if session_day == target:
+            return week_i
+    return None
+
+
+def default_expanded_plan_week_index(
+    weeks: Sequence[Mapping[str, object]],
+    today: pd.Timestamp | None = None,
+) -> int | None:
+    """Pick the chronologically relevant week within a plan.
+
+    Prefers the ISO week containing ``today``. If today falls in no plan week,
+    returns the nearest upcoming week. When every week is in the past, returns
+    ``None``. Used when choosing which plan is active; week-row open state uses
+    ``current_plan_week_index`` instead.
+    """
+    if not weeks:
+        return None
+    as_of = pd.Timestamp.now(tz="UTC") if today is None else pd.Timestamp(today)
+    as_of = normalize_utc(as_of)
+
+    current = current_plan_week_index(weeks, as_of)
+    if current is not None:
+        return current
+
+    upcoming: list[tuple[pd.Timedelta, int]] = []
+    for idx, week in enumerate(weeks):
+        start = week.get("week_start")
+        if start is None:
+            continue
+        monday = normalize_utc(pd.Timestamp(start))  # type: ignore[arg-type]
+        if monday > as_of:
+            upcoming.append((monday - as_of, idx))
+    if upcoming:
+        upcoming.sort(key=lambda item: item[0])
+        return upcoming[0][1]
+    return None
+
+
+def default_expanded_plan_index(
+    plans: Sequence[Mapping[str, object]],
+    today: pd.Timestamp | None = None,
+) -> int | None:
+    """Pick which training-plan expander should open by default.
+
+    Prefers the plan whose weeks include ``today``. If no plan covers today,
+    expands the plan with the nearest upcoming week. When every plan is fully
+    in the past, returns ``None`` (all collapsed).
+    """
+    if not plans:
+        return None
+    as_of = pd.Timestamp.now(tz="UTC") if today is None else pd.Timestamp(today)
+    as_of = normalize_utc(as_of)
+
+    current: list[int] = []
+    upcoming: list[tuple[pd.Timedelta, int]] = []
+    for idx, plan in enumerate(plans):
+        weeks = list(plan.get("weeks") or [])
+        week_idx = default_expanded_plan_week_index(weeks, as_of)
+        if week_idx is None:
+            continue
+        week = weeks[week_idx]
+        if _plan_week_contains_today(week, as_of):
+            current.append(idx)
+            continue
+        start = week.get("week_start")
+        if start is None:
+            continue
+        monday = normalize_utc(pd.Timestamp(start))  # type: ignore[arg-type]
+        if monday > as_of:
+            upcoming.append((monday - as_of, idx))
+
+    if current:
+        return current[0]
+    if upcoming:
+        upcoming.sort(key=lambda item: item[0])
+        return upcoming[0][1]
+    return None
+
+
+def _plan_name_fallback(path: Path) -> str:
+    """Humanize a plan filename stem when the CSV has no ``#`` header."""
+    stem = path.stem.replace("_", " ").replace("-", " ").strip()
+    return stem.title() if stem else "Training plan"
+
+
+def _normalize_plan_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename plan CSV headers to canonical column names."""
+    rename: dict[str, str] = {}
+    for col in df.columns:
+        key = str(col).strip().lower()
+        if key in _PLAN_COL_ALIASES:
+            rename[col] = _PLAN_COL_ALIASES[key]
+    return df.rename(columns=rename)
+
+
+def _monday_of(ts: pd.Timestamp) -> pd.Timestamp:
+    """Return the Monday (UTC midnight) of the ISO week containing ``ts``."""
+    day = normalize_utc(ts)
+    return day - pd.Timedelta(days=int(day.weekday()))
+
+
+def _read_plan_dataframe(path: Path, skiprows: int) -> pd.DataFrame:
+    """Read a plan CSV, merging overflow fields into the Session column.
+
+    Some plan rows leave commas inside Session unquoted (e.g.
+    ``Long run, flat terrain``). Those would otherwise fail pandas
+    tokenization; extra middle fields are rejoined into Session and the
+    last field is treated as elevation.
+    """
+    import csv
+
+    with path.open(newline="", encoding="utf-8") as handle:
+        for _ in range(max(0, int(skiprows))):
+            next(handle, None)
+        reader = csv.reader(handle)
+        try:
+            header = next(reader)
+        except StopIteration:
+            return pd.DataFrame()
+
+        expected = max(len(header), 4)
+        rows: list[list[str]] = []
+        for row in reader:
+            if not row or all(not str(cell).strip() for cell in row):
+                continue
+            if len(row) > expected:
+                # date, miles, session…, elevation
+                fixed = [
+                    row[0],
+                    row[1],
+                    ",".join(row[2:-1]),
+                    row[-1],
+                ]
+                # Preserve any columns beyond the common 4 if header is longer.
+                if expected > 4:
+                    fixed.extend(row[4:expected] if len(row) > 4 else [])
+                rows.append(fixed[:expected])
+            elif len(row) < expected:
+                rows.append(row + [""] * (expected - len(row)))
+            else:
+                rows.append(row)
+
+    columns = [str(col).strip() for col in header]
+    if len(columns) < expected:
+        columns = columns + [f"col_{i}" for i in range(len(columns), expected)]
+    return pd.DataFrame(rows, columns=columns[:expected])
+
+
+def parse_training_plan_file(path: Path) -> dict[str, object]:
+    """Parse one plan CSV into a name, start date, and Mon–Sun weeks.
+
+    The optional first-line ``#`` comment is the plan display name. Rows with
+    blank dates are skipped. Weeks are ISO weeks (Monday start).
+    """
+    fallback = _plan_name_fallback(path)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    skiprows = 0
+    name = fallback
+    if lines and lines[0].lstrip().startswith("#"):
+        name = parse_plan_header_name(lines[0], fallback=fallback)
+        skiprows = 1
+
+    raw = _read_plan_dataframe(path, skiprows)
+    frame = _normalize_plan_columns(raw)
+    if "date" not in frame.columns:
+        return {
+            "name": name,
+            "source": str(path),
+            "start_date": None,
+            "weeks": [],
+        }
+
+    if "session" not in frame.columns:
+        frame["session"] = ""
+    if "target_miles" not in frame.columns:
+        frame["target_miles"] = None
+    if "target_elevation_ft" not in frame.columns:
+        frame["target_elevation_ft"] = None
+
+    frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+    frame = frame.dropna(subset=["date"]).sort_values("date", kind="mergesort")
+
+    sessions: list[dict[str, object]] = []
+    for _, row in frame.iterrows():
+        miles_val, miles_label = parse_plan_miles(row.get("target_miles"))
+        session_name = str(row.get("session") or "").strip()
+        elev = parse_plan_elevation(row.get("target_elevation_ft"))
+        sessions.append(
+            {
+                "date": normalize_utc(pd.Timestamp(row["date"])),
+                "session": session_name,
+                "miles": miles_val,
+                "miles_label": miles_label,
+                "elevation_ft": elev,
+                "is_race": is_plan_race_session(session_name),
+            }
+        )
+
+    weeks_map: dict[pd.Timestamp, list[dict[str, object]]] = {}
+    for session in sessions:
+        monday = _monday_of(pd.Timestamp(session["date"]))  # type: ignore[arg-type]
+        weeks_map.setdefault(monday, []).append(session)
+
+    weeks: list[dict[str, object]] = []
+    for monday in sorted(weeks_map):
+        week_sessions = weeks_map[monday]
+        total_miles, total_elev = plan_week_totals(week_sessions)
+        weeks.append(
+            {
+                "week_start": monday,
+                "week_label": format_week_range_short(monday),
+                "total_miles": total_miles,
+                "total_elevation_ft": total_elev,
+                "sessions": week_sessions,
+            }
+        )
+
+    start_date = weeks[0]["week_start"] if weeks else (
+        sessions[0]["date"] if sessions else None
+    )
+    return {
+        "name": name,
+        "source": str(path),
+        "start_date": start_date,
+        "weeks": weeks,
+    }
+
+
+def _plans_cache_token(plans_dir: Path) -> str:
+    """Build a cache-busting token from plan CSV mtimes."""
+    if not plans_dir.is_dir():
+        return "missing"
+    parts: list[str] = []
+    for path in sorted(plans_dir.glob("*.csv")):
+        try:
+            parts.append(f"{path.name}:{path.stat().st_mtime_ns}")
+        except OSError:
+            parts.append(f"{path.name}:err")
+    return "|".join(parts) if parts else "empty"
+
+
+def _load_training_plans_uncached(plans_dir: Path) -> list[dict[str, object]]:
+    """Load every ``*.csv`` plan under ``plans_dir`` in chronological order."""
+    if not plans_dir.is_dir():
+        return []
+    plans = [
+        parse_training_plan_file(path)
+        for path in sorted(plans_dir.glob("*.csv"))
+    ]
+    plans.sort(
+        key=lambda plan: (
+            pd.Timestamp.max.tz_localize("UTC")
+            if plan.get("start_date") is None
+            else pd.Timestamp(plan["start_date"])  # type: ignore[arg-type]
+        )
+    )
+    return plans
+
+
+@st.cache_data(show_spinner=False)
+def _load_training_plans_cached(
+    cache_token: str, plans_dir_str: str
+) -> list[dict[str, object]]:
+    _ = cache_token
+    return _load_training_plans_uncached(Path(plans_dir_str))
+
+
+def load_training_plans(plans_dir: Path = PLANS_DIR) -> list[dict[str, object]]:
+    """Load training plans from ``data/plans/*.csv`` in chronological order.
+
+    Each plan dict has ``name``, ``source``, ``start_date``, and ``weeks``.
+    Week entries include totals and session rows (date, session, miles,
+    elevation, ``is_race``).
+    """
+    token = _plans_cache_token(plans_dir)
+    return _load_training_plans_cached(token, str(plans_dir))
+
+
+def plan_week_expander_label(week: Mapping[str, object]) -> str:
+    """Build a week expander summary with target miles and elevation."""
+    label = str(week.get("week_label") or "").strip()
+    if not label:
+        start = week.get("week_start")
+        label = format_week_range_short(pd.Timestamp(start)) if start is not None else "Week"
+
+    miles = week.get("total_miles")
+    try:
+        miles_val = 0.0 if miles is None else float(miles)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        miles_val = 0.0
+    miles_part = f"{_format_plan_miles_label(miles_val)} mi"
+
+    elev = week.get("total_elevation_ft")
+    if elev is None:
+        return f"{label} · {miles_part}"
+    try:
+        elev_val = float(elev)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return f"{label} · {miles_part}"
+    return f"{label} · {miles_part} · {elev_val:,.0f} ft"
 
