@@ -5,35 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Fixed
-
-**Dashboard**
-
-- Activity loaders (`load_runs`, `load_hikes`, `load_gear`, `load_pace_runs`, `load_race_results`) resolve legacy ``data/`` to ``data/activities/`` (stale Streamlit Cloud defaults) and return an empty frame instead of raising ``FileNotFoundError`` when the CSV is missing. Bootstrap reloads stale ``data`` / ``race_data`` modules whose loader defaults still point at ``data/``.
-- Bootstrap reloads a stale Streamlit Cloud ``ui`` module when page-required exports are missing (e.g. Training ``render_training_plans``) or when ``data`` / ``race_data`` were refreshed.
-
 ## [1.7.0] — 2026-09-14
 
 ### Added
 
 **Dashboard**
 
-- **Training**: collapsed **Training plans** section at the top of the page (after title; before Controls/charts), listing `data/plans/*.csv` (plan name from file header, weeks nested and collapsible with indented session rows; race sessions use muted-gold text across the whole row; today or next session day highlighted; current/focus week expanded by default).
-- **Training**: Controls **Zoom to plan** (`None` default + each loaded plan name). Selecting a plan sets Start/End to that plan’s dates (aligned to the current Show By grain). Selecting `None` again restores the page’s original default window. Plan-vs-actual mileage/elevation still uses all plans’ targets for weeks in the window.
+- **Training**: added collapsed Training plans section, listing `data/plans/*.csv` with totals by week and by date
+- **Training**: added **Zoom to plan** to Control panel (`None` default + each loaded plan name) to select date range based on training plan dates.
 
 ### Changed
 
 **Dashboard**
 
-- **Training**: weekly **Mileage** and **Elevation** charts show plan vs actual grouped bars when Show By is Week and the selected period overlaps **any** loaded training plan (all plans under `data/plans/`, not only the active/expanded one); otherwise they stay actual-only. Plan-bar hover includes plan name and week number (with the week date span and plan miles/elev). If the same ISO week appears in more than one plan, targets are summed and hover joins both plan identities.
-- **Training**: weekly **Mileage** actual bars use the teal ``MILEAGE_COLORSCALE`` heatmap by miles (same pattern as elevation by elev); plan bars stay a muted solid teal so the heatmap remains on actuals only.
-- **Training**: Start/End controls allow an End date through the latest training-plan session (not only latest activity), so plan-vs-actual can include future plan weeks.
+- **Training**: weekly **Mileage** and **Elevation** charts show plan vs actual grouped bars when Show By is Week and the selected period overlaps **any** loaded training plan (under `data/plans/`); otherwise they stay actual-only. 
 
 **Pipeline / data**
 
-- Sync-generated activity CSVs and `highest_activity_id.txt` moved from `data/` to [`data/activities/`](data/activities). Hand-authored assets (e.g. plans under `data/plans/`) stay outside that folder. Pipeline, dashboard loaders, and GitLab CI sync paths updated accordingly.
+- Sync-generated activity CSVs and `highest_activity_id.txt` moved from `data/` to [`data/activities/`](data/activities). 
+- Added hand-authored training plans to `data/plans/`.
 
 ## [1.6.0] — 2026-09-13
 
