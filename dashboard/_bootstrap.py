@@ -35,6 +35,30 @@ _REQUIRED_RACE_DATA_ATTRS = (
     "reverse_geocode_error_message",
 )
 
+# ``data`` must expose activities-path helpers after the data/ → data/activities
+# move; stale Cloud modules may still default loaders to ``data/``.
+_REQUIRED_DATA_ATTRS = (
+    "ACTIVITIES_DIR",
+    "load_gear",
+    "load_hikes",
+    "load_runs",
+    "resolve_activities_dir",
+)
+
+
+def _loader_default_is_activities(module: object, fn_name: str) -> bool:
+    """Return True when ``fn``'s first default path ends with ``activities``."""
+    fn = getattr(module, fn_name, None)
+    if fn is None or not callable(fn):
+        return False
+    defaults = getattr(fn, "__defaults__", None) or ()
+    if not defaults:
+        return False
+    try:
+        return Path(defaults[0]).name == "activities"
+    except TypeError:
+        return False
+
 
 def _prepend_sys_path(path: Path) -> None:
     """Move ``path`` to the front of ``sys.path`` so dashboard modules win.
@@ -79,14 +103,31 @@ def refresh_stale_modules() -> None:
     whose ``__file__`` still points at ``dashboard/race_data.py``, so
     ``from race_data import compare_race_type_options`` fails with ImportError
     even though the on-disk file defines the name.
+
+    Also reloads ``data`` / ``race_data`` when loader defaults still point at
+    legacy ``data/`` instead of ``data/activities``.
     """
     ensure_sys_path()
+    data_reloaded = False
+    data = sys.modules.get("data")
+    if data is not None:
+        data_stale = not all(
+            hasattr(data, name) for name in _REQUIRED_DATA_ATTRS
+        ) or not _loader_default_is_activities(data, "load_runs")
+        if data_stale:
+            _reload_module_from_path("data", DASHBOARD_ROOT / "data.py")
+            data_reloaded = True
+
     race_data = sys.modules.get("race_data")
     if race_data is None:
         return
-    if all(hasattr(race_data, name) for name in _REQUIRED_RACE_DATA_ATTRS):
-        return
-    _reload_module_from_path("race_data", DASHBOARD_ROOT / "race_data.py")
+    race_stale = (
+        data_reloaded
+        or not all(hasattr(race_data, name) for name in _REQUIRED_RACE_DATA_ATTRS)
+        or not _loader_default_is_activities(race_data, "load_race_results")
+    )
+    if race_stale:
+        _reload_module_from_path("race_data", DASHBOARD_ROOT / "race_data.py")
 
 
 def bootstrap() -> None:

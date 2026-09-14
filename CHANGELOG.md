@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+**Dashboard**
+
+- Activity loaders (`load_runs`, `load_hikes`, `load_gear`, `load_pace_runs`, `load_race_results`) resolve legacy ``data/`` to ``data/activities/`` (stale Streamlit Cloud defaults) and return an empty frame instead of raising ``FileNotFoundError`` when the CSV is missing. Bootstrap reloads stale ``data`` / ``race_data`` modules whose loader defaults still point at ``data/``.
+
 ## [1.7.0] — 2026-09-14
 
 ### Added

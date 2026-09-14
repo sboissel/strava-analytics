@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from collections.abc import Mapping, MutableMapping, Sequence
@@ -22,11 +23,50 @@ from strava_analytics.csv_io import activity_analysis_paths
 from strava_analytics.gear import gear_mileage_from_activities
 from theme import LONGEST_RUN_GOAL, WEEKLY_MILES_GOAL
 
+logger = logging.getLogger(__name__)
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"
 # Sync-generated activity CSVs and watermark (plans / hand-authored files stay under DATA_DIR).
 ACTIVITIES_DIR = DATA_DIR / "activities"
 PLANS_DIR = DATA_DIR / "plans"
+
+
+def resolve_activities_dir(data_dir: Path | None = None) -> Path:
+    """Resolve the directory that holds sync-generated activity CSVs.
+
+    Parameters
+    ----------
+    data_dir : pathlib.Path, optional
+        Caller-supplied directory. May be the modern ``data/activities``
+        folder or the legacy repository ``data/`` folder (pre-1.7 defaults
+        and stale Streamlit Cloud modules).
+
+    Returns
+    -------
+    pathlib.Path
+        Directory expected to contain ``strava_*_analysis.csv`` files.
+        Legacy ``data/`` is mapped to ``data/activities``; unrelated paths
+        (e.g. test temp dirs) are left unchanged.
+    """
+    preferred = ACTIVITIES_DIR
+    if data_dir is None:
+        return preferred
+    candidate = Path(data_dir)
+    run_csv = "strava_run_analysis.csv"
+    if (candidate / run_csv).exists():
+        return candidate
+    nested = candidate / "activities"
+    if (nested / run_csv).exists():
+        return nested
+    try:
+        if candidate.resolve() == DATA_DIR.resolve():
+            return preferred
+    except OSError:
+        pass
+    if candidate == DATA_DIR:
+        return preferred
+    return candidate
 
 # Plan CSV column aliases (case-insensitive header → canonical name).
 _PLAN_COL_ALIASES: dict[str, str] = {
@@ -110,6 +150,9 @@ def _coerce_race_flag(series: pd.Series) -> pd.Series:
 def _load_runs_uncached(data_dir: Path) -> pd.DataFrame:
     """Load run analysis rows with parsed dates and numeric fields."""
     path = data_dir / "strava_run_analysis.csv"
+    if not path.exists():
+        logger.warning("Run analysis CSV not found at %s", path)
+        return pd.DataFrame()
     df = pd.read_csv(path)
     df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
     df = df.dropna(subset=["date"]).copy()
@@ -144,20 +187,17 @@ def load_runs(data_dir: Path = ACTIVITIES_DIR) -> pd.DataFrame:
     ----------
     data_dir : pathlib.Path, optional
         Directory containing ``strava_run_analysis.csv``. Defaults to the
-        repository ``data/activities`` folder.
+        repository ``data/activities`` folder. Legacy ``data/`` is resolved
+        to ``data/activities``.
 
     Returns
     -------
     pandas.DataFrame
         Run rows sorted by activity date with parsed timestamps and numeric
         columns for distance, pace, heart rate, elevation, and a boolean
-        ``race`` flag.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the run analysis CSV is missing from ``data_dir``.
+        ``race`` flag. Empty when the CSV is missing.
     """
+    data_dir = resolve_activities_dir(data_dir)
     path = data_dir / "strava_run_analysis.csv"
     mtime = path.stat().st_mtime if path.exists() else 0.0
     return _load_runs_cached(mtime, str(data_dir))
@@ -188,6 +228,9 @@ def _parse_duration_minutes(value: object) -> float | None:
 def _load_hikes_uncached(data_dir: Path) -> pd.DataFrame:
     """Load hike analysis rows with parsed dates and numeric fields."""
     path = data_dir / "strava_hike_analysis.csv"
+    if not path.exists():
+        logger.warning("Hike analysis CSV not found at %s", path)
+        return pd.DataFrame()
     df = pd.read_csv(path)
     df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
     df = df.dropna(subset=["date"]).copy()
@@ -226,7 +269,8 @@ def load_hikes(data_dir: Path = ACTIVITIES_DIR) -> pd.DataFrame:
     ----------
     data_dir : pathlib.Path, optional
         Directory containing ``strava_hike_analysis.csv``. Defaults to the
-        repository ``data/activities`` folder.
+        repository ``data/activities`` folder. Legacy ``data/`` is resolved
+        to ``data/activities``.
 
     Returns
     -------
@@ -234,13 +278,9 @@ def load_hikes(data_dir: Path = ACTIVITIES_DIR) -> pd.DataFrame:
         Hike rows sorted by activity date with parsed timestamps, numeric
         distance / elevation / ``start_lat`` / ``start_lng`` when present,
         ``elapsed_min`` (from ``elapsed_time_min``), and ``moving_min``
-        (from ``moving_time_min``).
-
-    Raises
-    ------
-    FileNotFoundError
-        If the hike analysis CSV is missing from ``data_dir``.
+        (from ``moving_time_min``). Empty when the CSV is missing.
     """
+    data_dir = resolve_activities_dir(data_dir)
     path = data_dir / "strava_hike_analysis.csv"
     mtime = path.stat().st_mtime if path.exists() else 0.0
     return _load_hikes_cached(mtime, str(data_dir))
@@ -290,13 +330,15 @@ def load_gear(data_dir: Path = ACTIVITIES_DIR) -> pd.DataFrame:
     ----------
     data_dir : pathlib.Path, optional
         Directory containing ``strava_*_analysis.csv`` files. Defaults to the
-        repository ``data/activities`` folder.
+        repository ``data/activities`` folder. Legacy ``data/`` is resolved
+        to ``data/activities``.
 
     Returns
     -------
     pandas.DataFrame
         Columns ``gear_id``, ``name``, ``type``, ``mileage``, and ``status``.
     """
+    data_dir = resolve_activities_dir(data_dir)
     return _load_gear_cached(_analysis_csv_mtime(data_dir), str(data_dir))
 
 

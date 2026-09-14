@@ -26,6 +26,7 @@ from data import (
     latest_activity_label,
     load_runs,
     normalize_utc,
+    resolve_activities_dir,
     with_period_columns,
 )
 from strava_analytics.activities import hr_zone_sec_columns, race_distance_label
@@ -45,7 +46,7 @@ RACE_BUILDUP_WEEKS_DEFAULT = 12
 # pre-race training mileage (else "Insufficient HR data").
 RACE_BUILDUP_HR_COVERAGE_MIN = 0.10
 # Bump when derived race columns change so Streamlit cache invalidates.
-_RACE_LOADER_VERSION = 2
+_RACE_LOADER_VERSION = 3
 
 
 def race_buildup_weeks(race_type: str | None) -> int:
@@ -689,14 +690,16 @@ def load_race_results(data_dir: Path = ACTIVITIES_DIR) -> pd.DataFrame:
     ----------
     data_dir : pathlib.Path, optional
         Directory containing ``strava_run_analysis.csv``. Defaults to the
-        repository ``data/activities`` folder.
+        repository ``data/activities`` folder. Legacy ``data/`` is resolved
+        to ``data/activities``.
 
     Returns
     -------
     pandas.DataFrame
         Race rows sorted by date descending with parsed elapsed time, pace,
-        normalized race type, and PR flags.
+        normalized race type, and PR flags. Empty when the run CSV is missing.
     """
+    data_dir = resolve_activities_dir(data_dir)
     path = data_dir / "strava_run_analysis.csv"
     mtime = path.stat().st_mtime if path.exists() else 0.0
     return _load_race_results_cached(mtime, str(data_dir), _RACE_LOADER_VERSION)

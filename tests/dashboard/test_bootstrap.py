@@ -231,6 +231,42 @@ class BootstrapImportTests(unittest.TestCase):
                     sys.modules[name] = saved_mods[name]
             sys.path[:] = saved_path
 
+    def test_refresh_replaces_stale_data_with_legacy_load_runs_default(self):
+        """Stale ``data.load_runs`` defaulting to ``data/`` is reloaded."""
+        saved_path = list(sys.path)
+        saved_mods = {
+            name: sys.modules.pop(name, None)
+            for name in ("_bootstrap", "_sa_dashboard_bootstrap", "data", "race_data")
+        }
+        try:
+            sys.path[:] = [str(DASHBOARD_ROOT), str(REPO_ROOT / "src"), str(REPO_ROOT)]
+            stale = types.ModuleType("data")
+            stale.__file__ = str(DATA_MODULE)
+            stale.DATA_DIR = REPO_ROOT / "data"
+            stale.ACTIVITIES_DIR = stale.DATA_DIR / "activities"
+
+            def legacy_load_runs(data_dir=stale.DATA_DIR):
+                return data_dir
+
+            stale.load_runs = legacy_load_runs
+            stale.load_hikes = lambda data_dir=stale.DATA_DIR: data_dir
+            stale.load_gear = lambda data_dir=stale.DATA_DIR: data_dir
+            # Intentionally omit resolve_activities_dir.
+            sys.modules["data"] = stale
+
+            bootstrap = _load_bootstrap()
+            bootstrap.bootstrap()
+
+            data = sys.modules["data"]
+            self.assertTrue(hasattr(data, "resolve_activities_dir"))
+            self.assertEqual(Path(data.load_runs.__defaults__[0]).name, "activities")
+        finally:
+            for name in ("_bootstrap", "_sa_dashboard_bootstrap", "data", "race_data"):
+                sys.modules.pop(name, None)
+                if saved_mods[name] is not None:
+                    sys.modules[name] = saved_mods[name]
+            sys.path[:] = saved_path
+
     def test_performance_race_data_exports_exist_on_disk(self):
         """Every name Performance imports from race_data must exist on the module."""
         saved_path = list(sys.path)

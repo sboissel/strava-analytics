@@ -27,6 +27,7 @@ from data import (
     filter_to_recent_periods,
     generate_period_index,
     load_runs,
+    resolve_activities_dir,
     resolve_period_index,
     window_mask,
     with_period_columns,
@@ -145,6 +146,8 @@ def _week_tooltip_label(month_key: str, week_idx: int) -> str:
 def _load_pace_runs_uncached(data_dir: Path) -> pd.DataFrame:
     """Merge pace-bin seconds/HR with run dates and elevation."""
     path = data_dir / "strava_run_pace_analysis.csv"
+    if not path.exists():
+        return pd.DataFrame()
     pace = pd.read_csv(path)
     run_cols = ["activity_id", "date"]
     runs_all = load_runs(data_dir)
@@ -176,19 +179,17 @@ def load_pace_runs(data_dir: Path = ACTIVITIES_DIR) -> pd.DataFrame:
     ----------
     data_dir : pathlib.Path, optional
         Directory containing pace and run analysis CSVs. Defaults to the
-        repository ``data/activities`` folder.
+        repository ``data/activities`` folder. Legacy ``data/`` is resolved
+        to ``data/activities``.
 
     Returns
     -------
     pandas.DataFrame
         Pace-bin seconds and average heart-rate columns joined to run dates,
         plus ``elevation_gain_ft`` / ``distance_miles`` when present on runs.
-
-    Raises
-    ------
-    FileNotFoundError
-        If required CSV files are missing from ``data_dir``.
+        Empty when required CSVs are missing.
     """
+    data_dir = resolve_activities_dir(data_dir)
     pace_path = data_dir / "strava_run_pace_analysis.csv"
     runs_path = data_dir / "strava_run_analysis.csv"
     pace_mtime = pace_path.stat().st_mtime if pace_path.exists() else 0.0

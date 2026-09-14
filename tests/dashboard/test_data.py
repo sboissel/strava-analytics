@@ -1456,6 +1456,84 @@ class LoadRunsParsingTests(unittest.TestCase):
         self.assertTrue(bool(runs.iloc[1]["race"]))
         self.assertEqual(str(runs["race"].dtype), "bool")
 
+    def test_default_data_dir_is_activities(self):
+        from dashboard.data import ACTIVITIES_DIR, load_runs
+
+        defaults = load_runs.__defaults__
+        self.assertIsNotNone(defaults)
+        assert defaults is not None
+        self.assertEqual(defaults[0], ACTIVITIES_DIR)
+        self.assertEqual(ACTIVITIES_DIR.name, "activities")
+        self.assertEqual(ACTIVITIES_DIR.parent.name, "data")
+
+    def test_resolve_activities_dir_maps_legacy_data_dir(self):
+        from dashboard.data import ACTIVITIES_DIR, DATA_DIR, resolve_activities_dir
+
+        self.assertEqual(resolve_activities_dir(None), ACTIVITIES_DIR)
+        self.assertEqual(resolve_activities_dir(ACTIVITIES_DIR), ACTIVITIES_DIR)
+        self.assertEqual(resolve_activities_dir(DATA_DIR), ACTIVITIES_DIR)
+
+    def test_resolve_activities_dir_uses_nested_activities_csv(self):
+        from dashboard.data import resolve_activities_dir
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            activities = root / "activities"
+            activities.mkdir()
+            (activities / "strava_run_analysis.csv").write_text(
+                "activity_id,date\n1,2026-01-01T00:00:00Z\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(resolve_activities_dir(root), activities)
+
+    def test_load_runs_missing_csv_returns_empty(self):
+        from dashboard.data import load_runs
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runs = load_runs(Path(tmpdir))
+
+        self.assertTrue(runs.empty)
+
+
+class LoadRaceResultsPathTests(unittest.TestCase):
+    """Race loader defaults and legacy data/ resolution."""
+
+    def test_default_data_dir_is_activities(self):
+        from dashboard.data import ACTIVITIES_DIR
+        from dashboard.race_data import load_race_results
+
+        defaults = load_race_results.__defaults__
+        self.assertIsNotNone(defaults)
+        assert defaults is not None
+        self.assertEqual(defaults[0], ACTIVITIES_DIR)
+        self.assertEqual(Path(defaults[0]).name, "activities")
+
+    def test_legacy_data_dir_loads_from_activities(self):
+        from dashboard.race_data import load_race_results
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            activities = root / "activities"
+            activities.mkdir()
+            pd.DataFrame(
+                [
+                    {
+                        "activity_id": "1",
+                        "name": "5k",
+                        "type": "Run",
+                        "date": "2026-03-12T08:00:00Z",
+                        "distance_miles": "3.1",
+                        "elapsed_time_min": "0:20:00",
+                        "race": "True",
+                        "race_distance": "5k",
+                    }
+                ]
+            ).to_csv(activities / "strava_run_analysis.csv", index=False)
+            races = load_race_results(root)
+
+        self.assertEqual(len(races), 1)
+        self.assertEqual(str(races.iloc[0]["activity_id"]), "1")
+
 
 if __name__ == "__main__":
     unittest.main()
