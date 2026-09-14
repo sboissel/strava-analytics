@@ -45,6 +45,40 @@ _REQUIRED_DATA_ATTRS = (
     "resolve_activities_dir",
 )
 
+# Names pages import from ``ui``. A stale ``ui`` in ``sys.modules`` can point
+# at the right file but lack newer helpers (e.g. training-plan zoom/render).
+_REQUIRED_UI_ATTRS = (
+    "achievements_html",
+    "aerobic_efficiency_info_html",
+    "clear_hiking_map_filter",
+    "compliance_info_html",
+    "fastest_race_cards_html",
+    "fitness_freshness_info_html",
+    "hike_gap_info_html",
+    "hiking_badges_html",
+    "hr_zones_week_to_date_pie_html",
+    "key_indicators_html",
+    "metrics_inspect_anchor_html",
+    "pace_hr_title_html",
+    "race_buildup_delta_table_html",
+    "race_buildup_eh_values_html",
+    "race_buildup_hr_pies_html",
+    "race_buildup_row_heading_html",
+    "race_buildup_section_heading_html",
+    "race_buildup_summary_html",
+    "race_weeks_legend_html",
+    "render_hiking_section_nav",
+    "render_insights_section_nav",
+    "render_kpi_detail_panel",
+    "render_metrics_section_nav",
+    "render_period_range_inputs",
+    "render_race_section_nav",
+    "render_sidebar_section_nav",
+    "render_training_plan_zoom_select",
+    "render_training_plans",
+    "shoe_kpi_cards_html",
+)
+
 
 def _loader_default_is_activities(module: object, fn_name: str) -> bool:
     """Return True when ``fn``'s first default path ends with ``activities``."""
@@ -99,13 +133,15 @@ def _reload_module_from_path(module_name: str, path: Path) -> None:
 def refresh_stale_modules() -> None:
     """Reload dashboard modules that are cached but missing expected attrs.
 
-    Streamlit Cloud can keep an old ``race_data`` object in ``sys.modules``
-    whose ``__file__`` still points at ``dashboard/race_data.py``, so
-    ``from race_data import compare_race_type_options`` fails with ImportError
-    even though the on-disk file defines the name.
+    Streamlit Cloud can keep an old ``race_data`` / ``ui`` object in
+    ``sys.modules`` whose ``__file__`` still points at the dashboard file, so
+    ``from race_data import compare_race_type_options`` or
+    ``from ui import render_training_plans`` fails with ImportError even
+    though the on-disk file defines the name.
 
     Also reloads ``data`` / ``race_data`` when loader defaults still point at
-    legacy ``data/`` instead of ``data/activities``.
+    legacy ``data/`` instead of ``data/activities``, and reloads ``ui`` when
+    its ``data`` / ``race_data`` dependencies were refreshed.
     """
     ensure_sys_path()
     data_reloaded = False
@@ -118,16 +154,29 @@ def refresh_stale_modules() -> None:
             _reload_module_from_path("data", DASHBOARD_ROOT / "data.py")
             data_reloaded = True
 
+    race_data_reloaded = False
     race_data = sys.modules.get("race_data")
-    if race_data is None:
-        return
-    race_stale = (
-        data_reloaded
-        or not all(hasattr(race_data, name) for name in _REQUIRED_RACE_DATA_ATTRS)
-        or not _loader_default_is_activities(race_data, "load_race_results")
-    )
-    if race_stale:
-        _reload_module_from_path("race_data", DASHBOARD_ROOT / "race_data.py")
+    if race_data is not None:
+        race_stale = (
+            data_reloaded
+            or not all(
+                hasattr(race_data, name) for name in _REQUIRED_RACE_DATA_ATTRS
+            )
+            or not _loader_default_is_activities(race_data, "load_race_results")
+        )
+        if race_stale:
+            _reload_module_from_path("race_data", DASHBOARD_ROOT / "race_data.py")
+            race_data_reloaded = True
+
+    ui = sys.modules.get("ui")
+    if ui is not None:
+        ui_stale = (
+            data_reloaded
+            or race_data_reloaded
+            or not all(hasattr(ui, name) for name in _REQUIRED_UI_ATTRS)
+        )
+        if ui_stale:
+            _reload_module_from_path("ui", DASHBOARD_ROOT / "ui.py")
 
 
 def bootstrap() -> None:

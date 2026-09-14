@@ -14,6 +14,7 @@ DASHBOARD_ROOT = REPO_ROOT / "dashboard"
 PAGES_ROOT = DASHBOARD_ROOT / "pages"
 DATA_MODULE = DASHBOARD_ROOT / "data.py"
 RACE_DATA_MODULE = DASHBOARD_ROOT / "race_data.py"
+UI_MODULE = DASHBOARD_ROOT / "ui.py"
 
 # Names Performance imports from race_data (keep in sync with that page).
 _PERFORMANCE_RACE_DATA_IMPORTS = (
@@ -37,6 +38,24 @@ _PERFORMANCE_RACE_DATA_IMPORTS = (
     "races_have_start_coords",
     "reverse_geocode_error_message",
 )
+
+# Names Training imports from ui (keep in sync with that page).
+_TRAINING_UI_IMPORTS = (
+    "compliance_info_html",
+    "hr_zones_week_to_date_pie_html",
+    "race_weeks_legend_html",
+    "render_period_range_inputs",
+    "render_sidebar_section_nav",
+    "render_training_plan_zoom_select",
+    "render_training_plans",
+)
+
+
+def _prefer_sys_path(*paths: Path | str) -> None:
+    """Put ``paths`` first on ``sys.path`` without dropping the stdlib."""
+    preferred = [str(p) for p in paths]
+    rest = [p for p in sys.path if p not in preferred]
+    sys.path[:] = preferred + rest
 
 
 def _load_bootstrap():
@@ -63,7 +82,7 @@ class BootstrapImportTests(unittest.TestCase):
         saved_bootstrap = sys.modules.pop("_bootstrap", None)
         saved_sa = sys.modules.pop("_sa_dashboard_bootstrap", None)
         try:
-            sys.path[:] = [str(REPO_ROOT), str(DASHBOARD_ROOT)]
+            _prefer_sys_path(REPO_ROOT, DASHBOARD_ROOT)
             if "data" in sys.modules:
                 del sys.modules["data"]
 
@@ -100,11 +119,11 @@ class BootstrapImportTests(unittest.TestCase):
             )
         }
         try:
-            sys.path[:] = [str(DASHBOARD_ROOT), str(REPO_ROOT)]
+            _prefer_sys_path(DASHBOARD_ROOT, REPO_ROOT)
             bootstrap = _load_bootstrap()
 
             # Simulate Streamlit resetting path while keeping the module cached.
-            sys.path[:] = [str(PAGES_ROOT), str(REPO_ROOT)]
+            _prefer_sys_path(PAGES_ROOT, REPO_ROOT)
             sys.modules.pop("data", None)
             sys.modules.pop("race_data", None)
 
@@ -143,7 +162,7 @@ class BootstrapImportTests(unittest.TestCase):
             )
         }
         try:
-            sys.path[:] = [str(PAGES_ROOT), str(REPO_ROOT)]
+            _prefer_sys_path(PAGES_ROOT, REPO_ROOT)
             bootstrap = _load_bootstrap()
             bootstrap.bootstrap()
 
@@ -175,7 +194,7 @@ class BootstrapImportTests(unittest.TestCase):
             stale = types.ModuleType("_bootstrap")
             # Old Cloud module: import succeeds, attribute missing.
             sys.modules["_bootstrap"] = stale
-            sys.path[:] = [str(PAGES_ROOT), str(REPO_ROOT)]
+            _prefer_sys_path(PAGES_ROOT, REPO_ROOT)
 
             bootstrap = _load_bootstrap()
             self.assertTrue(hasattr(bootstrap, "ensure_sys_path"))
@@ -199,7 +218,7 @@ class BootstrapImportTests(unittest.TestCase):
             for name in ("_bootstrap", "_sa_dashboard_bootstrap", "data", "race_data")
         }
         try:
-            sys.path[:] = [str(DASHBOARD_ROOT), str(REPO_ROOT / "src"), str(REPO_ROOT)]
+            _prefer_sys_path(DASHBOARD_ROOT, REPO_ROOT / "src", REPO_ROOT)
             stale = types.ModuleType("race_data")
             stale.__file__ = str(RACE_DATA_MODULE)
             stale.RACE_TYPE_ORDER = ["5k"]
@@ -239,7 +258,7 @@ class BootstrapImportTests(unittest.TestCase):
             for name in ("_bootstrap", "_sa_dashboard_bootstrap", "data", "race_data")
         }
         try:
-            sys.path[:] = [str(DASHBOARD_ROOT), str(REPO_ROOT / "src"), str(REPO_ROOT)]
+            _prefer_sys_path(DASHBOARD_ROOT, REPO_ROOT / "src", REPO_ROOT)
             stale = types.ModuleType("data")
             stale.__file__ = str(DATA_MODULE)
             stale.DATA_DIR = REPO_ROOT / "data"
@@ -275,7 +294,7 @@ class BootstrapImportTests(unittest.TestCase):
             for name in ("_bootstrap", "_sa_dashboard_bootstrap", "data", "race_data")
         }
         try:
-            sys.path[:] = [str(DASHBOARD_ROOT), str(REPO_ROOT / "src"), str(REPO_ROOT)]
+            _prefer_sys_path(DASHBOARD_ROOT, REPO_ROOT / "src", REPO_ROOT)
             bootstrap = _load_bootstrap()
             bootstrap.bootstrap()
             race_data = importlib.import_module("race_data")
@@ -287,6 +306,144 @@ class BootstrapImportTests(unittest.TestCase):
             self.assertEqual(missing, [])
         finally:
             for name in ("_bootstrap", "_sa_dashboard_bootstrap", "data", "race_data"):
+                sys.modules.pop(name, None)
+                if saved_mods[name] is not None:
+                    sys.modules[name] = saved_mods[name]
+            sys.path[:] = saved_path
+
+    def test_refresh_replaces_stale_ui_missing_training_exports(self):
+        """Stale ``ui`` with correct ``__file__`` but missing attrs is reloaded."""
+        saved_path = list(sys.path)
+        saved_mods = {
+            name: sys.modules.pop(name, None)
+            for name in (
+                "_bootstrap",
+                "_sa_dashboard_bootstrap",
+                "data",
+                "race_data",
+                "ui",
+            )
+        }
+        try:
+            _prefer_sys_path(DASHBOARD_ROOT, REPO_ROOT / "src", REPO_ROOT)
+            stale = types.ModuleType("ui")
+            stale.__file__ = str(UI_MODULE)
+            stale.race_weeks_legend_html = lambda: ""
+            # Intentionally omit render_training_plans (Cloud ImportError case).
+            sys.modules["ui"] = stale
+
+            with self.assertRaises(ImportError):
+                from ui import render_training_plans  # noqa: F401
+
+            bootstrap = _load_bootstrap()
+            bootstrap.bootstrap()
+
+            ui = sys.modules["ui"]
+            for name in _TRAINING_UI_IMPORTS:
+                self.assertTrue(
+                    hasattr(ui, name),
+                    msg=f"ui missing required export {name!r}",
+                )
+            from ui import render_training_plans as render_fn
+
+            self.assertTrue(callable(render_fn))
+        finally:
+            for name in (
+                "_bootstrap",
+                "_sa_dashboard_bootstrap",
+                "data",
+                "race_data",
+                "ui",
+            ):
+                sys.modules.pop(name, None)
+                if saved_mods[name] is not None:
+                    sys.modules[name] = saved_mods[name]
+            sys.path[:] = saved_path
+
+    def test_refresh_reloads_ui_when_data_is_refreshed(self):
+        """``ui`` must reload after a stale ``data`` refresh (ui imports data)."""
+        saved_path = list(sys.path)
+        saved_mods = {
+            name: sys.modules.pop(name, None)
+            for name in (
+                "_bootstrap",
+                "_sa_dashboard_bootstrap",
+                "data",
+                "race_data",
+                "ui",
+            )
+        }
+        try:
+            _prefer_sys_path(DASHBOARD_ROOT, REPO_ROOT / "src", REPO_ROOT)
+            stale_data = types.ModuleType("data")
+            stale_data.__file__ = str(DATA_MODULE)
+            stale_data.DATA_DIR = REPO_ROOT / "data"
+            stale_data.ACTIVITIES_DIR = stale_data.DATA_DIR / "activities"
+
+            def legacy_load_runs(data_dir=stale_data.DATA_DIR):
+                return data_dir
+
+            stale_data.load_runs = legacy_load_runs
+            stale_data.load_hikes = lambda data_dir=stale_data.DATA_DIR: data_dir
+            stale_data.load_gear = lambda data_dir=stale_data.DATA_DIR: data_dir
+            sys.modules["data"] = stale_data
+
+            stale_ui = types.ModuleType("ui")
+            stale_ui.__file__ = str(UI_MODULE)
+            for name in _TRAINING_UI_IMPORTS:
+                setattr(stale_ui, name, lambda *a, **k: None)
+            sys.modules["ui"] = stale_ui
+            stale_ui_id = id(stale_ui)
+
+            bootstrap = _load_bootstrap()
+            bootstrap.bootstrap()
+
+            self.assertIsNot(sys.modules["ui"], stale_ui)
+            self.assertNotEqual(id(sys.modules["ui"]), stale_ui_id)
+            self.assertTrue(hasattr(sys.modules["ui"], "render_training_plans"))
+        finally:
+            for name in (
+                "_bootstrap",
+                "_sa_dashboard_bootstrap",
+                "data",
+                "race_data",
+                "ui",
+            ):
+                sys.modules.pop(name, None)
+                if saved_mods[name] is not None:
+                    sys.modules[name] = saved_mods[name]
+            sys.path[:] = saved_path
+
+    def test_training_ui_exports_exist_on_disk(self):
+        """Every name Training imports from ui must exist on the module."""
+        saved_path = list(sys.path)
+        saved_mods = {
+            name: sys.modules.pop(name, None)
+            for name in (
+                "_bootstrap",
+                "_sa_dashboard_bootstrap",
+                "data",
+                "race_data",
+                "ui",
+            )
+        }
+        try:
+            _prefer_sys_path(DASHBOARD_ROOT, REPO_ROOT / "src", REPO_ROOT)
+            bootstrap = _load_bootstrap()
+            bootstrap.bootstrap()
+            ui = importlib.import_module("ui")
+            missing = [
+                name for name in _TRAINING_UI_IMPORTS if not hasattr(ui, name)
+            ]
+            self.assertEqual(missing, [])
+        finally:
+            for name in (
+                "_bootstrap",
+                "_sa_dashboard_bootstrap",
+                "data",
+                "race_data",
+                "ui",
+            ):
                 sys.modules.pop(name, None)
                 if saved_mods[name] is not None:
                     sys.modules[name] = saved_mods[name]
