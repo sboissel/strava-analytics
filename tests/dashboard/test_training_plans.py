@@ -10,18 +10,21 @@ import pandas as pd
 
 from dashboard.data import (
     PLAN_ZOOM_NONE,
-    attach_plan_targets_to_periods,
+    PeriodWindow,
     align_to_period_start,
+    attach_plan_targets_to_periods,
     current_plan_week_index,
     default_expanded_plan_index,
     default_expanded_plan_week_index,
     default_period_bounds,
     is_plan_race_session,
     load_training_plans,
+    parse_plan_elevation,
     parse_plan_header_name,
     parse_plan_miles,
     parse_training_plan_file,
     period_window_for_plan,
+    period_window_widget_values,
     plan_focus_session_date,
     plan_targets_overlap_periods,
     plan_vs_actual_all_plans,
@@ -81,6 +84,14 @@ class PlanRaceAndMilesTests(unittest.TestCase):
         miles, label = parse_plan_miles("")
         self.assertIsNone(miles)
         self.assertEqual(label, "—")
+
+    def test_parse_plan_elevation(self):
+        self.assertEqual(parse_plan_elevation(1200), 1200.0)
+        self.assertEqual(parse_plan_elevation("850.5"), 850.5)
+        self.assertIsNone(parse_plan_elevation(""))
+        self.assertIsNone(parse_plan_elevation(None))
+        self.assertIsNone(parse_plan_elevation("flat"))
+        self.assertIsNone(parse_plan_elevation(float("nan")))
 
 
 class PlanWeekHelperTests(unittest.TestCase):
@@ -359,6 +370,22 @@ class PlanFileParseTests(unittest.TestCase):
             training_plans_max_end(
                 [{"name": "x", "start_date": None, "end_date": None, "weeks": []}]
             )
+        )
+
+    def test_training_plans_max_end_falls_back_to_week_sunday(self):
+        plans = [
+            {
+                "name": "No end_date",
+                "end_date": None,
+                "weeks": [
+                    {"week_start": pd.Timestamp("2026-09-14", tz="UTC")},
+                    {"week_start": pd.Timestamp("2026-09-21", tz="UTC")},
+                ],
+            }
+        ]
+        self.assertEqual(
+            training_plans_max_end(plans),
+            pd.Timestamp("2026-09-27", tz="UTC"),
         )
 
     def test_repo_plan_csvs_parse(self):
@@ -868,6 +895,19 @@ class PlanVsActualAggregatorTests(unittest.TestCase):
         )
         self.assertTrue(pd.isna(out.iloc[0]["plan_week"]))
 
+    def test_attach_empty_comparison_adds_nan_plan_columns(self):
+        period_df = pd.DataFrame(
+            {
+                "period_key": ["2026-38"],
+                "total_miles": [10.0],
+            }
+        )
+        out = attach_plan_targets_to_periods(period_df, pd.DataFrame())
+        self.assertTrue(pd.isna(out.iloc[0]["plan_miles"]))
+        self.assertTrue(pd.isna(out.iloc[0]["plan_elevation_ft"]))
+        self.assertTrue(pd.isna(out.iloc[0]["plan_name"]))
+        self.assertTrue(pd.isna(out.iloc[0]["plan_week"]))
+
 
 class PlanZoomWindowTests(unittest.TestCase):
     """Zoom-to-plan window helper and session-state sync."""
@@ -908,6 +948,22 @@ class PlanZoomWindowTests(unittest.TestCase):
                 as_of=as_of,
             )
         )
+
+    def test_period_window_widget_values_week_and_year(self):
+        week = PeriodWindow(
+            start=pd.Timestamp("2026-09-14", tz="UTC"),
+            end=pd.Timestamp("2026-11-30", tz="UTC"),
+        )
+        start, end = period_window_widget_values("Week", week)
+        self.assertEqual(start, week.start.date())
+        self.assertEqual(end, week.end.date())
+
+        year = PeriodWindow(
+            start=pd.Timestamp("2024-01-01", tz="UTC"),
+            end=pd.Timestamp("2026-01-01", tz="UTC"),
+        )
+        y_start, y_end = period_window_widget_values("Year", year)
+        self.assertEqual((y_start, y_end), (2024, 2026))
 
     def test_sync_applies_plan_then_restores_defaults_on_none(self):
         as_of = pd.Timestamp("2026-09-14T12:00:00Z")

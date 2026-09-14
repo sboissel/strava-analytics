@@ -1993,6 +1993,20 @@ def training_plan_table_html(
     Race badge). The focus day — today when a session falls on it, otherwise
     the next upcoming session day — gets a cool row wash distinct from race
     text styling.
+
+    Parameters
+    ----------
+    weeks :
+        Plan week dicts from ``parse_training_plan_file`` / loaders.
+    expanded_week_index : int, optional
+        Week row that starts open (``current_plan_week_index``).
+    today :
+        Reference day for focus highlighting (defaults to now UTC).
+
+    Returns
+    -------
+    str
+        HTML fragment for one plan table (or an empty-state message).
     """
     if not weeks:
         return (
@@ -2062,6 +2076,18 @@ def training_plan_week_table_html(
 
     Prefer ``training_plan_table_html`` for the Training page. This helper
     keeps race-row tests and callers that only have session lists working.
+
+    Parameters
+    ----------
+    sessions :
+        Session dicts for a single synthetic week.
+    today :
+        Reference day for focus highlighting (defaults to now UTC).
+
+    Returns
+    -------
+    str
+        HTML from ``training_plan_table_html`` with the week row open.
     """
     week = {
         "week_label": "Week",
@@ -2091,6 +2117,11 @@ def render_training_plans(
         Output of ``load_training_plans`` (chronological).
     today :
         Reference date for which plan opens and which week-sum row is open.
+
+    Returns
+    -------
+    None
+        Renders into the Streamlit page.
     """
     import pandas as pd
     import streamlit as st

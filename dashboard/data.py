@@ -756,6 +756,19 @@ def period_window_widget_values(
 
     Year grain uses calendar year integers; Day/Week/Month use ``date`` objects
     matching ``render_period_range_inputs``.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Selected Show By grain.
+    window : PeriodWindow
+        Inclusive aligned start/end (UTC midnights).
+
+    Returns
+    -------
+    tuple
+        ``(start, end)`` suitable for Streamlit session state: ``int`` years
+        for Year grain, else ``datetime.date`` values.
     """
     if grain == "Year":
         return int(window.start.year), int(window.end.year)
@@ -828,6 +841,30 @@ def sync_training_plan_zoom_window(
       default window for the current grain (not the previous plan).
     - Changing Show By while a plan remains selected: re-apply that plan for
       the new grain. Changing grain while ``None`` leaves per-grain dates alone.
+
+    Parameters
+    ----------
+    session_state : mutable mapping
+        Streamlit ``st.session_state`` (or a test dict).
+    selected : str
+        Zoom option (``none_label`` or a plan name).
+    grain : PeriodGrain
+        Current Show By grain.
+    plans : sequence of mapping
+        Loaded plans (need ``name``, ``start_date``, ``end_date``).
+    as_of : pandas.Timestamp
+        Reference for default bounds and clamping.
+    page_key : str, optional
+        Page namespace for session keys (default ``"training"``).
+    max_end : pandas.Timestamp, optional
+        Later selectable End (latest plan session).
+    none_label : str, optional
+        Label for the default “no zoom” option.
+
+    Returns
+    -------
+    None
+        Mutates ``session_state`` in place.
     """
     prev_key = f"{page_key}_plan_zoom_prev"
     grain_key = f"{page_key}_plan_zoom_grain"
@@ -3176,6 +3213,16 @@ def is_plan_race_session(session: object) -> bool:
 
     Matches case-insensitive tokens such as ``Race day``, ``12.5K trail race``,
     ``Malaga Half``, or ``Sierra Nevada Half``.
+
+    Parameters
+    ----------
+    session :
+        Session name cell from a plan CSV (or ``None``).
+
+    Returns
+    -------
+    bool
+        ``True`` when the label contains a race token.
     """
     text = str(session or "").strip()
     if not text:
@@ -3188,6 +3235,17 @@ def parse_plan_miles(value: object) -> tuple[float | None, str]:
 
     Supports plain numbers and inclusive ranges such as ``3-4`` (midpoint is
     used for week totals; the original range text is kept for display).
+
+    Parameters
+    ----------
+    value :
+        Miles cell (number, range string, or empty).
+
+    Returns
+    -------
+    tuple of (float or None, str)
+        Numeric miles for totals (``None`` when empty/invalid) and a display
+        label (range text preserved; empty → ``"—"``).
     """
     if value is None:
         return None, "—"
@@ -3222,7 +3280,18 @@ def _format_plan_miles_label(miles: float) -> str:
 
 
 def parse_plan_elevation(value: object) -> float | None:
-    """Parse optional plan elevation (feet); empty cells become ``None``."""
+    """Parse optional plan elevation (feet); empty cells become ``None``.
+
+    Parameters
+    ----------
+    value :
+        Elevation cell (number, numeric string, or empty).
+
+    Returns
+    -------
+    float or None
+        Feet as float, or ``None`` when blank / non-numeric.
+    """
     if value is None:
         return None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -3244,6 +3313,16 @@ def plan_week_totals(
     """Sum target miles and elevation for a plan week.
 
     Elevation is ``None`` when no session in the week has an elevation value.
+
+    Parameters
+    ----------
+    sessions :
+        Session dicts with optional ``miles`` / ``elevation_ft``.
+
+    Returns
+    -------
+    tuple of (float, float or None)
+        ``(total_miles, total_elevation_ft)``; elevation ``None`` if unset.
     """
     total_miles = 0.0
     elev_sum = 0.0
@@ -3285,6 +3364,18 @@ def current_plan_week_index(
 
     Used for default-open week summary rows in the plan table (only “this
     week” opens; other weeks stay collapsed).
+
+    Parameters
+    ----------
+    weeks :
+        Plan week dicts with ``week_start`` (Monday).
+    today : pandas.Timestamp, optional
+        Reference day (defaults to now UTC).
+
+    Returns
+    -------
+    int or None
+        Zero-based week index, or ``None`` when ``today`` is outside all weeks.
     """
     if not weeks:
         return None
@@ -3323,6 +3414,18 @@ def plan_focus_session_date(
     future session day (preferring remaining sessions in the current plan
     week when that week has any, otherwise the soonest across the plan).
     Returns ``None`` when every session is in the past or the plan is empty.
+
+    Parameters
+    ----------
+    weeks :
+        Plan week dicts with dated ``sessions``.
+    today : pandas.Timestamp, optional
+        Reference day (defaults to now UTC).
+
+    Returns
+    -------
+    pandas.Timestamp or None
+        UTC midnight focus date, or ``None`` when nothing remains to highlight.
     """
     if not weeks:
         return None
@@ -3351,7 +3454,20 @@ def plan_week_index_for_date(
     weeks: Sequence[Mapping[str, object]],
     day: pd.Timestamp | None,
 ) -> int | None:
-    """Return the week index that contains a session on ``day``, else ``None``."""
+    """Return the week index that contains a session on ``day``, else ``None``.
+
+    Parameters
+    ----------
+    weeks :
+        Plan week dicts with dated ``sessions``.
+    day : pandas.Timestamp or None
+        Calendar day to match (UTC-normalized).
+
+    Returns
+    -------
+    int or None
+        Zero-based week index, or ``None`` when ``day`` is missing/unmatched.
+    """
     if day is None or not weeks:
         return None
     target = normalize_utc(pd.Timestamp(day))
@@ -3371,6 +3487,18 @@ def default_expanded_plan_week_index(
     returns the nearest upcoming week. When every week is in the past, returns
     ``None``. Used when choosing which plan is active; week-row open state uses
     ``current_plan_week_index`` instead.
+
+    Parameters
+    ----------
+    weeks :
+        Plan week dicts with ``week_start``.
+    today : pandas.Timestamp, optional
+        Reference day (defaults to now UTC).
+
+    Returns
+    -------
+    int or None
+        Zero-based week index, or ``None`` when all weeks are in the past.
     """
     if not weeks:
         return None
@@ -3404,6 +3532,18 @@ def default_expanded_plan_index(
     Prefers the plan whose weeks include ``today``. If no plan covers today,
     expands the plan with the nearest upcoming week. When every plan is fully
     in the past, returns ``None`` (all collapsed).
+
+    Parameters
+    ----------
+    plans :
+        Loaded plan dicts (each with ``weeks``).
+    today : pandas.Timestamp, optional
+        Reference day (defaults to now UTC).
+
+    Returns
+    -------
+    int or None
+        Zero-based plan index, or ``None`` when every plan is fully past.
     """
     if not plans:
         return None
@@ -3510,6 +3650,17 @@ def parse_training_plan_file(path: Path) -> dict[str, object]:
 
     The optional first-line ``#`` comment is the plan display name. Rows with
     blank dates are skipped. Weeks are ISO weeks (Monday start).
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Path to a ``*.csv`` under ``data/plans/`` (or a test fixture).
+
+    Returns
+    -------
+    dict
+        ``name``, ``source``, ``start_date``, ``end_date``, and ``weeks``
+        (each week has totals and session rows including ``is_race``).
     """
     fallback = _plan_name_fallback(path)
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -3676,13 +3827,35 @@ def load_training_plans(plans_dir: Path = PLANS_DIR) -> list[dict[str, object]]:
     Each plan dict has ``name``, ``source``, ``start_date``, ``end_date``,
     and ``weeks``. Week entries include totals and session rows (date,
     session, miles, elevation, ``is_race``).
+
+    Parameters
+    ----------
+    plans_dir : pathlib.Path, optional
+        Directory of plan CSVs (default ``PLANS_DIR``).
+
+    Returns
+    -------
+    list of dict
+        Plans sorted by ``start_date`` ascending (missing dates last).
     """
     token = _plans_cache_token(plans_dir)
     return _load_training_plans_cached(token, str(plans_dir))
 
 
 def plan_week_expander_label(week: Mapping[str, object]) -> str:
-    """Build a week expander summary with target miles and elevation."""
+    """Build a week expander summary with target miles and elevation.
+
+    Parameters
+    ----------
+    week : mapping
+        Plan week with ``week_label`` / ``week_start``, ``total_miles``,
+        and optional ``total_elevation_ft``.
+
+    Returns
+    -------
+    str
+        Label like ``Sep 14, 2026 - Sep 20, 2026 · 18 mi · 1,200 ft``.
+    """
     label = str(week.get("week_label") or "").strip()
     if not label:
         start = week.get("week_start")
@@ -3730,6 +3903,18 @@ def select_plan_for_charts(
     Prefers the same rule as ``default_expanded_plan_index`` (week containing
     ``today``, else nearest upcoming). When every plan is fully in the past,
     falls back to the chronologically latest plan that has weeks.
+
+    Parameters
+    ----------
+    plans :
+        Loaded plan dicts.
+    today : pandas.Timestamp, optional
+        Reference day (defaults to now UTC via ``default_expanded_plan_index``).
+
+    Returns
+    -------
+    tuple of (int or None, mapping or None)
+        Selected index and plan, or ``(None, None)`` when no plan has weeks.
     """
     if not plans:
         return None, None
@@ -3902,7 +4087,19 @@ def plan_vs_actual_by_week(
 
 
 def plan_vs_actual_has_overlap(comparison: pd.DataFrame) -> bool:
-    """Return True when any plan week contains at least one matched run."""
+    """Return True when any plan week contains at least one matched run.
+
+    Parameters
+    ----------
+    comparison : pandas.DataFrame
+        Output of ``plan_vs_actual_by_week`` / ``plan_vs_actual_all_plans``.
+
+    Returns
+    -------
+    bool
+        ``True`` when any row has ``run_count > 0`` (or positive actual miles /
+        elevation when ``run_count`` is absent).
+    """
     if comparison is None or comparison.empty:
         return False
     if "run_count" in comparison.columns:
@@ -3920,6 +4117,18 @@ def plan_targets_overlap_periods(
 
     ``comparison`` may include weeks from one plan or every loaded plan
     (``plan_vs_actual_all_plans``).
+
+    Parameters
+    ----------
+    comparison : pandas.DataFrame
+        Plan-vs-actual rows with ``period_key``.
+    period_df : pandas.DataFrame
+        Aggregated chart periods with ``period_key``.
+
+    Returns
+    -------
+    bool
+        ``True`` when the key sets intersect.
     """
     if comparison is None or comparison.empty or period_df is None or period_df.empty:
         return False
@@ -4019,6 +4228,19 @@ def attach_plan_targets_to_periods(
     When ``comparison`` includes multiple plans, overlapping ISO weeks are
     collapsed via ``_collapse_plan_targets_by_period`` (sum targets; join
     names for hover).
+
+    Parameters
+    ----------
+    period_df : pandas.DataFrame
+        Aggregated period metrics (needs ``period_key``).
+    comparison : pandas.DataFrame
+        Plan-vs-actual rows from one or all plans.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Copy of ``period_df`` with ``plan_miles``, ``plan_elevation_ft``,
+        ``plan_name``, and ``plan_week`` columns attached.
     """
     out = period_df.copy()
     for col in ("plan_miles", "plan_elevation_ft", "plan_name", "plan_week"):

@@ -2544,6 +2544,26 @@ class PlanVsActualChartTests(unittest.TestCase):
         self.assertEqual(list(bar_traces[0].y), [None, 800.0, None])
         self.assertEqual(list(bar_traces[1].y), [350.0, 400.0, 100.0])
 
+    def test_elevation_miles_unit_ignores_plan_columns(self):
+        """Hiking elevation (unit=mi) stays actual-only even with plan elev."""
+        fig = elevation_chart(self._period_with_plan(), "Week", unit="mi")
+        bar_traces = [t for t in fig.data if t.type == "bar"]
+        self.assertEqual(len(bar_traces), 1)
+        self.assertFalse(fig.layout.showlegend)
+        self.assertNotEqual(fig.layout.barmode, "group")
+
+    def test_plan_hover_joined_multi_plan_name_without_week(self):
+        """Collapsed overlap attach sets plan_name join and clears plan_week."""
+        period = self._period_with_plan().copy()
+        period.loc[0, "plan_name"] = "Plan A · Week 1 / Plan B · Week 1"
+        period.loc[0, "plan_week"] = np.nan
+        fig = mileage_chart(period, "Week")
+        plan = next(t for t in fig.data if t.type == "bar" and t.name == "Plan")
+        self.assertEqual(
+            plan.customdata[0][2],
+            "<br>Plan A · Week 1 / Plan B · Week 1",
+        )
+
     def test_mileage_without_plan_stays_actual_only(self):
         fig = mileage_chart(_training_period_df(), "Week")
         bar_traces = [t for t in fig.data if t.type == "bar"]

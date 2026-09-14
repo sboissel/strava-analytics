@@ -1634,6 +1634,8 @@ def elevation_chart(
 
     When ``period_df`` includes finite ``plan_elevation_ft`` (Training week
     grain with an overlapping plan), draws grouped plan vs actual bars.
+    Plan overlay applies only for ``unit="ft"`` (Hiking ``unit="mi"`` stays
+    actual-only).
 
     Parameters
     ----------
