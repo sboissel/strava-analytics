@@ -1115,13 +1115,55 @@ class PeriodWindowControlsTests(unittest.TestCase):
             self.assertNotIn("render_period_count_input", page)
             self.assertNotIn("count=window", page)
         self.assertIn('page_key="training"', training)
+        self.assertIn("training_plans_max_end", training)
+        self.assertIn("max_end=plan_max_end", training)
+        self.assertIn("render_training_plan_zoom_select", training)
         self.assertIn('page_key="fitness"', fitness)
+        self.assertNotIn("training_plans_max_end", fitness)
+        self.assertNotIn("max_end=", fitness)
+        self.assertNotIn("render_training_plan_zoom_select", fitness)
         ui = (
             Path(__file__).resolve().parents[2] / "dashboard" / "ui.py"
         ).read_text()
         self.assertIn("def render_period_range_inputs", ui)
+        self.assertIn("def render_training_plan_zoom_select", ui)
+        self.assertIn("Zoom to plan", ui)
         self.assertIn("Start / End", ui)
+        self.assertIn("max_end", ui)
         self.assertNotIn("Periods to show", ui)
+
+    def test_period_window_limits_extend_with_max_end(self):
+        from dashboard.data import (
+            align_to_period_start,
+            clamp_period_window,
+            period_window_limits,
+        )
+
+        as_of = pd.Timestamp("2026-09-14T12:00:00Z")
+        plan_end = pd.Timestamp("2027-04-04T00:00:00Z")
+        base = period_window_limits("Week", as_of)
+        extended = period_window_limits("Week", as_of, max_end=plan_end)
+        self.assertEqual(base.end, align_to_period_start("Week", as_of))
+        self.assertEqual(extended.end, align_to_period_start("Week", plan_end))
+        self.assertEqual(extended.start, base.start)
+        self.assertGreater(extended.end, base.end)
+
+        # Defaults still end at as_of; clamp allows selecting through plan end.
+        allowed = clamp_period_window(
+            "Week",
+            pd.Timestamp("2026-09-14T00:00:00Z"),
+            plan_end,
+            as_of=as_of,
+            max_end=plan_end,
+        )
+        self.assertEqual(allowed.end, align_to_period_start("Week", plan_end))
+        blocked = clamp_period_window(
+            "Week",
+            pd.Timestamp("2026-09-14T00:00:00Z"),
+            plan_end,
+            as_of=as_of,
+        )
+        self.assertEqual(blocked.end, align_to_period_start("Week", as_of))
 
     def test_default_bounds_match_period_config(self):
         from dashboard.data import PERIOD_CONFIG, default_period_bounds, generate_period_index_range

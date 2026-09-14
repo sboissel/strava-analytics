@@ -63,6 +63,10 @@ RACE_BUILDUP_MARGIN_B = 56
 # Larger than TRAINING_MARGIN_T so the legend clears the overlaid title row.
 COMPLIANCE_MARGIN_T = 96
 TRAINING_BARGAP = 0.28
+# Slightly tighter gap when mileage/elevation show plan + actual side by side.
+PLAN_VS_ACTUAL_BARGAP = 0.22
+# Extra top margin so the Plan / Actual legend clears the Plotly title.
+PLAN_VS_ACTUAL_MARGIN_T = TRAINING_MARGIN_T + 28
 TRAINING_OFFSETGROUP = "training-period"
 TRAINING_XAXIS_DOMAIN = [0.0, 1.0]
 RACE_STRIP_HEIGHT = 40
@@ -1121,6 +1125,58 @@ def _relative_weeks_bar_customdata(period_df: pd.DataFrame) -> list[list[str]]:
     return customdata
 
 
+def _period_has_plan_series(period_df: pd.DataFrame, column: str) -> bool:
+    """Return True when ``column`` has at least one finite plan value."""
+    if period_df is None or period_df.empty or column not in period_df.columns:
+        return False
+    series = pd.to_numeric(period_df[column], errors="coerce")
+    return bool(series.notna().any())
+
+
+def _plan_identity_hover_html(name: object, week: object) -> str:
+    """Format ``PlanName · Week N`` (or either part alone) for plan-bar hover."""
+    label = ""
+    if name is not None and not (isinstance(name, float) and pd.isna(name)):
+        label = str(name).strip()
+    week_num: int | None = None
+    if week is not None and not (isinstance(week, float) and pd.isna(week)):
+        try:
+            week_num = int(week)
+        except (TypeError, ValueError):
+            week_num = None
+    if label and week_num is not None:
+        return f"<br>{label} · Week {week_num}"
+    if label:
+        return f"<br>{label}"
+    if week_num is not None:
+        return f"<br>Week {week_num}"
+    return ""
+
+
+def _plan_bar_customdata(period_df: pd.DataFrame, grain: str) -> list[list]:
+    """Plan-bar hover customdata: period tip, in-progress note, plan identity.
+
+    Index layout matches actual bars for ``[0]``/``[1]``, then ``[2]`` is an
+    optional HTML fragment (``<br>PlanName · Week N``) from ``plan_name`` /
+    ``plan_week`` when present (via ``attach_plan_targets_to_periods``).
+    """
+    base = _bar_period_customdata(period_df, grain)
+    names = (
+        period_df["plan_name"].tolist()
+        if "plan_name" in period_df.columns
+        else [None] * len(period_df)
+    )
+    weeks = (
+        period_df["plan_week"].tolist()
+        if "plan_week" in period_df.columns
+        else [None] * len(period_df)
+    )
+    return [
+        [tip, note, _plan_identity_hover_html(name, week)]
+        for (tip, note), name, week in zip(base, names, weeks)
+    ]
+
+
 def mileage_chart(
     period_df: pd.DataFrame,
     grain: str,
@@ -1130,17 +1186,25 @@ def mileage_chart(
     show_goal: bool = True,
     relative_weeks_from_race: bool = False,
 ) -> go.Figure:
-    """Build a total mileage bar chart with a solid ``MILEAGE_BAR`` fill.
+    """Build a total mileage bar chart with heatmap-colored actual bars.
 
-    The calendar mileage heatmap (Training expander)
-    uses ``mileage_heatmap_chart`` with ``MILEAGE_COLORSCALE``. Keeping
-    the main bars solid preserves alignment with the race-week strip,
-    80:20, and elevation charts.
+    Actual bars use a sequential heatmap (pale teal → ``MILEAGE_BAR``) via
+    ``MILEAGE_COLORSCALE``, matching elevation's value-based coloring. No
+    colorbar: ``showscale=False`` keeps the plot box aligned with the other
+    Training charts. The calendar mileage heatmap (Training expander) uses
+    the same palette via ``mileage_heatmap_chart``.
+
+    When ``period_df`` includes finite ``plan_miles`` (Training week grain with
+    overlapping plan targets from any loaded plan), draws grouped plan vs
+    actual bars instead of a single actual series. Plan bars stay a muted
+    solid teal (outline ``MILEAGE_BAR``); only actual bars use the heatmap.
 
     Parameters
     ----------
     period_df : pandas.DataFrame
         Aggregated period metrics from ``aggregate_period_metrics``.
+        Optional ``plan_miles`` / ``plan_name`` / ``plan_week`` from
+        ``attach_plan_targets_to_periods`` (plan hover shows name + week).
     grain : str
         Period grain label used for goal scaling and axis formatting.
     title : str, optional
@@ -1164,12 +1228,20 @@ def mileage_chart(
     chart_title = mileage_title(grain) if title is None else title
     fig = go.Figure()
     n = 0 if period_df.empty else len(period_df)
+    show_plan = (
+        not relative_weeks_from_race
+        and _period_has_plan_series(period_df, "plan_miles")
+    )
     if relative_weeks_from_race:
         labels = _weeks_from_race_tick_labels(n)
         chart_margin = _race_buildup_mileage_margin()
     else:
         labels = [] if period_df.empty else period_df["period_label"].tolist()
-        chart_margin = None
+        chart_margin = (
+            _training_margin(grain, len(labels), top=PLAN_VS_ACTUAL_MARGIN_T)
+            if show_plan and not period_df.empty
+            else None
+        )
     if period_df.empty:
         xaxis = _training_xaxis(labels, grain)
         if relative_weeks_from_race:
@@ -1196,26 +1268,77 @@ def mileage_chart(
     totals = period_df["total_miles"].fillna(0.0)
     mile_values = totals.tolist()
     goal = miles_goal(grain)
-    fig.add_trace(
-        go.Bar(
-            x=labels,
-            y=mile_values,
-            offsetgroup=TRAINING_OFFSETGROUP,
-            alignmentgroup=TRAINING_OFFSETGROUP,
-            marker=dict(
-                color=MILEAGE_BAR,
-                pattern=_in_progress_bar_pattern(period_df),
-                cornerradius=5,
-                opacity=0.92,
-            ),
-            customdata=customdata,
-            hovertemplate=(
-                "<b>%{customdata[0]}</b>%{customdata[1]}"
-                "<br>%{y:.1f} miles<extra></extra>"
-            ),
-            showlegend=False,
+    in_progress_pattern = _in_progress_bar_pattern(period_df)
+    if show_plan:
+        plan_miles = pd.to_numeric(period_df["plan_miles"], errors="coerce")
+        plan_customdata = _plan_bar_customdata(period_df, grain)
+        fig.add_trace(
+            go.Bar(
+                x=labels,
+                y=_nan_to_none(plan_miles),
+                name="Plan",
+                marker=dict(
+                    color="rgba(80, 155, 143, 0.35)",
+                    line=dict(color=MILEAGE_BAR, width=1.5),
+                    pattern=in_progress_pattern,
+                    cornerradius=5,
+                ),
+                customdata=plan_customdata,
+                hovertemplate=(
+                    "<b>%{customdata[0]}</b>%{customdata[1]}%{customdata[2]}"
+                    "<br>Plan: %{y:.1f} miles<extra></extra>"
+                ),
+                legendrank=1,
+            )
         )
-    )
+        fig.add_trace(
+            go.Bar(
+                x=labels,
+                y=mile_values,
+                name="Actual",
+                marker=dict(
+                    color=mile_values,
+                    colorscale=MILEAGE_COLORSCALE,
+                    cmin=0,
+                    cmax=max(float(totals.max()), 1.0),
+                    showscale=False,
+                    pattern=in_progress_pattern,
+                    cornerradius=5,
+                    opacity=0.92,
+                ),
+                customdata=customdata,
+                hovertemplate=(
+                    "<b>%{customdata[0]}</b>%{customdata[1]}"
+                    "<br>Actual: %{y:.1f} miles<extra></extra>"
+                ),
+                legendrank=2,
+            )
+        )
+    else:
+        fig.add_trace(
+            go.Bar(
+                x=labels,
+                y=mile_values,
+                offsetgroup=TRAINING_OFFSETGROUP,
+                alignmentgroup=TRAINING_OFFSETGROUP,
+                marker=dict(
+                    color=mile_values,
+                    colorscale=MILEAGE_COLORSCALE,
+                    cmin=0,
+                    cmax=max(float(totals.max()), 1.0),
+                    showscale=False,
+                    pattern=in_progress_pattern,
+                    cornerradius=5,
+                    opacity=0.92,
+                ),
+                customdata=customdata,
+                hovertemplate=(
+                    "<b>%{customdata[0]}</b>%{customdata[1]}"
+                    "<br>%{y:.1f} miles<extra></extra>"
+                ),
+                showlegend=False,
+            )
+        )
     if show_goal:
         # Full-width paper shape above bars; diamonds clear the line in y.
         _add_mileage_goal_line(fig, goal=goal)
@@ -1224,6 +1347,10 @@ def mileage_chart(
     diamond_min_pad = RACE_CHART_DIAMOND_Y_PAD_MIN_MI
     if y_max is None:
         peak = float(totals.max())
+        if show_plan:
+            plan_peak = pd.to_numeric(period_df["plan_miles"], errors="coerce")
+            if plan_peak.notna().any():
+                peak = max(peak, float(plan_peak.max()))
         if show_goal:
             peak = max(peak, goal)
         axis_max = max(peak * 1.18, 5)
@@ -1257,23 +1384,27 @@ def mileage_chart(
             title=dict(text="Weeks from race", font=dict(size=12, color=MUTED)),
             tickangle=0,
         )
-    fig.update_layout(
-        title=_title(chart_title),
-        showlegend=False,
-        yaxis=_training_yaxis(
+    layout_kwargs: dict = {
+        "title": _title(chart_title),
+        "showlegend": show_plan,
+        "yaxis": _training_yaxis(
             title=dict(text="Total Miles", font=dict(size=12, color=MUTED)),
             range=[0, axis_max],
             gridcolor="rgba(21,32,40,0.08)",
         ),
-        xaxis=xaxis,
-        bargap=TRAINING_BARGAP,
-        bargroupgap=0,
-        hoverlabel=_hoverlabel(),
+        "xaxis": xaxis,
+        "barmode": "group" if show_plan else "relative",
+        "bargap": PLAN_VS_ACTUAL_BARGAP if show_plan else TRAINING_BARGAP,
+        "bargroupgap": 0.08 if show_plan else 0,
+        "hoverlabel": _hoverlabel(),
         **{
             **CHART_LAYOUT,
             "margin": chart_margin or _training_margin(grain, len(labels)),
         },
-    )
+    }
+    if show_plan:
+        layout_kwargs["legend"] = LEGEND_UNDER_TITLE
+    fig.update_layout(**layout_kwargs)
     if not relative_weeks_from_race:
         _add_race_week_diamonds(
             fig,
@@ -1501,10 +1632,15 @@ def elevation_chart(
     colorbar: ``showscale=False`` keeps the plot box aligned with the
     other Training charts. Achievements keep ``ELEVATION_PURPLE``.
 
+    When ``period_df`` includes finite ``plan_elevation_ft`` (Training week
+    grain with an overlapping plan), draws grouped plan vs actual bars.
+
     Parameters
     ----------
     period_df : pandas.DataFrame
         Aggregated period metrics from ``aggregate_period_metrics``.
+        Optional ``plan_elevation_ft`` / ``plan_name`` / ``plan_week`` from
+        ``attach_plan_targets_to_periods`` (plan hover shows name + week).
     grain : str
         Period grain label used for axis formatting.
     unit : {"ft", "mi"}, optional
@@ -1519,13 +1655,20 @@ def elevation_chart(
     title = elevation_title(grain)
     fig = go.Figure()
     labels = [] if period_df.empty else period_df["period_label"].tolist()
+    # Plan overlay is Training feet only (Hiking uses unit="mi" without plans).
+    show_plan = unit == "ft" and _period_has_plan_series(period_df, "plan_elevation_ft")
+    margin = (
+        _training_margin(grain, len(labels), top=PLAN_VS_ACTUAL_MARGIN_T)
+        if show_plan and not period_df.empty
+        else _training_margin(grain, 0 if period_df.empty else len(labels))
+    )
     if period_df.empty:
         fig.update_layout(
             title=_title(title),
             xaxis=_training_xaxis(labels, grain),
             yaxis=_training_yaxis(),
             showlegend=False,
-            **{**CHART_LAYOUT, "margin": _training_margin(grain, 0)},
+            **{**CHART_LAYOUT, "margin": margin},
         )
         return fig
 
@@ -1547,46 +1690,100 @@ def elevation_chart(
         y_floor = 100.0
     customdata = _bar_period_customdata(period_df, grain)
     elev_values = totals.tolist()
-    fig.add_trace(
-        go.Bar(
-            x=labels,
-            y=elev_values,
-            offsetgroup=TRAINING_OFFSETGROUP,
-            alignmentgroup=TRAINING_OFFSETGROUP,
-            marker=dict(
-                color=elev_values,
-                colorscale=ELEVATION_COLORSCALE,
-                cmin=0,
-                cmax=max(float(totals.max()), 1.0 if unit == "ft" else 0.01),
-                showscale=False,
-                pattern=_in_progress_bar_pattern(period_df),
-                cornerradius=5,
-                opacity=0.92,
-            ),
-            customdata=customdata,
-            hovertemplate=(
-                f"<b>%{{customdata[0]}}</b>%{{customdata[1]}}"
-                f"<br>{hover_y}<extra></extra>"
-            ),
-            showlegend=False,
+    in_progress_pattern = _in_progress_bar_pattern(period_df)
+    if show_plan:
+        plan_elev = pd.to_numeric(period_df["plan_elevation_ft"], errors="coerce")
+        plan_customdata = _plan_bar_customdata(period_df, grain)
+        fig.add_trace(
+            go.Bar(
+                x=labels,
+                y=_nan_to_none(plan_elev),
+                name="Plan",
+                marker=dict(
+                    color="rgba(133, 117, 168, 0.35)",
+                    line=dict(color=ELEVATION_BAR, width=1.5),
+                    pattern=in_progress_pattern,
+                    cornerradius=5,
+                ),
+                customdata=plan_customdata,
+                hovertemplate=(
+                    f"<b>%{{customdata[0]}}</b>%{{customdata[1]}}%{{customdata[2]}}"
+                    f"<br>Plan: {hover_y}<extra></extra>"
+                ),
+                legendrank=1,
+            )
         )
-    )
-    y_max = max(float(totals.max()) * 1.18, y_floor)
-    fig.update_layout(
-        title=_title(title),
-        showlegend=False,
-        yaxis=_training_yaxis(
+        fig.add_trace(
+            go.Bar(
+                x=labels,
+                y=elev_values,
+                name="Actual",
+                marker=dict(
+                    color=elev_values,
+                    colorscale=ELEVATION_COLORSCALE,
+                    cmin=0,
+                    cmax=max(float(totals.max()), 1.0),
+                    showscale=False,
+                    pattern=in_progress_pattern,
+                    cornerradius=5,
+                    opacity=0.92,
+                ),
+                customdata=customdata,
+                hovertemplate=(
+                    f"<b>%{{customdata[0]}}</b>%{{customdata[1]}}"
+                    f"<br>Actual: {hover_y}<extra></extra>"
+                ),
+                legendrank=2,
+            )
+        )
+        plan_peak = float(plan_elev.max()) if plan_elev.notna().any() else 0.0
+        y_max = max(float(totals.max()), plan_peak) * 1.18
+        y_max = max(y_max, y_floor)
+    else:
+        fig.add_trace(
+            go.Bar(
+                x=labels,
+                y=elev_values,
+                offsetgroup=TRAINING_OFFSETGROUP,
+                alignmentgroup=TRAINING_OFFSETGROUP,
+                marker=dict(
+                    color=elev_values,
+                    colorscale=ELEVATION_COLORSCALE,
+                    cmin=0,
+                    cmax=max(float(totals.max()), 1.0 if unit == "ft" else 0.01),
+                    showscale=False,
+                    pattern=in_progress_pattern,
+                    cornerradius=5,
+                    opacity=0.92,
+                ),
+                customdata=customdata,
+                hovertemplate=(
+                    f"<b>%{{customdata[0]}}</b>%{{customdata[1]}}"
+                    f"<br>{hover_y}<extra></extra>"
+                ),
+                showlegend=False,
+            )
+        )
+        y_max = max(float(totals.max()) * 1.18, y_floor)
+    layout_kwargs: dict = {
+        "title": _title(title),
+        "showlegend": show_plan,
+        "yaxis": _training_yaxis(
             title=dict(text=y_title, font=dict(size=12, color=MUTED)),
             range=[0, y_max],
             tickformat=tickformat,
             gridcolor="rgba(21,32,40,0.08)",
         ),
-        xaxis=_training_xaxis(labels, grain),
-        bargap=TRAINING_BARGAP,
-        bargroupgap=0,
-        hoverlabel=_hoverlabel(),
-        **{**CHART_LAYOUT, "margin": _training_margin(grain, len(labels))},
-    )
+        "xaxis": _training_xaxis(labels, grain),
+        "barmode": "group" if show_plan else "relative",
+        "bargap": PLAN_VS_ACTUAL_BARGAP if show_plan else TRAINING_BARGAP,
+        "bargroupgap": 0.08 if show_plan else 0,
+        "hoverlabel": _hoverlabel(),
+        **{**CHART_LAYOUT, "margin": margin},
+    }
+    if show_plan:
+        layout_kwargs["legend"] = LEGEND_UNDER_TITLE
+    fig.update_layout(**layout_kwargs)
     _add_race_week_diamonds(fig, period_df, totals)
     return fig
 
@@ -3250,3 +3447,4 @@ def race_results_scatter(
         },
     )
     return fig
+

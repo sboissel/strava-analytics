@@ -9,18 +9,30 @@ from pathlib import Path
 import pandas as pd
 
 from dashboard.data import (
+    PLAN_ZOOM_NONE,
+    attach_plan_targets_to_periods,
+    align_to_period_start,
     current_plan_week_index,
     default_expanded_plan_index,
     default_expanded_plan_week_index,
+    default_period_bounds,
     is_plan_race_session,
     load_training_plans,
     parse_plan_header_name,
     parse_plan_miles,
     parse_training_plan_file,
+    period_window_for_plan,
     plan_focus_session_date,
+    plan_targets_overlap_periods,
+    plan_vs_actual_all_plans,
+    plan_vs_actual_by_week,
+    plan_vs_actual_has_overlap,
     plan_week_expander_label,
     plan_week_index_for_date,
     plan_week_totals,
+    select_plan_for_charts,
+    sync_training_plan_zoom_window,
+    training_plans_max_end,
 )
 from dashboard.theme import GLOBAL_CSS, TRAINING_PLAN_RACE_TEXT
 from dashboard.ui import training_plan_table_html, training_plan_week_table_html
@@ -218,6 +230,9 @@ class PlanFileParseTests(unittest.TestCase):
 
         self.assertEqual(plan["name"], "Sample Plan")
         self.assertEqual(len(plan["weeks"]), 3)
+        self.assertEqual(
+            plan["end_date"], pd.Timestamp("2026-11-08", tz="UTC")
+        )
         week0 = plan["weeks"][0]
         self.assertEqual(
             week0["week_start"], pd.Timestamp("2026-09-14", tz="UTC")
@@ -301,6 +316,50 @@ class PlanFileParseTests(unittest.TestCase):
             plans = load_training_plans(root)
 
         self.assertEqual([p["name"] for p in plans], ["Earlier Plan", "Later Plan"])
+
+    def test_training_plans_max_end_uses_latest_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_plan(
+                root,
+                "a.csv",
+                "\n".join(
+                    [
+                        "#A",
+                        "Date,Target Miles,Session,Target Elevation",
+                        "2026-09-14,4,Easy,",
+                        "2026-11-08,13.1,Race,",
+                    ]
+                )
+                + "\n",
+            )
+            self._write_plan(
+                root,
+                "b.csv",
+                "\n".join(
+                    [
+                        "#B",
+                        "Date,Target Miles,Session,Target Elevation",
+                        "2026-12-01,5,Easy,",
+                        "2027-04-04,15.5,Race,",
+                    ]
+                )
+                + "\n",
+            )
+            plans = load_training_plans(root)
+
+        self.assertEqual(
+            training_plans_max_end(plans),
+            pd.Timestamp("2027-04-04", tz="UTC"),
+        )
+
+    def test_training_plans_max_end_empty(self):
+        self.assertIsNone(training_plans_max_end([]))
+        self.assertIsNone(
+            training_plans_max_end(
+                [{"name": "x", "start_date": None, "end_date": None, "weeks": []}]
+            )
+        )
 
     def test_repo_plan_csvs_parse(self):
         repo_plans = Path(__file__).resolve().parents[2] / "data" / "plans"
@@ -554,6 +613,382 @@ class PlanTableHtmlTests(unittest.TestCase):
             html.count('<details class="training-plan-week" open>'), 0
         )
         self.assertEqual(html.count('<details class="training-plan-week">'), 2)
+
+
+class PlanVsActualAggregatorTests(unittest.TestCase):
+    def _plan(self) -> dict[str, object]:
+        return {
+            "name": "Sample",
+            "weeks": [
+                {
+                    "week_start": pd.Timestamp("2026-09-14", tz="UTC"),
+                    "week_label": "Sep 14, 2026 - Sep 20, 2026",
+                    "total_miles": 17.8,
+                    "total_elevation_ft": None,
+                    "sessions": [
+                        {
+                            "date": pd.Timestamp("2026-09-14", tz="UTC"),
+                            "miles": 4.0,
+                            "elevation_ft": None,
+                        },
+                        {
+                            "date": pd.Timestamp("2026-09-16", tz="UTC"),
+                            "miles": 3.8,
+                            "elevation_ft": None,
+                        },
+                        {
+                            "date": pd.Timestamp("2026-09-18", tz="UTC"),
+                            "miles": 10.0,
+                            "elevation_ft": None,
+                        },
+                    ],
+                },
+                {
+                    "week_start": pd.Timestamp("2026-09-21", tz="UTC"),
+                    "week_label": "Sep 21, 2026 - Sep 27, 2026",
+                    "total_miles": 12.0,
+                    "total_elevation_ft": 800.0,
+                    "sessions": [],
+                },
+            ],
+        }
+
+    def _runs(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "date": [
+                    pd.Timestamp("2026-09-14", tz="UTC"),
+                    pd.Timestamp("2026-09-18", tz="UTC"),
+                    pd.Timestamp("2026-09-20", tz="UTC"),  # Sunday of week 0
+                    pd.Timestamp("2026-09-21", tz="UTC"),  # Monday of week 1
+                    pd.Timestamp("2026-09-28", tz="UTC"),  # outside plan weeks
+                ],
+                "distance_miles": [4.0, 9.5, 3.0, 5.0, 99.0],
+                "elevation_gain_ft": [100.0, 200.0, 50.0, 400.0, 999.0],
+            }
+        )
+
+    def test_aligns_iso_weeks_and_sums_actuals(self):
+        out = plan_vs_actual_by_week(
+            self._plan(),
+            self._runs(),
+            as_of=pd.Timestamp("2026-09-16", tz="UTC"),
+        )
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out.iloc[0]["period_key"], "2026-38")
+        self.assertEqual(out.iloc[0]["plan_name"], "Sample")
+        self.assertEqual(int(out.iloc[0]["plan_week"]), 1)
+        self.assertEqual(int(out.iloc[1]["plan_week"]), 2)
+        self.assertAlmostEqual(float(out.iloc[0]["plan_miles"]), 17.8)
+        self.assertTrue(pd.isna(out.iloc[0]["plan_elevation_ft"]))
+        # Sep 14 + 18 + 20 (Sun still in Mon–Sun week)
+        self.assertAlmostEqual(float(out.iloc[0]["actual_miles"]), 16.5)
+        self.assertAlmostEqual(float(out.iloc[0]["actual_elevation_ft"]), 350.0)
+        self.assertEqual(int(out.iloc[0]["run_count"]), 3)
+        self.assertTrue(bool(out.iloc[0]["in_progress"]))
+
+        self.assertAlmostEqual(float(out.iloc[1]["plan_miles"]), 12.0)
+        self.assertAlmostEqual(float(out.iloc[1]["plan_elevation_ft"]), 800.0)
+        self.assertAlmostEqual(float(out.iloc[1]["actual_miles"]), 5.0)
+        self.assertAlmostEqual(float(out.iloc[1]["actual_elevation_ft"]), 400.0)
+        self.assertFalse(bool(out.iloc[1]["in_progress"]))
+        # Sep 28 is outside both plan weeks.
+        self.assertNotIn(99.0, out["actual_miles"].tolist())
+
+    def test_empty_plan_and_no_overlap(self):
+        empty = plan_vs_actual_by_week({"name": "x", "weeks": []}, self._runs())
+        self.assertTrue(empty.empty)
+        self.assertFalse(plan_vs_actual_has_overlap(empty))
+
+        no_overlap_runs = pd.DataFrame(
+            {
+                "date": [pd.Timestamp("2026-01-01", tz="UTC")],
+                "distance_miles": [10.0],
+                "elevation_gain_ft": [100.0],
+            }
+        )
+        out = plan_vs_actual_by_week(self._plan(), no_overlap_runs)
+        self.assertEqual(len(out), 2)
+        self.assertFalse(plan_vs_actual_has_overlap(out))
+        self.assertEqual(int(out["run_count"].sum()), 0)
+
+    def test_range_midpoint_flows_into_week_totals_for_actual_chart(self):
+        # parse_plan_miles midpoint already used when building week totals;
+        # ensure aggregator consumes those totals as plan_miles.
+        plan = {
+            "name": "Ranges",
+            "weeks": [
+                {
+                    "week_start": pd.Timestamp("2026-09-14", tz="UTC"),
+                    "total_miles": 3.5,  # midpoint of 3-4
+                    "total_elevation_ft": None,
+                    "sessions": [],
+                }
+            ],
+        }
+        out = plan_vs_actual_by_week(plan, pd.DataFrame())
+        self.assertAlmostEqual(float(out.iloc[0]["plan_miles"]), 3.5)
+        self.assertAlmostEqual(float(out.iloc[0]["actual_miles"]), 0.0)
+
+    def test_select_plan_for_charts_fallback_to_latest_past(self):
+        plans = [
+            {
+                "name": "Past A",
+                "weeks": [{"week_start": pd.Timestamp("2026-07-06", tz="UTC")}],
+            },
+            {
+                "name": "Past B",
+                "weeks": [{"week_start": pd.Timestamp("2026-08-03", tz="UTC")}],
+            },
+        ]
+        today = pd.Timestamp("2026-09-14", tz="UTC")
+        self.assertIsNone(default_expanded_plan_index(plans, today))
+        idx, plan = select_plan_for_charts(plans, today)
+        self.assertEqual(idx, 1)
+        self.assertEqual(plan["name"], "Past B")
+
+    def test_attach_plan_targets_joins_by_period_key(self):
+        comparison = plan_vs_actual_by_week(self._plan(), self._runs())
+        period_df = pd.DataFrame(
+            {
+                "period_key": ["2026-37", "2026-38", "2026-39"],
+                "period_label": ["a", "b", "c"],
+                "total_miles": [1.0, 16.5, 5.0],
+                "total_elevation_ft": [10.0, 350.0, 400.0],
+            }
+        )
+        self.assertTrue(plan_targets_overlap_periods(comparison, period_df))
+        out = attach_plan_targets_to_periods(period_df, comparison)
+        self.assertTrue(pd.isna(out.iloc[0]["plan_miles"]))
+        self.assertTrue(pd.isna(out.iloc[0]["plan_name"]))
+        self.assertTrue(pd.isna(out.iloc[0]["plan_week"]))
+        self.assertAlmostEqual(float(out.iloc[1]["plan_miles"]), 17.8)
+        self.assertEqual(out.iloc[1]["plan_name"], "Sample")
+        self.assertEqual(int(out.iloc[1]["plan_week"]), 1)
+        self.assertAlmostEqual(float(out.iloc[2]["plan_miles"]), 12.0)
+        self.assertEqual(out.iloc[2]["plan_name"], "Sample")
+        self.assertEqual(int(out.iloc[2]["plan_week"]), 2)
+        self.assertTrue(pd.isna(out.iloc[1]["plan_elevation_ft"]))
+        self.assertAlmostEqual(float(out.iloc[2]["plan_elevation_ft"]), 800.0)
+
+    def test_plan_targets_no_overlap_with_unrelated_window(self):
+        comparison = plan_vs_actual_by_week(self._plan(), self._runs())
+        period_df = pd.DataFrame(
+            {
+                "period_key": ["2026-01", "2026-02"],
+                "total_miles": [1.0, 2.0],
+            }
+        )
+        self.assertFalse(plan_targets_overlap_periods(comparison, period_df))
+
+    def test_all_plans_attach_disjoint_weeks(self):
+        plans = [
+            {
+                "name": "Early",
+                "weeks": [
+                    {
+                        "week_start": pd.Timestamp("2026-09-14", tz="UTC"),
+                        "total_miles": 10.0,
+                        "total_elevation_ft": 100.0,
+                        "sessions": [],
+                    }
+                ],
+            },
+            {
+                "name": "Late",
+                "weeks": [
+                    {
+                        "week_start": pd.Timestamp("2026-11-30", tz="UTC"),
+                        "total_miles": 20.0,
+                        "total_elevation_ft": 200.0,
+                        "sessions": [],
+                    }
+                ],
+            },
+        ]
+        comparison = plan_vs_actual_all_plans(plans, pd.DataFrame())
+        self.assertEqual(len(comparison), 2)
+        self.assertEqual(set(comparison["period_key"]), {"2026-38", "2026-49"})
+        period_df = pd.DataFrame(
+            {
+                "period_key": ["2026-38", "2026-40", "2026-49"],
+                "total_miles": [1.0, 2.0, 3.0],
+            }
+        )
+        self.assertTrue(plan_targets_overlap_periods(comparison, period_df))
+        out = attach_plan_targets_to_periods(period_df, comparison)
+        self.assertAlmostEqual(float(out.iloc[0]["plan_miles"]), 10.0)
+        self.assertEqual(out.iloc[0]["plan_name"], "Early")
+        self.assertEqual(int(out.iloc[0]["plan_week"]), 1)
+        self.assertTrue(pd.isna(out.iloc[1]["plan_miles"]))
+        self.assertAlmostEqual(float(out.iloc[2]["plan_miles"]), 20.0)
+        self.assertEqual(out.iloc[2]["plan_name"], "Late")
+        self.assertEqual(int(out.iloc[2]["plan_week"]), 1)
+
+    def test_all_plans_attach_overlapping_week_sums_and_joins_names(self):
+        plans = [
+            {
+                "name": "Plan A",
+                "weeks": [
+                    {
+                        "week_start": pd.Timestamp("2026-09-14", tz="UTC"),
+                        "total_miles": 10.0,
+                        "total_elevation_ft": 100.0,
+                        "sessions": [],
+                    }
+                ],
+            },
+            {
+                "name": "Plan B",
+                "weeks": [
+                    {
+                        "week_start": pd.Timestamp("2026-09-14", tz="UTC"),
+                        "total_miles": 5.0,
+                        "total_elevation_ft": None,
+                        "sessions": [],
+                    }
+                ],
+            },
+        ]
+        comparison = plan_vs_actual_all_plans(plans, pd.DataFrame())
+        self.assertEqual(len(comparison), 2)
+        self.assertEqual(comparison["period_key"].tolist(), ["2026-38", "2026-38"])
+        period_df = pd.DataFrame(
+            {
+                "period_key": ["2026-38"],
+                "total_miles": [1.0],
+            }
+        )
+        out = attach_plan_targets_to_periods(period_df, comparison)
+        self.assertEqual(len(out), 1)
+        self.assertAlmostEqual(float(out.iloc[0]["plan_miles"]), 15.0)
+        self.assertAlmostEqual(float(out.iloc[0]["plan_elevation_ft"]), 100.0)
+        self.assertEqual(
+            out.iloc[0]["plan_name"], "Plan A · Week 1 / Plan B · Week 1"
+        )
+        self.assertTrue(pd.isna(out.iloc[0]["plan_week"]))
+
+
+class PlanZoomWindowTests(unittest.TestCase):
+    """Zoom-to-plan window helper and session-state sync."""
+
+    def _plan(self) -> dict[str, object]:
+        # Wednesday start → Week grain aligns to prior Monday (2026-09-14).
+        return {
+            "name": "Sample",
+            "start_date": pd.Timestamp("2026-09-16", tz="UTC"),
+            "end_date": pd.Timestamp("2027-04-04", tz="UTC"),
+            "weeks": [],
+        }
+
+    def test_period_window_for_plan_aligns_week(self):
+        as_of = pd.Timestamp("2026-09-14T12:00:00Z")
+        plan_end = pd.Timestamp("2027-04-04", tz="UTC")
+        window = period_window_for_plan(
+            "Week",
+            self._plan(),
+            as_of=as_of,
+            max_end=plan_end,
+        )
+        self.assertIsNotNone(window)
+        assert window is not None
+        self.assertEqual(
+            window.start, align_to_period_start("Week", self._plan()["start_date"])
+        )
+        self.assertEqual(
+            window.end, align_to_period_start("Week", self._plan()["end_date"])
+        )
+
+    def test_period_window_for_plan_missing_dates(self):
+        as_of = pd.Timestamp("2026-09-14T12:00:00Z")
+        self.assertIsNone(
+            period_window_for_plan(
+                "Week",
+                {"name": "Empty", "start_date": None, "end_date": None},
+                as_of=as_of,
+            )
+        )
+
+    def test_sync_applies_plan_then_restores_defaults_on_none(self):
+        as_of = pd.Timestamp("2026-09-14T12:00:00Z")
+        plan = self._plan()
+        plan_end = plan["end_date"]
+        assert isinstance(plan_end, pd.Timestamp)
+        state: dict[str, object] = {}
+
+        # Initial None: do not write Start/End (page defaults apply on load).
+        sync_training_plan_zoom_window(
+            state,
+            selected=PLAN_ZOOM_NONE,
+            grain="Week",
+            plans=[plan],
+            as_of=as_of,
+            max_end=plan_end,
+        )
+        self.assertNotIn("training_period_start_Week", state)
+        self.assertEqual(state["training_plan_zoom_prev"], PLAN_ZOOM_NONE)
+
+        # Select plan → write aligned plan window.
+        sync_training_plan_zoom_window(
+            state,
+            selected="Sample",
+            grain="Week",
+            plans=[plan],
+            as_of=as_of,
+            max_end=plan_end,
+        )
+        expected = period_window_for_plan(
+            "Week", plan, as_of=as_of, max_end=plan_end
+        )
+        assert expected is not None
+        self.assertEqual(
+            state["training_period_start_Week"], expected.start.date()
+        )
+        self.assertEqual(state["training_period_end_Week"], expected.end.date())
+        self.assertEqual(state["training_plan_zoom_prev"], "Sample")
+
+        # Back to None → restore original default window (not prior plan).
+        sync_training_plan_zoom_window(
+            state,
+            selected=PLAN_ZOOM_NONE,
+            grain="Week",
+            plans=[plan],
+            as_of=as_of,
+            max_end=plan_end,
+        )
+        defaults = default_period_bounds("Week", as_of)
+        self.assertEqual(
+            state["training_period_start_Week"], defaults.start.date()
+        )
+        self.assertEqual(state["training_period_end_Week"], defaults.end.date())
+        self.assertEqual(state["training_plan_zoom_prev"], PLAN_ZOOM_NONE)
+
+    def test_sync_reapplies_plan_when_grain_changes(self):
+        as_of = pd.Timestamp("2026-09-14T12:00:00Z")
+        plan = self._plan()
+        plan_end = plan["end_date"]
+        assert isinstance(plan_end, pd.Timestamp)
+        state: dict[str, object] = {
+            "training_plan_zoom_prev": "Sample",
+            "training_plan_zoom_grain": "Week",
+        }
+        sync_training_plan_zoom_window(
+            state,
+            selected="Sample",
+            grain="Month",
+            plans=[plan],
+            as_of=as_of,
+            max_end=plan_end,
+        )
+        expected = period_window_for_plan(
+            "Month", plan, as_of=as_of, max_end=plan_end
+        )
+        assert expected is not None
+        self.assertEqual(
+            state["training_period_start_Month"], expected.start.date()
+        )
+        self.assertEqual(state["training_period_end_Month"], expected.end.date())
+        self.assertEqual(state["training_plan_zoom_grain"], "Month")
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from charts import (
     pace_hr_title,
 )
 from data import (
+    PLAN_ZOOM_NONE,
     PeriodGrain,
     PeriodWindow,
     clamp_period_window,
@@ -34,6 +35,7 @@ from data import (
     period_window_limits,
     plan_focus_session_date,
     plan_week_index_for_date,
+    sync_training_plan_zoom_window,
 )
 from race_data import (
     easy_hard_ratio_from_pct,
@@ -1616,11 +1618,96 @@ def render_metrics_section_nav() -> None:
     )
 
 
+def render_training_plan_zoom_select(
+    plans: Sequence[Mapping[str, object]],
+    grain: PeriodGrain,
+    *,
+    as_of: pd.Timestamp,
+    page_key: str = "training",
+    max_end: pd.Timestamp | None = None,
+) -> str:
+    """Render Training Controls **Zoom to plan** and sync Start/End keys.
+
+    Options are ``None`` (default) plus each loaded plan name. Selecting a
+    plan writes grain-aligned Start/End from that plan's dates; selecting
+    ``None`` again restores ``default_period_bounds``. Must run **before**
+    ``render_period_range_inputs`` so session keys update prior to widgets.
+
+    Parameters
+    ----------
+    plans :
+        Output of ``load_training_plans``.
+    grain : PeriodGrain
+        Current Show By grain.
+    as_of : pandas.Timestamp
+        Reference end for defaults and clamping.
+    page_key : str
+        Page namespace (default ``"training"``).
+    max_end : pandas.Timestamp, optional
+        Later selectable End (latest plan session).
+
+    Returns
+    -------
+    str
+        Selected option (``None`` or a plan name).
+    """
+    import streamlit as st
+    import pandas as pd
+
+    as_of_ts = pd.Timestamp(as_of)
+    if as_of_ts.tzinfo is None:
+        as_of_ts = as_of_ts.tz_localize("UTC")
+    max_end_ts = None
+    if max_end is not None:
+        max_end_ts = pd.Timestamp(max_end)
+        if max_end_ts.tzinfo is None:
+            max_end_ts = max_end_ts.tz_localize("UTC")
+
+    names = []
+    for plan in plans:
+        name = str(plan.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    options = [PLAN_ZOOM_NONE, *names]
+    zoom_key = f"{page_key}_plan_zoom"
+    if zoom_key not in st.session_state:
+        st.session_state[zoom_key] = PLAN_ZOOM_NONE
+    # Drop a stale selection if the plan file disappeared.
+    if st.session_state[zoom_key] not in options:
+        st.session_state[zoom_key] = PLAN_ZOOM_NONE
+
+    st.markdown(
+        '<div class="controls-filter-label">Zoom to plan</div>',
+        unsafe_allow_html=True,
+    )
+    selected = st.selectbox(
+        "Zoom to plan",
+        options=options,
+        key=zoom_key,
+        label_visibility="collapsed",
+        help=(
+            "Set Start/End to a training plan's dates (aligned to Show By). "
+            "None keeps or restores the default period window."
+        ),
+    )
+    sync_training_plan_zoom_window(
+        st.session_state,
+        selected=str(selected),
+        grain=grain,
+        plans=plans,
+        as_of=as_of_ts,
+        page_key=page_key,
+        max_end=max_end_ts,
+    )
+    return str(selected)
+
+
 def render_period_range_inputs(
     grain: PeriodGrain,
     *,
     as_of: pd.Timestamp,
     page_key: str,
+    max_end: pd.Timestamp | None = None,
 ) -> PeriodWindow:
     """Render start/end controls for the Show By window.
 
@@ -1639,6 +1726,9 @@ def render_period_range_inputs(
         Reference end date (typically latest activity).
     page_key : str
         Page namespace such as ``"training"`` or ``"fitness"``.
+    max_end : pandas.Timestamp, optional
+        When later than ``as_of``, extends the selectable End (e.g. last
+        training-plan session). Defaults still end at ``as_of``.
 
     Returns
     -------
@@ -1651,8 +1741,13 @@ def render_period_range_inputs(
     as_of_ts = pd.Timestamp(as_of)
     if as_of_ts.tzinfo is None:
         as_of_ts = as_of_ts.tz_localize("UTC")
+    max_end_ts = None
+    if max_end is not None:
+        max_end_ts = pd.Timestamp(max_end)
+        if max_end_ts.tzinfo is None:
+            max_end_ts = max_end_ts.tz_localize("UTC")
     defaults = default_period_bounds(grain, as_of_ts)
-    limits = period_window_limits(grain, as_of_ts)
+    limits = period_window_limits(grain, as_of_ts, max_end=max_end_ts)
 
     start_key = f"{page_key}_period_start_{grain}"
     end_key = f"{page_key}_period_end_{grain}"
@@ -1752,7 +1847,9 @@ def render_period_range_inputs(
         raw_start = pd.Timestamp(range_start, tz="UTC")
         raw_end = pd.Timestamp(range_end, tz="UTC")
 
-    return clamp_period_window(grain, raw_start, raw_end, as_of=as_of_ts)
+    return clamp_period_window(
+        grain, raw_start, raw_end, as_of=as_of_ts, max_end=max_end_ts
+    )
 
 
 def render_sidebar_section_nav(grain: str) -> None:

@@ -2649,7 +2649,7 @@ GLOBAL_CSS = f"""
     margin-bottom: calc(var(--layout-gap) * 1.5) !important;
   }}
   /* Training: plans sit under the title — keep that gap tight; section break
-     moves to plans → Controls (.st-key-training_plans margin-bottom). */
+     moves to Training plans → Controls. */
   [data-testid="stElementContainer"]:has(.panel-summary):has(
     + [data-testid="stElementContainer"]:has(#training-plans)
   ) {{
@@ -3356,8 +3356,8 @@ GLOBAL_CSS = f"""
   }}
 
   /* Training plans: collapsed section near top of Training page.
-     Top: tight under title (panel-summary override above). Bottom: full
-     section gap before Controls (same token as other page section breaks). */
+     Top: tight under title (panel-summary override above). Bottom: gap
+     before Controls. */
   .st-key-training_plans {{
     margin-top: 0 !important;
     margin-bottom: calc(var(--layout-gap) * 1.5) !important;

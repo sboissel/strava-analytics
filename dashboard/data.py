@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 from pathlib import Path
 from typing import Literal, NamedTuple
 
@@ -664,7 +664,10 @@ def default_period_bounds(
 
 
 def period_window_limits(
-    grain: PeriodGrain, as_of: pd.Timestamp
+    grain: PeriodGrain,
+    as_of: pd.Timestamp,
+    *,
+    max_end: pd.Timestamp | None = None,
 ) -> PeriodWindow:
     """Return the selectable min start and max end for period range controls.
 
@@ -673,15 +676,23 @@ def period_window_limits(
     grain : PeriodGrain
         Calendar aggregation grain.
     as_of : pandas.Timestamp
-        Reference end date (typically latest activity).
+        Reference end date (typically latest activity). Min-start lookback
+        and the baseline max end use this date.
+    max_end : pandas.Timestamp, optional
+        When later than ``as_of``, extends the selectable max end (e.g. last
+        training-plan session). Does not change the default window or the
+        min-start lookback.
 
     Returns
     -------
     PeriodWindow
-        ``start`` is the earliest allowed period; ``end`` is the period
-        containing ``as_of``.
+        ``start`` is the earliest allowed period from ``as_of`` lookback;
+        ``end`` is the period containing ``max(as_of, max_end)``.
     """
-    end = align_to_period_start(grain, as_of)
+    end_ref = normalize_utc(as_of)
+    if max_end is not None:
+        end_ref = max(end_ref, normalize_utc(max_end))
+    end = align_to_period_start(grain, end_ref)
     n = int(PERIOD_COUNT_MAX.get(grain, 200))
     index = generate_period_index(grain, as_of, n)
     start = period_key_to_timestamp(str(index["period_key"].iloc[0]), grain)
@@ -694,11 +705,13 @@ def clamp_period_window(
     end: pd.Timestamp,
     *,
     as_of: pd.Timestamp,
+    max_end: pd.Timestamp | None = None,
 ) -> PeriodWindow:
     """Align, order, and clamp a start/end pair to selectable bounds.
 
     Ensures ``start <= end`` and at least one period. Values outside the
-    ``PERIOD_COUNT_MAX`` lookback from ``as_of`` are clamped.
+    ``PERIOD_COUNT_MAX`` lookback from ``as_of`` (or past ``max_end`` when
+    provided) are clamped.
 
     Parameters
     ----------
@@ -709,14 +722,16 @@ def clamp_period_window(
     end : pandas.Timestamp
         Requested window end.
     as_of : pandas.Timestamp
-        Reference used for max end and min start limits.
+        Reference used for min start limits and baseline max end.
+    max_end : pandas.Timestamp, optional
+        Optional later selectable max end (see ``period_window_limits``).
 
     Returns
     -------
     PeriodWindow
         Valid inclusive aligned window.
     """
-    limits = period_window_limits(grain, as_of)
+    limits = period_window_limits(grain, as_of, max_end=max_end)
     left = align_to_period_start(grain, start)
     right = align_to_period_start(grain, end)
     if left > right:
@@ -728,6 +743,128 @@ def clamp_period_window(
     if left > right:
         left = right
     return PeriodWindow(start=left, end=right)
+
+
+# Training Controls: Zoom to plan selectbox default (no auto-apply on load).
+PLAN_ZOOM_NONE = "None"
+
+
+def period_window_widget_values(
+    grain: PeriodGrain, window: PeriodWindow
+) -> tuple[object, object]:
+    """Return Start/End values for period-range widget session keys.
+
+    Year grain uses calendar year integers; Day/Week/Month use ``date`` objects
+    matching ``render_period_range_inputs``.
+    """
+    if grain == "Year":
+        return int(window.start.year), int(window.end.year)
+    return window.start.date(), window.end.date()
+
+
+def period_window_for_plan(
+    grain: PeriodGrain,
+    plan: Mapping[str, object],
+    *,
+    as_of: pd.Timestamp,
+    max_end: pd.Timestamp | None = None,
+) -> PeriodWindow | None:
+    """Return a grain-aligned Start/End window covering a training plan.
+
+    Uses the plan's ``start_date`` / ``end_date`` (from parse helpers). Dates
+    are aligned to the Show By grain (e.g. Week → Monday) and clamped with
+    ``clamp_period_window`` so End may extend through ``max_end`` (latest plan
+    session) when that is later than ``as_of``.
+
+    Parameters
+    ----------
+    grain : PeriodGrain
+        Selected Show By grain.
+    plan : mapping
+        Parsed plan with ``start_date`` / ``end_date``.
+    as_of : pandas.Timestamp
+        Reference for selectable min start / baseline max end.
+    max_end : pandas.Timestamp, optional
+        Optional later selectable max end (same as period range controls).
+
+    Returns
+    -------
+    PeriodWindow or None
+        Inclusive aligned window, or ``None`` when either plan date is missing.
+    """
+    start_raw = plan.get("start_date")
+    end_raw = plan.get("end_date")
+    if start_raw is None or end_raw is None:
+        return None
+    return clamp_period_window(
+        grain,
+        normalize_utc(pd.Timestamp(start_raw)),  # type: ignore[arg-type]
+        normalize_utc(pd.Timestamp(end_raw)),  # type: ignore[arg-type]
+        as_of=as_of,
+        max_end=max_end,
+    )
+
+
+def sync_training_plan_zoom_window(
+    session_state: MutableMapping[str, object],
+    *,
+    selected: str,
+    grain: PeriodGrain,
+    plans: Sequence[Mapping[str, object]],
+    as_of: pd.Timestamp,
+    page_key: str = "training",
+    max_end: pd.Timestamp | None = None,
+    none_label: str = PLAN_ZOOM_NONE,
+) -> None:
+    """Write period Start/End session keys when Training plan zoom changes.
+
+    UX (Training Controls **Zoom to plan**):
+
+    - Default ``None``: do **not** write dates on load — existing
+      ``default_period_bounds`` / widget defaults apply.
+    - Selecting a plan name: set Start/End from that plan's dates (aligned to
+      ``grain``, clamped with ``max_end``).
+    - Selecting ``None`` again after a plan: restore the page's original
+      default window for the current grain (not the previous plan).
+    - Changing Show By while a plan remains selected: re-apply that plan for
+      the new grain. Changing grain while ``None`` leaves per-grain dates alone.
+    """
+    prev_key = f"{page_key}_plan_zoom_prev"
+    grain_key = f"{page_key}_plan_zoom_grain"
+    prev = str(session_state.get(prev_key, none_label))
+    prev_grain = session_state.get(grain_key)
+    if selected == prev and grain == prev_grain:
+        return
+
+    start_key = f"{page_key}_period_start_{grain}"
+    end_key = f"{page_key}_period_end_{grain}"
+
+    if selected == none_label:
+        if prev != none_label:
+            defaults = default_period_bounds(grain, as_of)
+            start_val, end_val = period_window_widget_values(grain, defaults)
+            session_state[start_key] = start_val
+            session_state[end_key] = end_val
+    else:
+        plan = next(
+            (
+                p
+                for p in plans
+                if str(p.get("name") or "").strip() == selected
+            ),
+            None,
+        )
+        if plan is not None:
+            window = period_window_for_plan(
+                grain, plan, as_of=as_of, max_end=max_end
+            )
+            if window is not None:
+                start_val, end_val = period_window_widget_values(grain, window)
+                session_state[start_key] = start_val
+                session_state[end_key] = end_val
+
+    session_state[prev_key] = selected
+    session_state[grain_key] = grain
 
 
 def period_window_from_activities(
@@ -3389,6 +3526,7 @@ def parse_training_plan_file(path: Path) -> dict[str, object]:
             "name": name,
             "source": str(path),
             "start_date": None,
+            "end_date": None,
             "weeks": [],
         }
 
@@ -3440,12 +3578,57 @@ def parse_training_plan_file(path: Path) -> dict[str, object]:
     start_date = weeks[0]["week_start"] if weeks else (
         sessions[0]["date"] if sessions else None
     )
+    if sessions:
+        end_date: pd.Timestamp | None = pd.Timestamp(sessions[-1]["date"])  # type: ignore[arg-type]
+    elif weeks:
+        end_date = pd.Timestamp(weeks[-1]["week_start"]) + pd.Timedelta(days=6)  # type: ignore[arg-type]
+    else:
+        end_date = None
     return {
         "name": name,
         "source": str(path),
         "start_date": start_date,
+        "end_date": end_date,
         "weeks": weeks,
     }
+
+
+def training_plans_max_end(
+    plans: Sequence[Mapping[str, object]],
+) -> pd.Timestamp | None:
+    """Return the latest plan end date across loaded training plans.
+
+    Prefers each plan's ``end_date`` (last session day). When missing, falls
+    back to the Sunday of the last week (``week_start + 6 days``).
+
+    Parameters
+    ----------
+    plans :
+        Output of ``load_training_plans`` / parse helpers.
+
+    Returns
+    -------
+    pandas.Timestamp or None
+        UTC-normalized max end, or ``None`` when no plan has dated weeks.
+    """
+    ends: list[pd.Timestamp] = []
+    for plan in plans:
+        end_raw = plan.get("end_date")
+        if end_raw is not None:
+            ends.append(normalize_utc(pd.Timestamp(end_raw)))  # type: ignore[arg-type]
+            continue
+        weeks = list(plan.get("weeks") or [])
+        if not weeks:
+            continue
+        last_start = weeks[-1].get("week_start")
+        if last_start is None:
+            continue
+        ends.append(
+            normalize_utc(pd.Timestamp(last_start)) + pd.Timedelta(days=6)  # type: ignore[arg-type]
+        )
+    if not ends:
+        return None
+    return max(ends)
 
 
 def _plans_cache_token(plans_dir: Path) -> str:
@@ -3490,9 +3673,9 @@ def _load_training_plans_cached(
 def load_training_plans(plans_dir: Path = PLANS_DIR) -> list[dict[str, object]]:
     """Load training plans from ``data/plans/*.csv`` in chronological order.
 
-    Each plan dict has ``name``, ``source``, ``start_date``, and ``weeks``.
-    Week entries include totals and session rows (date, session, miles,
-    elevation, ``is_race``).
+    Each plan dict has ``name``, ``source``, ``start_date``, ``end_date``,
+    and ``weeks``. Week entries include totals and session rows (date,
+    session, miles, elevation, ``is_race``).
     """
     token = _plans_cache_token(plans_dir)
     return _load_training_plans_cached(token, str(plans_dir))
@@ -3520,4 +3703,355 @@ def plan_week_expander_label(week: Mapping[str, object]) -> str:
     except (TypeError, ValueError):
         return f"{label} · {miles_part}"
     return f"{label} · {miles_part} · {elev_val:,.0f} ft"
+
+
+PLAN_VS_ACTUAL_COLUMNS = (
+    "week_start",
+    "period_key",
+    "period_label",
+    "period_tooltip",
+    "plan_name",
+    "plan_week",
+    "plan_miles",
+    "plan_elevation_ft",
+    "actual_miles",
+    "actual_elevation_ft",
+    "run_count",
+    "in_progress",
+)
+
+
+def select_plan_for_charts(
+    plans: Sequence[Mapping[str, object]],
+    today: pd.Timestamp | None = None,
+) -> tuple[int | None, Mapping[str, object] | None]:
+    """Pick the plan index/dict to chart by default.
+
+    Prefers the same rule as ``default_expanded_plan_index`` (week containing
+    ``today``, else nearest upcoming). When every plan is fully in the past,
+    falls back to the chronologically latest plan that has weeks.
+    """
+    if not plans:
+        return None, None
+    idx = default_expanded_plan_index(plans, today)
+    if idx is not None:
+        return idx, plans[idx]
+    for i in range(len(plans) - 1, -1, -1):
+        if list(plans[i].get("weeks") or []):
+            return i, plans[i]
+    return None, None
+
+
+def plan_vs_actual_all_plans(
+    plans: Sequence[Mapping[str, object]],
+    runs: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Align week totals from every loaded plan with actual runs.
+
+    Concatenates ``plan_vs_actual_by_week`` for each plan in load order.
+    Overlapping ISO weeks stay as separate rows until
+    ``attach_plan_targets_to_periods`` collapses them (sum targets; join
+    names for hover). Current ``data/plans/`` blocks (November halves vs
+    Sierra Nevada Half) do not share ISO weeks.
+
+    Parameters
+    ----------
+    plans :
+        Output of ``load_training_plans`` / parse helpers.
+    runs : pandas.DataFrame
+        Run rows from ``load_runs`` (needs ``date``; optional distance/elev).
+    as_of : pandas.Timestamp, optional
+        Reference for the ``in_progress`` flag (defaults to now UTC).
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per plan week across all plans (may repeat ``period_key``).
+        Empty frame (correct columns) when no plan has weeks.
+    """
+    frames = [
+        plan_vs_actual_by_week(plan, runs, as_of=as_of) for plan in plans
+    ]
+    frames = [frame for frame in frames if frame is not None and not frame.empty]
+    if not frames:
+        return pd.DataFrame(columns=list(PLAN_VS_ACTUAL_COLUMNS))
+    return pd.concat(frames, ignore_index=True)
+
+
+def plan_vs_actual_by_week(
+    plan: Mapping[str, object],
+    runs: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Align plan week totals with actual run miles/elevation for those weeks.
+
+    Each plan week is an ISO Mon–Sun span (``week_start`` Monday). Plan miles
+    use existing week totals (range midpoints already applied). Actuals sum
+    ``distance_miles`` and ``elevation_gain_ft`` for runs dated in
+    ``[monday, monday + 7 days)``.
+
+    Parameters
+    ----------
+    plan :
+        One training plan dict from ``load_training_plans`` / parse helpers.
+    runs : pandas.DataFrame
+        Run rows from ``load_runs`` (needs ``date``; optional distance/elev).
+    as_of : pandas.Timestamp, optional
+        Reference for the ``in_progress`` flag (defaults to now UTC).
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per plan week with plan/actual miles and elevation columns.
+        Empty frame (correct columns) when the plan has no weeks.
+    """
+    weeks = list(plan.get("weeks") or [])
+    empty = pd.DataFrame(columns=list(PLAN_VS_ACTUAL_COLUMNS))
+    if not weeks:
+        return empty
+
+    ref = (
+        normalize_utc(pd.Timestamp(as_of))
+        if as_of is not None
+        else normalize_utc(pd.Timestamp.now(tz="UTC"))
+    )
+
+    if runs is None or runs.empty or "date" not in getattr(runs, "columns", []):
+        run_work = pd.DataFrame(
+            columns=["date", "distance_miles", "elevation_gain_ft"]
+        )
+    else:
+        run_work = runs.copy()
+        run_work["date"] = pd.to_datetime(run_work["date"], utc=True, errors="coerce")
+        run_work = run_work.dropna(subset=["date"])
+        if "distance_miles" not in run_work.columns:
+            run_work["distance_miles"] = 0.0
+        else:
+            run_work["distance_miles"] = pd.to_numeric(
+                run_work["distance_miles"], errors="coerce"
+            ).fillna(0.0)
+        if "elevation_gain_ft" not in run_work.columns:
+            run_work["elevation_gain_ft"] = 0.0
+        else:
+            run_work["elevation_gain_ft"] = pd.to_numeric(
+                run_work["elevation_gain_ft"], errors="coerce"
+            ).fillna(0.0)
+
+    plan_name = str(plan.get("name") or "").strip()
+    rows: list[dict[str, object]] = []
+    for plan_week, week in enumerate(weeks, start=1):
+        start_raw = week.get("week_start")
+        if start_raw is None:
+            continue
+        monday = normalize_utc(pd.Timestamp(start_raw))  # type: ignore[arg-type]
+        week_end = monday + pd.Timedelta(days=7)
+        iso = monday.isocalendar()
+        period_key = f"{int(iso.year)}-{int(iso.week):02d}"
+        period_label = str(_format_mdy_label(pd.Series([monday])).iloc[0])
+        period_tooltip = format_week_range_short(monday)
+
+        try:
+            plan_miles = float(week.get("total_miles") or 0.0)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            plan_miles = 0.0
+        plan_elev_raw = week.get("total_elevation_ft")
+        if plan_elev_raw is None:
+            plan_elev: float | None = None
+        else:
+            try:
+                plan_elev = float(plan_elev_raw)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                plan_elev = None
+
+        if run_work.empty:
+            actual_miles = 0.0
+            actual_elev = 0.0
+            run_count = 0
+        else:
+            mask = window_mask(run_work, monday, week_end)
+            matched = run_work.loc[mask]
+            actual_miles = float(matched["distance_miles"].sum()) if not matched.empty else 0.0
+            actual_elev = (
+                float(matched["elevation_gain_ft"].sum()) if not matched.empty else 0.0
+            )
+            run_count = int(len(matched))
+
+        rows.append(
+            {
+                "week_start": monday,
+                "period_key": period_key,
+                "period_label": period_label,
+                "period_tooltip": period_tooltip,
+                "plan_name": plan_name,
+                "plan_week": plan_week,
+                "plan_miles": plan_miles,
+                "plan_elevation_ft": plan_elev if plan_elev is not None else np.nan,
+                "actual_miles": actual_miles,
+                "actual_elevation_ft": actual_elev,
+                "run_count": run_count,
+                "in_progress": bool(monday <= ref < week_end),
+            }
+        )
+
+    if not rows:
+        return empty
+    return pd.DataFrame(rows, columns=list(PLAN_VS_ACTUAL_COLUMNS))
+
+
+def plan_vs_actual_has_overlap(comparison: pd.DataFrame) -> bool:
+    """Return True when any plan week contains at least one matched run."""
+    if comparison is None or comparison.empty:
+        return False
+    if "run_count" in comparison.columns:
+        return bool(pd.to_numeric(comparison["run_count"], errors="coerce").fillna(0).gt(0).any())
+    miles = pd.to_numeric(comparison.get("actual_miles"), errors="coerce").fillna(0.0)
+    elev = pd.to_numeric(comparison.get("actual_elevation_ft"), errors="coerce").fillna(0.0)
+    return bool((miles > 0).any() or (elev > 0).any())
+
+
+def plan_targets_overlap_periods(
+    comparison: pd.DataFrame,
+    period_df: pd.DataFrame,
+) -> bool:
+    """Return True when any plan week ``period_key`` appears in ``period_df``.
+
+    ``comparison`` may include weeks from one plan or every loaded plan
+    (``plan_vs_actual_all_plans``).
+    """
+    if comparison is None or comparison.empty or period_df is None or period_df.empty:
+        return False
+    if "period_key" not in comparison.columns or "period_key" not in period_df.columns:
+        return False
+    plan_keys = set(comparison["period_key"].astype(str))
+    period_keys = set(period_df["period_key"].astype(str))
+    return bool(plan_keys & period_keys)
+
+
+def _plan_target_identity_label(name: object, week: object) -> str:
+    """Build ``PlanName · Week N`` (or either part) for multi-plan merge hover."""
+    label = ""
+    if name is not None and not (isinstance(name, float) and pd.isna(name)):
+        label = str(name).strip()
+    week_num: int | None = None
+    if week is not None and not (isinstance(week, float) and pd.isna(week)):
+        try:
+            week_num = int(week)
+        except (TypeError, ValueError):
+            week_num = None
+    if label and week_num is not None:
+        return f"{label} · Week {week_num}"
+    if label:
+        return label
+    if week_num is not None:
+        return f"Week {week_num}"
+    return ""
+
+
+def _collapse_plan_targets_by_period(comparison: pd.DataFrame) -> pd.DataFrame:
+    """One attach row per ``period_key``.
+
+    Non-overlapping weeks (the common case across November halves vs Sierra)
+    keep a single ``plan_name`` / ``plan_week``. When the same ISO week appears
+    in more than one plan, sum ``plan_miles`` and finite ``plan_elevation_ft``,
+    and join identities into ``plan_name`` (``A · Week N / B · Week M``) with
+    ``plan_week`` cleared so hover shows the combined label.
+    """
+    cols = [
+        c
+        for c in (
+            "period_key",
+            "plan_miles",
+            "plan_elevation_ft",
+            "plan_name",
+            "plan_week",
+        )
+        if c in comparison.columns
+    ]
+    if not cols or "period_key" not in cols:
+        return comparison.iloc[0:0].copy()
+
+    rows: list[dict[str, object]] = []
+    for period_key, group in comparison[cols].groupby("period_key", sort=False):
+        if len(group) == 1:
+            row = group.iloc[0].to_dict()
+            rows.append(row)
+            continue
+
+        miles = pd.to_numeric(group["plan_miles"], errors="coerce")
+        elev = (
+            pd.to_numeric(group["plan_elevation_ft"], errors="coerce")
+            if "plan_elevation_ft" in group.columns
+            else pd.Series(dtype=float)
+        )
+        identities: list[str] = []
+        for _, part in group.iterrows():
+            identity = _plan_target_identity_label(
+                part.get("plan_name"), part.get("plan_week")
+            )
+            if identity and identity not in identities:
+                identities.append(identity)
+        elev_finite = elev.dropna()
+        rows.append(
+            {
+                "period_key": period_key,
+                "plan_miles": float(miles.fillna(0.0).sum()),
+                "plan_elevation_ft": (
+                    float(elev_finite.sum()) if not elev_finite.empty else np.nan
+                ),
+                "plan_name": " / ".join(identities) if identities else pd.NA,
+                "plan_week": np.nan,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def attach_plan_targets_to_periods(
+    period_df: pd.DataFrame,
+    comparison: pd.DataFrame,
+) -> pd.DataFrame:
+    """Left-join plan miles/elevation/name/week onto period rows by ``period_key``.
+
+    Weeks outside any plan keep ``NaN`` plan columns so charts can omit plan
+    bars there while still showing actuals for the full Controls window.
+    When ``comparison`` includes multiple plans, overlapping ISO weeks are
+    collapsed via ``_collapse_plan_targets_by_period`` (sum targets; join
+    names for hover).
+    """
+    out = period_df.copy()
+    for col in ("plan_miles", "plan_elevation_ft", "plan_name", "plan_week"):
+        if col in out.columns:
+            out = out.drop(columns=[col])
+    if comparison is None or comparison.empty or "period_key" not in out.columns:
+        out["plan_miles"] = np.nan
+        out["plan_elevation_ft"] = np.nan
+        out["plan_name"] = pd.NA
+        out["plan_week"] = np.nan
+        return out
+
+    payload = _collapse_plan_targets_by_period(comparison)
+    payload_cols = [
+        c
+        for c in (
+            "period_key",
+            "plan_miles",
+            "plan_elevation_ft",
+            "plan_name",
+            "plan_week",
+        )
+        if c in payload.columns
+    ]
+    payload = payload[payload_cols]
+    out = out.merge(payload, on="period_key", how="left")
+    if "plan_miles" not in out.columns:
+        out["plan_miles"] = np.nan
+    if "plan_elevation_ft" not in out.columns:
+        out["plan_elevation_ft"] = np.nan
+    if "plan_name" not in out.columns:
+        out["plan_name"] = pd.NA
+    if "plan_week" not in out.columns:
+        out["plan_week"] = np.nan
+    return out
 

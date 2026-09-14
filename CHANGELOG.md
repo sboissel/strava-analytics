@@ -12,8 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Dashboard**
 
 - **Training**: collapsed **Training plans** section at the top of the page (after title; before Controls/charts), listing `data/plans/*.csv` (plan name from file header, weeks nested and collapsible with indented session rows; race sessions use muted-gold text across the whole row; today or next session day highlighted; current/focus week expanded by default).
+- **Training**: Controls **Zoom to plan** (`None` default + each loaded plan name). Selecting a plan sets Start/End to that plan’s dates (aligned to the current Show By grain). Selecting `None` again restores the page’s original default window. Plan-vs-actual mileage/elevation still uses all plans’ targets for weeks in the window.
 
 ### Changed
+
+**Dashboard**
+
+- **Training**: weekly **Mileage** and **Elevation** charts show plan vs actual grouped bars when Show By is Week and the selected period overlaps **any** loaded training plan (all plans under `data/plans/`, not only the active/expanded one); otherwise they stay actual-only. Plan-bar hover includes plan name and week number (with the week date span and plan miles/elev). If the same ISO week appears in more than one plan, targets are summed and hover joins both plan identities.
+- **Training**: weekly **Mileage** actual bars use the teal ``MILEAGE_COLORSCALE`` heatmap by miles (same pattern as elevation by elev); plan bars stay a muted solid teal so the heatmap remains on actuals only.
+- **Training**: Start/End controls allow an End date through the latest training-plan session (not only latest activity), so plan-vs-actual can include future plan weeks.
 
 **Pipeline / data**
 
