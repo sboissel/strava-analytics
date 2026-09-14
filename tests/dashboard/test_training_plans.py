@@ -48,7 +48,12 @@ class PlanRaceAndMilesTests(unittest.TestCase):
         self.assertTrue(is_plan_race_session("Race day"))
         self.assertTrue(is_plan_race_session("RACE DAY"))
         self.assertTrue(is_plan_race_session("12.5K trail race"))
+        self.assertTrue(is_plan_race_session("Malaga Half"))
+        self.assertTrue(is_plan_race_session("Cordoba Half"))
+        self.assertTrue(is_plan_race_session("Sierra Nevada Half"))
+        self.assertTrue(is_plan_race_session("City Marathon"))
         self.assertFalse(is_plan_race_session("Easy trail run"))
+        self.assertFalse(is_plan_race_session("Long run"))
         self.assertFalse(is_plan_race_session(""))
         self.assertFalse(is_plan_race_session(None))
 

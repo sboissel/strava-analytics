@@ -44,6 +44,11 @@ _PLAN_COL_ALIASES: dict[str, str] = {
 _PLAN_MILES_RANGE_RE = re.compile(
     r"^(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)$"
 )
+# Race-like tokens in plan session labels (word-boundary; case-insensitive).
+_PLAN_RACE_TOKEN_RE = re.compile(
+    r"\b(?:race|half|marathon|5k|10k|5m)\b",
+    re.IGNORECASE,
+)
 
 PeriodGrain = Literal["Day", "Week", "Month", "Year"]
 
@@ -3032,13 +3037,13 @@ def parse_plan_header_name(raw: object | None, *, fallback: str = "") -> str:
 def is_plan_race_session(session: object) -> bool:
     """Return whether a plan session label marks a race.
 
-    Matches case-insensitive substrings such as ``Race day``, ``RACE DAY``,
-    or ``12.5K trail race``.
+    Matches case-insensitive tokens such as ``Race day``, ``12.5K trail race``,
+    ``Malaga Half``, or ``Sierra Nevada Half``.
     """
-    text = str(session or "").strip().lower()
+    text = str(session or "").strip()
     if not text:
         return False
-    return "race" in text
+    return _PLAN_RACE_TOKEN_RE.search(text) is not None
 
 
 def parse_plan_miles(value: object) -> tuple[float | None, str]:
