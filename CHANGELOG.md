@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Dashboard**
+
+- **Training**: Training plans expander opens by default; section title matches the RACES panel label style.
+- **Training**: **Show this week only** (default) / **Show full training plan** toggle — week-only omits plans with no current calendar week; full plan lists all weeks collapsed.
+- **Training**: in full-plan view, the current week keeps a cool summary wash while collapsed.
+- **Training**: Day column (weekday) on session rows; Shoes column; Session Notes hover on dashed underlines.
+- **Training**: future Shoes cells hover estimated cumulative mileage (gear actuals + planned miles on that shoe across loaded plans through the session date).
+- **Training**: prepare/limit wear cues tint shoe names orange/red from estimate (future) or actual-to-date (today/past).
+- **Metrics**: shoe gauges show a shaded prepare band (350–400 mi) and an end-of-arc limit tick; ⓘ tooltip documents the cues.
+
+### Changed
+
+**Dashboard**
+
+- **Training**: race session rows apply race text color to every cell (no gold background wash).
+
+**Pipeline / data**
+
+- Training plan CSVs use Shoe / Session Notes columns (`november_halves`, `sierra_half` updated).
+
 ## [1.7.0] — 2026-09-14
 
 ### Added
