@@ -1,71 +1,69 @@
 #November halves
-Date,Target Miles,Session,Target Elevation,Shoes
-2026-07-27,3,Easy trail run,
-2026-07-29,3.5,Hill repeats - 6x1min,
-2026-07-31,8,"Long run, trail",
-2026-08-03,3,Easy trail run,
-2026-08-05,3.5,"Easy run",
-2026-08-07,7.77,"12.5K trail race",
-2026-08-10,3.5,Easy trail run,
-2026-08-12,3.5,Hill repeats - 6x1min,
-2026-08-14,9,"Long run, trail",
-2026-08-17,2.5,"Easy test run",
-2026-08-19,3,"Hill repeats - 6x1min",
-2026-08-21,7,"Long run, trail",
-2026-08-24,3.5,Easy trail run,
-2026-08-26,3.5,Hill repeats - 6x1min,
-2026-08-27,2.5,"Easy, flat",
-2026-08-28,8,"Long run, trail",
-2026-08-31,4,Easy trail run,
-2026-09-02,3.8,Hill repeats - 6x1min,
-2026-09-03,3,"Easy, flat",
-2026-09-04,9,"Long run, trail",
-2026-09-07,3,Easy trail run,
-2026-09-09,3.3,"Hill repeats - 4x1min",
-2026-09-10,3,"Easy, flat",
-2026-09-11,8,"Long run, trail at elevation",
-2026-09-14,4,Easy trail run,Nike Pegasus Trail 5
-2026-09-16,3.8,"Hill repeats - 6x1min",Hoka Mach 7
-2026-09-17,3,"Easy, flat",
-2026-09-18,10,"Long run, trail",Nike Pegasus Trail 5
-2026-09-21,4.0,Easy run,Nike Pegasus Trail 5
-2026-09-23,4.0,Hill repeats - 6x1min,Hoka Mach 7
-2026-09-24,3.0,Easy flat run,
-2026-09-25,10,Long run,Nike Pegasus Trail 5
-2026-09-28,4.0,Easy run,Nike Pegasus Trail 5
-2026-09-30,4.0,Hill repeats - 6x1min,Hoka Mach 7
-2026-10-01,3.0,Easy flat run,
-2026-10-02,11,Long run,Nike Pegasus Trail 5
-2026-10-05,2.9,Easy run,Nike Pegasus Trail 5
-2026-10-07,2.9,Hill repeats - 6x1min,Hoka Mach 7
-2026-10-08,2.2,Easy flat run,
-2026-10-09,9,Long run,Nike Pegasus Trail 5
-2026-10-12,3.6,Easy run,
-2026-10-14,3.6,Hill repeats - 6x1min,Hoka Mach 7
-2026-10-15,2.8,Easy flat run,
-2026-10-16,12,Long run,Nike Pegasus Trail 5
-2026-10-19,3.6,Easy run,
-2026-10-21,3.6,Hill repeats - 6x1min,Hoka Mach 7
-2026-10-22,2.8,Easy flat run,
-2026-10-23,13,"Long run, flat terrain",
-2026-10-26,2.5,Easy run,
-2026-10-28,2.5,Hill repeats - 6x1min,Hoka Mach 7
-2026-10-29,2.0,Easy flat run,
-2026-10-30,7,Long run,Nike Pegasus Trail 5
-2026-11-02,1.3,Easy run,
-2026-11-04,1.3,Hill repeats - 6x1min,Hoka Mach 7
-2026-11-05,0.9,Easy flat run,
-2026-11-06,4.5,Long run,
-2026-11-08,13.1,Malaga Half,
-2026-11-09,3.6,Easy run,
-2026-11-11,3.6,Hill repeats - 6x1min,Hoka Mach 7
-2026-11-12,2.8,Easy flat run,
-2026-11-16,3.2,Easy run,
-2026-11-18,3.2,Hill repeats - 6x1min,Hoka Mach 7
-2026-11-19,2.6,Easy flat run,
-2026-11-20,9,Long run,
-2026-11-23,1.8,Easy run,
-2026-11-25,1.8,Hill repeats - 6x1min,Hoka Mach 7
-2026-11-26,1.4,Easy flat run,
-2026-11-27,3,Long run,
-2026-11-29,13.1,Cordoba Half,
+Date,Target Miles,Session,Shoes,,Target Elevation
+2026-07-27,3,Easy run,,Pegasus Trail 5
+2026-07-29,3.5,Hill repeats,,Pegasus 42
+2026-07-31,8,Long run,,Pegasus Trail 5
+2026-08-03,3,Easy run,,Pegasus Trail 5
+2026-08-05,3.5,Easy run,,Pegasus 42
+2026-08-07,7.77,12.5K race,,Pegasus Trail 5
+2026-08-10,3.5,Easy run,,Pegasus Trail 5
+2026-08-12,3.5,6x60sec hill reps,,Hoka Mach 7
+2026-08-14,9,Long run,,Pegasus Trail 5
+2026-08-17,2.5,Easy test run,,Pegasus 42
+2026-08-19,3,4x60sec hill reps,,Hoka Mach 7
+2026-08-21,7,Long run,,Pegasus Trail 5
+2026-08-24,3.5,Easy run,,Pegasus Trail 5
+2026-08-26,3.5,6x60sec hill reps,,Pegasus 42
+2026-08-27,2.5,Easy flat run,,Pegasus 42
+2026-08-28,8,Long run,,Pegasus Trail 5
+2026-08-31,4,Easy run,,Pegasus Trail 5
+2026-09-02,3.8,6x60sec hill reps,,Hoka Mach 7
+2026-09-03,3,Easy flat run,,Pegasus 42
+2026-09-04,9,Long run,,Pegasus Trail 5
+2026-09-07,3,Easy run,,Pegasus Trail 5
+2026-09-09,3.3,4x60sec hill reps,,Pegasus 42
+2026-09-10,3,Easy flat run,,Pegasus 42
+2026-09-11,8,Sierra Nevada run,,Pegasus Trail 5
+2026-09-14,4,Easy run,,Pegasus Trail 5
+2026-09-16,3.8,6x60sec hill reps,,Hoka Mach 7
+2026-09-17,3,Easy flat run,,Pegasus 42
+2026-09-18,10,Long run,,Pegasus Trail 5
+2026-09-21,4.0,Easy run,,Vaporfly
+2026-09-23,4.0,8x60sec hill reps,,Hoka Mach 7
+2026-09-24,3.0,10min tempo @ goal pace,,Vaporfly
+2026-09-25,10,Long run,,Pegasus Trail 5
+2026-09-28,4.0,Easy run,,Pegasus Trail 5
+2026-09-30,4.0,6x90sec hill reps,,Hoka Mach 7
+2026-10-01,3.0,15min tempo @ goal pace,,Pegasus 42
+2026-10-02,11,Long run,,Pegasus Trail 5
+2026-10-05,2.9,Easy run,,Pegasus Trail 5
+2026-10-07,2.9,4x60sec hill reps,,Hoka Mach 7
+2026-10-08,2.2,Easy only,,Pegasus 42
+2026-10-09,9,Long run,,Pegasus Trail 5
+2026-10-12,3.6,Easy run,,Pegasus Trail 5
+2026-10-14,3.6,8x90sec hill reps,,Hoka Mach 7
+2026-10-15,2.8,20min tempo @ goal pace,,Pegasus 42
+2026-10-16,12,Long run,,Pegasus Trail 5
+2026-10-19,3.6,Easy run,,Pegasus Trail 5
+2026-10-21,3.6,4x60sec hill reps,,Hoka Mach 7
+2026-10-22,2.8,Easy only,,Pegasus 42
+2026-10-23,13,Long run,,Pegasus 42
+2026-10-26,2.5,Easy run,,Pegasus Trail 5
+2026-10-28,2.5,4x60sec hill reps,,Hoka Mach 7
+2026-10-29,2.0,10min tempo @ goal pace,,Pegasus 42
+2026-10-30,7,Long run,,Pegasus Trail 5
+2026-11-02,1.3,Easy run,,Pegasus Trail 5
+2026-11-04,1.3,Easy + strides,,Hoka Mach 7
+2026-11-05,0.9,Easy + strides,,Pegasus 42
+2026-11-06,4.5,Long run ,,Pegasus Trail 5
+2026-11-09,3.6,Easy run,,Pegasus Trail 5
+2026-11-11,3.6,Recovery,,Hoka Mach 7
+2026-11-12,2.8,Easy only,,Pegasus 42
+2026-11-16,3.2,Easy run,,Pegasus Trail 5
+2026-11-18,3.2,6x60sec hill reps,,Hoka Mach 7
+2026-11-19,2.6,15-20min tempo @ goal pace,,Pegasus 42
+2026-11-20,9,Long run,,Pegasus Trail 5
+2026-11-23,1.8,Easy run,,Pegasus Trail 5
+2026-11-25,1.8,Easy + strides,,Hoka Mach 7
+2026-11-26,1.4,Easy + strides,,Pegasus 42
+2026-11-27,3,Long run,,Pegasus Trail 5
