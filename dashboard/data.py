@@ -80,6 +80,12 @@ _PLAN_COL_ALIASES: dict[str, str] = {
     "target elevation ft": "target_elevation_ft",
     "target_elevation_ft": "target_elevation_ft",
     "elevation": "target_elevation_ft",
+    "shoes": "shoes",
+    "shoe": "shoes",
+    "gear": "shoes",
+    "session notes": "notes",
+    "session_notes": "notes",
+    "notes": "notes",
 }
 _PLAN_MILES_RANGE_RE = re.compile(
     r"^(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)$"
@@ -378,6 +384,25 @@ def format_full_date(ts: pd.Timestamp) -> str:
     if stamp.tzinfo is not None:
         stamp = stamp.tz_convert("UTC")
     return f"{stamp.strftime('%B')} {stamp.day}, {stamp.year}"
+
+
+def format_weekday_short(ts: pd.Timestamp) -> str:
+    """Format a timestamp as a short English weekday name.
+
+    Parameters
+    ----------
+    ts : pandas.Timestamp
+        Timestamp to format.
+
+    Returns
+    -------
+    str
+        Weekday such as ``Mon`` or ``Tue`` (UTC calendar day).
+    """
+    stamp = pd.Timestamp(ts)
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("UTC")
+    return stamp.strftime("%a")
 
 
 def format_full_month(ts: pd.Timestamp) -> str:
@@ -3321,6 +3346,456 @@ def _format_plan_miles_label(miles: float) -> str:
     return label or "0"
 
 
+def parse_plan_shoes(row: Mapping[str, object]) -> str | None:
+    """Return planned shoe/gear label from a normalized plan CSV row.
+
+    Some plan files use a blank header column between ``Shoes`` and elevation
+    (legacy ``november_halves.csv``); shoe names there are merged when the
+    ``shoes`` cell is empty.
+
+    Parameters
+    ----------
+    row :
+        Mapping with optional ``shoes`` and/or a blank-key overflow column.
+
+    Returns
+    -------
+    str or None
+        Stripped shoe label, or ``None`` when blank.
+    """
+    raw = row.get("shoes")
+    if raw is not None and str(raw).strip():
+        return str(raw).strip()
+    for col in row:
+        if str(col).strip():
+            continue
+        extra = row.get(col)
+        if extra is not None and str(extra).strip():
+            return str(extra).strip()
+    return None
+
+
+def parse_plan_notes(row: Mapping[str, object]) -> str | None:
+    """Return non-empty Session Notes text from a normalized plan CSV row.
+
+    Collapses internal whitespace (including newlines) to single spaces so
+    hover tooltips stay readable on one flowing line.
+
+    Parameters
+    ----------
+    row :
+        Mapping with optional ``notes`` (Session Notes column).
+
+    Returns
+    -------
+    str or None
+        Normalized notes text, or ``None`` when empty/missing.
+    """
+    raw = row.get("notes")
+    if raw is None:
+        return None
+    text = re.sub(r"\s+", " ", str(raw).strip())
+    return text or None
+
+
+def normalize_shoe_label(name: object) -> str | None:
+    """Return a stripped shoe label, or ``None`` when blank / placeholder.
+
+    Treats empty strings, em dashes, and a lone ASCII hyphen (plan CSV
+    ``-`` for no shoes) as missing.
+
+    Parameters
+    ----------
+    name :
+        Raw shoe cell or gear name.
+
+    Returns
+    -------
+    str or None
+        Stripped label, or ``None`` when blank / placeholder.
+    """
+    if name is None:
+        return None
+    text = str(name).strip()
+    if not text or text in {"—", "-", "–"}:
+        return None
+    return text
+
+
+def shoes_labels_match(a: object, b: object) -> bool:
+    """Return True when two shoe labels refer to the same shoe.
+
+    Matching prefers exact equality after normalize + casefold. A brand-prefix
+    suffix match is allowed when the longer name ends with the shorter at a
+    word boundary (e.g. plan ``Pegasus Trail 5`` ↔ gear ``Nike Pegasus Trail
+    5``). Short suffixes (under 8 characters) are rejected so bare tokens
+    like ``5`` or ``Trail 5`` do not attach to unrelated shoes.
+
+    Parameters
+    ----------
+    a, b :
+        Shoe labels to compare (plan shorthand or full gear name).
+
+    Returns
+    -------
+    bool
+        ``True`` when both normalize and match under the rules above.
+    """
+    left = normalize_shoe_label(a)
+    right = normalize_shoe_label(b)
+    if left is None or right is None:
+        return False
+    ka = left.casefold()
+    kb = right.casefold()
+    if ka == kb:
+        return True
+    if len(ka) < len(kb):
+        longer, shorter = kb, ka
+    else:
+        longer, shorter = ka, kb
+    if len(shorter) < 8 or not longer.endswith(shorter):
+        return False
+    prefix = longer[: len(longer) - len(shorter)]
+    return bool(prefix) and prefix.endswith(" ")
+
+
+def _iter_plan_sessions(
+    plans: Sequence[Mapping[str, object]],
+) -> list[Mapping[str, object]]:
+    """Flatten week sessions from loaded training plans."""
+    sessions: list[Mapping[str, object]] = []
+    for plan in plans:
+        for week in plan.get("weeks") or []:
+            for session in week.get("sessions") or []:
+                if isinstance(session, Mapping):
+                    sessions.append(session)
+    return sessions
+
+
+def _distinct_plan_shoe_labels(
+    plans: Sequence[Mapping[str, object]],
+) -> list[str]:
+    """Return distinct non-blank shoe labels from ``plans`` (first-seen order)."""
+    labels: list[str] = []
+    seen: set[str] = set()
+    for session in _iter_plan_sessions(plans):
+        label = normalize_shoe_label(session.get("shoes"))
+        if label is None:
+            continue
+        key = label.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        labels.append(label)
+    return labels
+
+
+def actual_shoe_mileage(shoe_label: object, gear: pd.DataFrame | None) -> float:
+    """Return actual-to-date miles for ``shoe_label`` from a gear frame.
+
+    Uses ``shoes_labels_match`` against gear ``name`` values. Missing gear or
+    no match yields ``0.0`` (planned miles alone still form an estimate).
+
+    Parameters
+    ----------
+    shoe_label :
+        Plan or gear shoe name.
+    gear : pandas.DataFrame or None
+        Gear frame with ``name`` and ``mileage`` columns (e.g. ``load_gear``).
+
+    Returns
+    -------
+    float
+        Matched mileage, or ``0.0`` when unmatched / missing gear.
+    """
+    label = normalize_shoe_label(shoe_label)
+    if label is None or gear is None or getattr(gear, "empty", True):
+        return 0.0
+    if "name" not in gear.columns or "mileage" not in gear.columns:
+        return 0.0
+    for _, row in gear.iterrows():
+        if shoes_labels_match(label, row.get("name")):
+            try:
+                return float(row.get("mileage") or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def actual_shoe_mileages(
+    plans: Sequence[Mapping[str, object]],
+    gear: pd.DataFrame | None,
+) -> dict[str, float]:
+    """Map each distinct plan shoe label to Metrics-page actual mileage.
+
+    Parameters
+    ----------
+    plans :
+        Loaded training plans (sessions scanned for distinct shoe labels).
+    gear : pandas.DataFrame or None
+        Gear frame passed through to ``actual_shoe_mileage``.
+
+    Returns
+    -------
+    dict of str to float
+        Plan shoe label → actual-to-date miles (``0.0`` when unmatched).
+    """
+    return {
+        label: actual_shoe_mileage(label, gear)
+        for label in _distinct_plan_shoe_labels(plans)
+    }
+
+
+def future_planned_shoe_miles(
+    shoe_label: object,
+    plans: Sequence[Mapping[str, object]],
+    as_of: object,
+    *,
+    through_date: object | None = None,
+) -> float:
+    """Sum planned miles for ``shoe_label`` after ``as_of``, optionally capped.
+
+    Includes matching sessions with ``as_of < session_date``. When
+    ``through_date`` is set, only sessions with
+    ``as_of < session_date <= through_date`` are summed — the cumulative
+    planned miles as of a hovered session, not all remaining miles through
+    the end of the plan.
+
+    Sums across every plan in ``plans``. Callers should pass **all loaded
+    training plans** (they are consecutive blocks) so estimates keep
+    accumulating across plans when ``through_date`` caps the sum. Sessions
+    without numeric ``miles`` are skipped.
+
+    Parameters
+    ----------
+    shoe_label :
+        Shoe to match (plan shorthand or full gear name).
+    plans :
+        Training plans whose sessions contribute planned miles.
+    as_of :
+        Reference day; sessions on or before this day are excluded.
+    through_date : optional
+        Inclusive upper bound on session date. When omitted, all future
+        matching sessions in ``plans`` are summed.
+
+    Returns
+    -------
+    float
+        Sum of matching planned miles (``0.0`` when none).
+    """
+    label = normalize_shoe_label(shoe_label)
+    if label is None or not plans:
+        return 0.0
+    as_of_day = normalize_utc(pd.Timestamp(as_of))  # type: ignore[arg-type]
+    through_day = None
+    if through_date is not None:
+        through_day = normalize_utc(pd.Timestamp(through_date))  # type: ignore[arg-type]
+    total = 0.0
+    for session in _iter_plan_sessions(plans):
+        if not shoes_labels_match(label, session.get("shoes")):
+            continue
+        date_raw = session.get("date")
+        if date_raw is None:
+            continue
+        try:
+            session_day = normalize_utc(pd.Timestamp(date_raw))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        if session_day <= as_of_day:
+            continue
+        if through_day is not None and session_day > through_day:
+            continue
+        miles = session.get("miles")
+        if miles is None:
+            continue
+        try:
+            total += float(miles)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def estimated_shoe_mileage(
+    shoe_label: object,
+    plans: Sequence[Mapping[str, object]],
+    gear: pd.DataFrame | None,
+    as_of: object,
+    *,
+    through_date: object | None = None,
+) -> float | None:
+    """Estimate shoe mileage: actual to date + future planned miles.
+
+    ``actual`` comes from ``load_gear`` / gear DataFrame (``TRACKED_GEAR``
+    baseline + activity ``gear_id`` distance sums) — the same number as the
+    Metrics shoe gauges. Future planned miles are sessions with matching
+    shoes and ``date > as_of`` across the provided ``plans`` (pass all loaded
+    plans so consecutive blocks keep accumulating).
+
+    Pass ``through_date`` (hovered session date) so the estimate is
+    cumulative **as of that session**:
+    ``actual + Σ planned miles on that shoe where as_of < date ≤ through_date``.
+    Without ``through_date``, sums all remaining future miles in ``plans``.
+
+    Parameters
+    ----------
+    shoe_label :
+        Shoe to estimate.
+    plans :
+        Training plans for future planned miles (prefer all loaded plans).
+    gear : pandas.DataFrame or None
+        Gear frame for actual-to-date miles.
+    as_of :
+        Reference day separating past from future planned sessions.
+    through_date : optional
+        Cap future planned miles at this session date (inclusive).
+
+    Returns
+    -------
+    float or None
+        Estimated miles, or ``None`` when ``shoe_label`` is blank.
+    """
+    label = normalize_shoe_label(shoe_label)
+    if label is None:
+        return None
+    return actual_shoe_mileage(label, gear) + future_planned_shoe_miles(
+        label, plans, as_of, through_date=through_date
+    )
+
+
+def estimated_shoe_mileages(
+    plans: Sequence[Mapping[str, object]],
+    gear: pd.DataFrame | None,
+    as_of: object,
+    *,
+    through_date: object | None = None,
+) -> dict[str, float]:
+    """Map each distinct plan shoe label to estimated total mileage.
+
+    Keys are the stripped labels as they appear on sessions. Matching to gear
+    names and across plan shorthand uses ``shoes_labels_match``. Pass all
+    loaded plans so consecutive training blocks accumulate. Optional
+    ``through_date`` caps each estimate at that session date (see
+    ``estimated_shoe_mileage``).
+
+    Parameters
+    ----------
+    plans :
+        Training plans whose distinct shoe labels are estimated.
+    gear : pandas.DataFrame or None
+        Gear frame for actual-to-date miles.
+    as_of :
+        Reference day for future planned miles.
+    through_date : optional
+        Inclusive session-date cap shared by every label in the map.
+
+    Returns
+    -------
+    dict of str to float
+        Plan shoe label → estimated miles.
+    """
+    return {
+        label: float(
+            estimated_shoe_mileage(
+                label, plans, gear, as_of, through_date=through_date
+            )
+            or 0.0
+        )
+        for label in _distinct_plan_shoe_labels(plans)
+    }
+
+
+def lookup_shoe_miles(
+    shoe_label: object,
+    miles_by_label: Mapping[str, float] | None,
+) -> float | None:
+    """Return miles for ``shoe_label`` from a label map, with soft matching.
+
+    Tries exact key first, then ``shoes_labels_match`` against map keys.
+
+    Parameters
+    ----------
+    shoe_label :
+        Label to look up.
+    miles_by_label :
+        Map of shoe label → miles (estimates or actuals).
+
+    Returns
+    -------
+    float or None
+        Matched miles, or ``None`` when blank / unmatched.
+    """
+    label = normalize_shoe_label(shoe_label)
+    if label is None or not miles_by_label:
+        return None
+    if label in miles_by_label:
+        return float(miles_by_label[label])
+    for key, value in miles_by_label.items():
+        if shoes_labels_match(key, label):
+            return float(value)
+    return None
+
+
+def shoe_miles_for_wear_flag(
+    shoe_label: object,
+    *,
+    session_day: object | None,
+    today: object | None,
+    estimated_miles: float | None = None,
+    shoe_estimates: Mapping[str, float] | None = None,
+    shoe_actuals: Mapping[str, float] | None = None,
+) -> float | None:
+    """Miles used for plan-table wear banding.
+
+    Future sessions (``session_day > today``) prefer ``estimated_miles`` when
+    provided (cumulative as-of that session), else a legacy
+    ``shoe_estimates`` label map. Today and past sessions use actual-to-date
+    so shoes already in the prepare/limit bands still flag without a future
+    estimate tooltip.
+
+    Parameters
+    ----------
+    shoe_label :
+        Shoe on the session row.
+    session_day :
+        Session calendar day (UTC-normalized when present).
+    today :
+        Reference day separating future from today/past.
+    estimated_miles : float, optional
+        Preferred cumulative estimate for a future session.
+    shoe_estimates :
+        Legacy label → estimate map used when ``estimated_miles`` is unset.
+    shoe_actuals :
+        Label → actual-to-date map for today/past sessions.
+
+    Returns
+    -------
+    float or None
+        Miles to pass to ``shoe_wear_band``, or ``None`` when unavailable.
+    """
+    label = normalize_shoe_label(shoe_label)
+    if label is None:
+        return None
+    as_of = None
+    day = None
+    if today is not None:
+        try:
+            as_of = normalize_utc(pd.Timestamp(today))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            as_of = None
+    if session_day is not None:
+        try:
+            day = normalize_utc(pd.Timestamp(session_day))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            day = None
+    if day is not None and as_of is not None and day > as_of:
+        if estimated_miles is not None:
+            return float(estimated_miles)
+        estimate = lookup_shoe_miles(label, shoe_estimates)
+        if estimate is not None:
+            return estimate
+    return lookup_shoe_miles(label, shoe_actuals)
+
+
 def parse_plan_elevation(value: object) -> float | None:
     """Parse optional plan elevation (feet); empty cells become ``None``.
 
@@ -3453,9 +3928,10 @@ def plan_focus_session_date(
     """Return the calendar day to highlight in a plan table.
 
     Prefers a session on ``today``. When none exist, returns the nearest
-    future session day (preferring remaining sessions in the current plan
-    week when that week has any, otherwise the soonest across the plan).
-    Returns ``None`` when every session is in the past or the plan is empty.
+    future session day only while ``today`` falls inside a plan week
+    (preferring remaining sessions in that week, otherwise the soonest
+    across the plan). Returns ``None`` when ``today`` is outside every plan
+    week, every session is in the past, or the plan is empty.
 
     Parameters
     ----------
@@ -3467,7 +3943,8 @@ def plan_focus_session_date(
     Returns
     -------
     pandas.Timestamp or None
-        UTC midnight focus date, or ``None`` when nothing remains to highlight.
+        UTC midnight focus date, or ``None`` when ``today`` is outside the
+        plan's weeks or nothing remains to highlight.
     """
     if not weeks:
         return None
@@ -3480,11 +3957,16 @@ def plan_focus_session_date(
     if any(day == as_of for _, day in dated):
         return as_of
 
+    # Only highlight a "next" session while ``as_of`` falls inside a plan week.
+    # Before the plan starts (or in a gap between weeks), do not treat week 1's
+    # first session as the focus day — that reads as a false "current week".
     current_idx = current_plan_week_index(weeks, as_of)
-    if current_idx is not None:
-        in_week = [day for week_i, day in dated if week_i == current_idx and day > as_of]
-        if in_week:
-            return min(in_week)
+    if current_idx is None:
+        return None
+
+    in_week = [day for week_i, day in dated if week_i == current_idx and day > as_of]
+    if in_week:
+        return min(in_week)
 
     future = [day for _, day in dated if day > as_of]
     if future:
@@ -3647,6 +4129,9 @@ def _read_plan_dataframe(path: Path, skiprows: int) -> pd.DataFrame:
     ``Long run, flat terrain``). Those would otherwise fail pandas
     tokenization; extra middle fields are rejoined into Session and the
     last field is treated as elevation.
+
+    Duplicate header rows (a second ``Date,...`` line) are skipped; when a
+    later header is wider (e.g. adds Session Notes), that wider header wins.
     """
     import csv
 
@@ -3663,6 +4148,12 @@ def _read_plan_dataframe(path: Path, skiprows: int) -> pd.DataFrame:
         rows: list[list[str]] = []
         for row in reader:
             if not row or all(not str(cell).strip() for cell in row):
+                continue
+            # Skip / upgrade duplicate header lines left in edited plan CSVs.
+            if str(row[0]).strip().lower() == "date":
+                if len(row) > len(header):
+                    header = list(row)
+                    expected = max(len(header), 4)
                 continue
             if len(row) > expected:
                 # date, miles, session…, elevation
@@ -3729,6 +4220,10 @@ def parse_training_plan_file(path: Path) -> dict[str, object]:
         frame["target_miles"] = None
     if "target_elevation_ft" not in frame.columns:
         frame["target_elevation_ft"] = None
+    if "shoes" not in frame.columns:
+        frame["shoes"] = None
+    if "notes" not in frame.columns:
+        frame["notes"] = None
 
     frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
     frame = frame.dropna(subset=["date"]).sort_values("date", kind="mergesort")
@@ -3738,6 +4233,8 @@ def parse_training_plan_file(path: Path) -> dict[str, object]:
         miles_val, miles_label = parse_plan_miles(row.get("target_miles"))
         session_name = str(row.get("session") or "").strip()
         elev = parse_plan_elevation(row.get("target_elevation_ft"))
+        shoes = parse_plan_shoes(row)
+        notes = parse_plan_notes(row)
         sessions.append(
             {
                 "date": normalize_utc(pd.Timestamp(row["date"])),
@@ -3745,6 +4242,8 @@ def parse_training_plan_file(path: Path) -> dict[str, object]:
                 "miles": miles_val,
                 "miles_label": miles_label,
                 "elevation_ft": elev,
+                "shoes": shoes,
+                "notes": notes,
                 "is_race": is_plan_race_session(session_name),
             }
         )

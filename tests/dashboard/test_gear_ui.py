@@ -9,9 +9,11 @@ import pandas as pd
 from dashboard.data import load_gear
 from dashboard.theme import (
     SHOE_MILEAGE_GOAL,
+    SHOE_WEAR_PREPARE_MILES,
     TRAFFIC_GREEN,
     TRAFFIC_ORANGE,
     TRAFFIC_RED,
+    shoe_wear_band,
     shoe_wear_color,
 )
 from dashboard.ui import shoe_kpi_cards_html, shoe_kpi_tooltip
@@ -80,6 +82,10 @@ class ShoeWearColorTests(unittest.TestCase):
         self.assertEqual(shoe_wear_color(400, SHOE_MILEAGE_GOAL), TRAFFIC_RED)
         self.assertEqual(shoe_wear_color(450, SHOE_MILEAGE_GOAL), TRAFFIC_RED)
 
+    def test_prepare_and_limit_bands(self):
+        self.assertEqual(shoe_wear_band(SHOE_WEAR_PREPARE_MILES), "prepare")
+        self.assertEqual(shoe_wear_band(SHOE_MILEAGE_GOAL), "limit")
+
 
 class ShoeKpiTooltipTests(unittest.TestCase):
     """Shoes ⓘ copy explains miles run in the shoes."""
@@ -90,6 +96,18 @@ class ShoeKpiTooltipTests(unittest.TestCase):
         self.assertNotIn("Baseline", tip)
         self.assertNotIn("gear ID", tip)
         self.assertIn("400", tip)
+        self.assertIn("350", tip)
+        self.assertIn("Wear cues", tip)
+        self.assertIn("prepare to switch", tip)
+        self.assertIn("Shaded prepare band on gauge", tip)
+        self.assertIn("End tick at 400 mi", tip)
+        # Wear cues: plain text only (no orange/red band dots).
+        cues = tip[tip.index("Wear cues") : tip.index("Wear Bands")]
+        self.assertNotIn("band-dot", cues)
+        # Wear Bands still use colored dots as a legend.
+        self.assertIn("band-dot", tip[tip.index("Wear Bands") :])
+        self.assertNotIn("Gauge ticks", tip)
+        self.assertNotIn("Dot beside miles", tip)
 
 
 class ShoeKpiCardsHtmlTests(unittest.TestCase):
@@ -123,12 +141,51 @@ class ShoeKpiCardsHtmlTests(unittest.TestCase):
         self.assertIn("of 400 mi", html)
         self.assertIn('id="shoe-mileage"', html)
         self.assertIn("shoe-gauge", html)
-        # End-of-arc tick marks the 400 mi goal (target_progress=1.0).
+        # One limit tick per shoe at goal (no prepare tick at 350).
         self.assertEqual(html.count("gauge-target-tick"), 2)
+        # Limit tick at progress=1.0 (theta=0): radial line at x=102→114, y=60.
+        self.assertIn(
+            'class="gauge-target-tick" x1="102.00" y1="60.00" x2="114.00" y2="60.00"',
+            html,
+        )
+        # Soft prepare wash on the track from 350/400 → 1.0 (not a 350 label).
+        self.assertEqual(html.count("gauge-prepare-band"), 2)
+        self.assertIn('stroke-dasharray="0 87.5 12.5 100"', html)
+        self.assertNotIn(">350<", html)
+        # No prepare/limit wear dots beside mileage.
+        self.assertNotIn("shoe-kpi-wear", html)
         # One section-level info control, not per shoe.
         self.assertEqual(html.count("kpi-info"), 1)
         # Highest mileage first.
         self.assertLess(html.index("Nike Pegasus Trail 5"), html.index("Nike ZoomX"))
+
+    def test_prepare_band_and_limit_tick_without_wear_dots(self):
+        gear = pd.DataFrame(
+            [
+                {
+                    "gear_id": "g1",
+                    "name": "Near limit",
+                    "type": "Daily",
+                    "mileage": 360.0,
+                    "status": "active",
+                },
+                {
+                    "gear_id": "g2",
+                    "name": "Over limit",
+                    "type": "Race",
+                    "mileage": 410.0,
+                    "status": "active",
+                },
+            ]
+        )
+        html = shoe_kpi_cards_html(gear)
+        # Wear dots beside mileage removed; gauge cues remain.
+        self.assertNotIn("shoe-kpi-wear", html)
+        self.assertNotIn("shoe-kpi-wear--prepare", html)
+        self.assertNotIn("shoe-kpi-wear--limit", html)
+        # End-of-arc limit tick + prepare band on each shoe gauge.
+        self.assertEqual(html.count("gauge-target-tick"), 2)
+        self.assertEqual(html.count("gauge-prepare-band"), 2)
 
 
 if __name__ == "__main__":

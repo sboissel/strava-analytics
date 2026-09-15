@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import math
+import re
 from collections.abc import Mapping, Sequence
 
 from charts import (
@@ -26,15 +27,21 @@ from data import (
     PLAN_ZOOM_NONE,
     PeriodGrain,
     PeriodWindow,
+    actual_shoe_mileages,
     clamp_period_window,
     current_plan_week_index,
     default_period_bounds,
+    estimated_shoe_mileage,
     format_full_date,
+    format_weekday_short,
     format_week_range_short,
+    load_gear,
+    lookup_shoe_miles,
+    normalize_shoe_label,
     normalize_utc,
     period_window_limits,
     plan_focus_session_date,
-    plan_week_index_for_date,
+    shoe_miles_for_wear_flag,
     sync_training_plan_zoom_window,
 )
 from race_data import (
@@ -58,12 +65,14 @@ from theme import (
     MILES_GAUGE_MAX,
     MUTED,
     SHOE_MILEAGE_GOAL,
+    SHOE_WEAR_PREPARE_MILES,
     WEEKLY_MILES_GOAL,
     eh_color,
     EH_BAND_THRESHOLDS,
     longest_run_color,
     miles_color,
     miles_legend_labels,
+    shoe_wear_band,
     shoe_wear_color,
 )
 
@@ -92,6 +101,42 @@ def band_diamond(color_hex: str) -> str:
 def band_square(color_hex: str) -> str:
     """Return HTML for a small square swatch in race-strip tooltips."""
     return f'<span class="band-square" style="background:{color_hex}"></span>'
+
+
+def hero_html() -> str:
+    """Return the dashboard hero banner HTML (kicker + title only).
+
+    Returns
+    -------
+    str
+        HTML for the hero kicker and title. Package version lives in the
+        sidebar footer via :func:`sidebar_version_html`.
+    """
+    return (
+        '<div class="hero">'
+        '<div class="hero-kicker">Strava analytics</div>'
+        '<h1 class="hero-title">Runner’s Dashboard</h1>'
+        "</div>"
+    )
+
+
+def sidebar_version_html(*, version: str | None = None) -> str:
+    """Return muted package-version markup for the sidebar footer.
+
+    Parameters
+    ----------
+    version : str, optional
+        Version string to display. Defaults to ``strava_analytics.__version__``.
+
+    Returns
+    -------
+    str
+        HTML for a quiet ``vX.Y.Z`` label under the left nav.
+    """
+    from strava_analytics import __version__ as pkg_version
+
+    ver = pkg_version if version is None else version
+    return f'<div class="sidebar-version">v{html.escape(ver)}</div>'
 
 
 def race_weeks_legend_html() -> str:
@@ -658,19 +703,52 @@ def kpi_label_html(label: str, tooltip: str) -> str:
 
 
 def _gauge_svg(
-    progress: float, color: str, *, target_progress: float | None = None
+    progress: float,
+    color: str,
+    *,
+    target_progress: float | Sequence[float] | None = None,
+    prepare_progress: float | None = None,
 ) -> str:
     """Semicircle gauge filled to ``progress`` (0–1) using ``color``.
 
-    When ``target_progress`` is set (0–1), a short radial tick marks that
-    position on the arc (distinct from the progress fill).
+    When ``target_progress`` is set (a fraction 0–1, or a sequence of them),
+    short radial ticks mark those positions on the arc (distinct from the
+    progress fill). Shoe gauges pass the limit fraction; KPI gauges usually
+    pass a single target.
+
+    When ``prepare_progress`` is set, a soft warning wash shades the track
+    from that fraction to 1.0 (prepare-to-switch band), drawn under the
+    progress fill so only the unfilled portion of the band remains visible.
     """
     capped = max(0.0, min(float(progress), 1.0))
     filled = round(capped * 100, 1)
     cx, cy, r = 60.0, 60.0, 48.0
-    tick = ""
+    track = (
+        '<path d="M 12 60 A 48 48 0 0 1 108 60" fill="none" '
+        'stroke="rgba(21, 32, 40, 0.10)" stroke-width="10" stroke-linecap="round"/>'
+    )
+    prepare_band = ""
+    if prepare_progress is not None:
+        prep = max(0.0, min(float(prepare_progress), 1.0))
+        if prep < 1.0:
+            # pathLength=100: gap to prepare, then draw through the limit end.
+            gap = round(prep * 100, 1)
+            band = round((1.0 - prep) * 100, 1)
+            prepare_band = (
+                '<path class="gauge-prepare-band" '
+                'd="M 12 60 A 48 48 0 0 1 108 60" fill="none" '
+                'stroke-width="10" stroke-linecap="butt" '
+                f'pathLength="100" stroke-dasharray="0 {gap} {band} 100"/>'
+            )
+    ticks: list[float] = []
     if target_progress is not None:
-        t = max(0.0, min(float(target_progress), 1.0))
+        if isinstance(target_progress, (int, float)):
+            ticks = [float(target_progress)]
+        else:
+            ticks = [float(t) for t in target_progress]
+    tick_markup = []
+    for raw_t in ticks:
+        t = max(0.0, min(raw_t, 1.0))
         # Arc runs left→right (π→0) as progress goes 0→1.
         theta = math.pi * (1.0 - t)
         cos_t, sin_t = math.cos(theta), math.sin(theta)
@@ -678,14 +756,15 @@ def _gauge_svg(
         inner, outer = r - 6.0, r + 6.0
         x1, y1 = cx + inner * cos_t, cy - inner * sin_t
         x2, y2 = cx + outer * cos_t, cy - outer * sin_t
-        tick = (
+        tick_markup.append(
             f'<line class="gauge-target-tick" '
             f'x1="{x1:.2f}" y1="{y1:.2f}" x2="{x2:.2f}" y2="{y2:.2f}"/>'
         )
+    tick = "".join(tick_markup)
     return (
         '<svg viewBox="0 0 120 70" aria-hidden="true">'
-        '<path d="M 12 60 A 48 48 0 0 1 108 60" fill="none" '
-        'stroke="rgba(21, 32, 40, 0.10)" stroke-width="10" stroke-linecap="round"/>'
+        f"{track}"
+        f"{prepare_band}"
         '<path d="M 12 60 A 48 48 0 0 1 108 60" fill="none" '
         f'stroke="{html.escape(color)}" stroke-width="10" stroke-linecap="round" '
         f'pathLength="100" stroke-dasharray="{filled} 100"/>'
@@ -1357,14 +1436,41 @@ def hiking_badges_html(kpis: dict) -> str:
     )
 
 
-def shoe_kpi_tooltip(goal: float = SHOE_MILEAGE_GOAL) -> str:
-    """Return tooltip HTML for shoe mileage gauge cards."""
+def shoe_kpi_tooltip(
+    goal: float = SHOE_MILEAGE_GOAL,
+    *,
+    prepare_at: float = SHOE_WEAR_PREPARE_MILES,
+) -> str:
+    """Return tooltip HTML for shoe mileage gauge cards.
+
+    Wear cues describe the shaded prepare band and limit tick in plain text
+    (no band dots). The Wear Bands section keeps the traffic-light legend.
+
+    Parameters
+    ----------
+    goal : float, optional
+        Retirement mileage shown in Target / Wear cues. Defaults to
+        ``SHOE_MILEAGE_GOAL``.
+    prepare_at : float, optional
+        Lower bound of the prepare band. Defaults to
+        ``SHOE_WEAR_PREPARE_MILES``.
+
+    Returns
+    -------
+    str
+        HTML fragment for the Shoes panel ⓘ tooltip.
+    """
     return (
         "<strong>Definition</strong>"
         "Total miles run in these shoes."
         "<br><br>"
         "<strong>Target</strong>"
         f"Retire around {goal:.0f} mi."
+        "<br><br>"
+        "<strong>Wear cues</strong>"
+        f"Shaded prepare band on gauge from "
+        f"{prepare_at:.0f}–{goal:.0f} mi (prepare to switch)"
+        f"<br>End tick at {goal:.0f} mi (limit)"
         "<br><br>"
         "<strong>Wear Bands</strong>"
         f"{band_dot(TRAFFIC_GREEN)}&lt;50% of goal"
@@ -1375,8 +1481,18 @@ def shoe_kpi_tooltip(goal: float = SHOE_MILEAGE_GOAL) -> str:
     )
 
 
-def shoe_kpi_cards_html(gear, goal: float = SHOE_MILEAGE_GOAL) -> str:
+def shoe_kpi_cards_html(
+    gear,
+    goal: float = SHOE_MILEAGE_GOAL,
+    *,
+    prepare_at: float = SHOE_WEAR_PREPARE_MILES,
+) -> str:
     """Render shoe mileage gauge cards for the Metrics page.
+
+    Each gauge keeps an end-of-arc tick at ``goal`` (limit) and a shaded
+    prepare band on the track from ``prepare_at``→``goal``. Wear signaling
+    is on the gauge (prepare wash + limit tick), not secondary dots beside
+    the mileage value.
 
     Parameters
     ----------
@@ -1384,6 +1500,8 @@ def shoe_kpi_cards_html(gear, goal: float = SHOE_MILEAGE_GOAL) -> str:
         DataFrame with ``name``, ``type``, ``mileage``, and ``status`` columns.
     goal : float, optional
         Retirement mileage target. Defaults to ``SHOE_MILEAGE_GOAL``.
+    prepare_at : float, optional
+        Prepare-to-switch mileage. Defaults to ``SHOE_WEAR_PREPARE_MILES``.
 
     Returns
     -------
@@ -1396,7 +1514,9 @@ def shoe_kpi_cards_html(gear, goal: float = SHOE_MILEAGE_GOAL) -> str:
         '<span class="kpi-info" tabindex="0" role="button" '
         'aria-label="About Shoes">'
         '<span aria-hidden="true">ⓘ</span>'
-        f'<span class="kpi-tooltip" role="tooltip">{shoe_kpi_tooltip(goal)}</span>'
+        f'<span class="kpi-tooltip" role="tooltip">'
+        f"{shoe_kpi_tooltip(goal, prepare_at=prepare_at)}"
+        "</span>"
         "</span></div>"
     )
     if gear is None or getattr(gear, "empty", True):
@@ -1407,6 +1527,7 @@ def shoe_kpi_cards_html(gear, goal: float = SHOE_MILEAGE_GOAL) -> str:
             "</div>"
         )
 
+    prepare_frac = (prepare_at / goal) if goal > 0 else None
     ordered = gear.sort_values("mileage", ascending=False, kind="mergesort")
     cards = []
     for _, row in ordered.iterrows():
@@ -1421,7 +1542,7 @@ def shoe_kpi_cards_html(gear, goal: float = SHOE_MILEAGE_GOAL) -> str:
             f'<div class="shoe-kpi-card{retired_class}" style="--accent:{accent}">'
             f'<div class="shoe-kpi-name">{name}</div>'
             f'<div class="shoe-gauge">'
-            f"{_gauge_svg(progress, accent, target_progress=1.0)}"
+            f"{_gauge_svg(progress, accent, target_progress=1.0, prepare_progress=prepare_frac)}"
             f"</div>"
             f'<div class="shoe-kpi-value">{mileage:.0f}</div>'
             f'<div class="shoe-kpi-sub">of {goal:.0f} mi</div>'
@@ -1578,6 +1699,7 @@ def render_section_nav(
                         )
                     st.page_link(path, label=title, use_container_width=True)
         st.markdown(jumps, unsafe_allow_html=True)
+        st.markdown(sidebar_version_html(), unsafe_allow_html=True)
 
 
 def render_insights_section_nav(
@@ -1879,11 +2001,101 @@ def render_sidebar_section_nav(grain: str) -> None:
     )
 
 
+def _estimated_shoe_tooltip(
+    shoes_label: str,
+    *,
+    session_day: object | None,
+    today: object | None,
+    shoe_plans: Sequence[Mapping[str, object]] | None = None,
+    shoe_gear=None,
+    shoe_estimates: Mapping[str, float] | None = None,
+) -> str:
+    """Return hover tooltip copy for future sessions with known shoes.
+
+    Only sessions with ``date > today`` get a mileage estimate tooltip. Copy is
+    ``Est. ~XXX mi`` (rounded whole miles). When ``shoe_plans`` + ``shoe_gear``
+    are set, the estimate is cumulative as of ``session_day`` (actual + planned
+    miles on that shoe with ``today < date ≤ session_day``). A legacy
+    ``shoe_estimates`` map is used only when plans/gear are absent. Rendered via
+    a CSS ``.kpi-tooltip`` (not native ``title``), which Streamlit/Electron
+    surfaces reliably on hover.
+    """
+    label = normalize_shoe_label(shoes_label)
+    if label is None or session_day is None or today is None:
+        return ""
+    import pandas as pd
+
+    as_of = normalize_utc(pd.Timestamp(today))  # type: ignore[arg-type]
+    day = normalize_utc(pd.Timestamp(session_day))  # type: ignore[arg-type]
+    if day <= as_of:
+        return ""
+    estimate: float | None = None
+    if shoe_plans is not None and shoe_gear is not None:
+        estimate = estimated_shoe_mileage(
+            label, shoe_plans, shoe_gear, as_of, through_date=day
+        )
+    elif shoe_estimates:
+        estimate = lookup_shoe_miles(label, shoe_estimates)
+    if estimate is None:
+        return ""
+    return f"Est. ~{float(estimate):.0f} mi"
+
+
+def _shoe_wear_tooltip(band: str | None) -> str:
+    """Return brief wear-band hover copy (no threshold numbers in the table)."""
+    if band == "prepare":
+        return "Nearing retirement — prepare to switch"
+    if band == "limit":
+        return "At retirement mileage"
+    return ""
+
+
+def _combine_shoe_tooltips(*parts: str) -> str:
+    """Join non-empty tooltip fragments with a middle dot."""
+    cleaned = [p.strip() for p in parts if p and str(p).strip()]
+    return " · ".join(cleaned)
+
+
+def _plan_cell_tooltip_html(
+    visible_text: str,
+    tip: str,
+    *,
+    cell_class: str,
+    tip_modifier: str,
+    suffix_html: str = "",
+) -> str:
+    """Wrap cell text in a CSS ``.kpi-tooltip`` hover when ``tip`` is set."""
+    safe_text = html.escape(visible_text)
+    if not tip:
+        return f'<span class="{cell_class}">{safe_text}{suffix_html}</span>'
+    safe_tip = html.escape(tip)
+    return (
+        f'<span class="{cell_class} {tip_modifier}" tabindex="0" '
+        f'aria-label="{html.escape(visible_text, quote=True)}; '
+        f'{html.escape(tip, quote=True)}">'
+        f"{safe_text}{suffix_html}"
+        f'<span class="kpi-tooltip" role="tooltip">{safe_tip}</span>'
+        f"</span>"
+    )
+
+
+def _session_notes_tooltip(notes: object | None) -> str:
+    """Return trimmed session notes for hover, or empty when absent."""
+    if notes is None:
+        return ""
+    text = re.sub(r"\s+", " ", str(notes).strip())
+    return text
+
+
 def _training_plan_session_row_html(
     session: Mapping[str, object],
     *,
     focus_date: object | None = None,
     today: object | None = None,
+    shoe_plans: Sequence[Mapping[str, object]] | None = None,
+    shoe_gear=None,
+    shoe_estimates: Mapping[str, float] | None = None,
+    shoe_actuals: Mapping[str, float] | None = None,
 ) -> str:
     """Return one session row for the expandable plan table."""
     date_raw = session.get("date")
@@ -1894,10 +2106,13 @@ def _training_plan_session_row_html(
 
             session_day = normalize_utc(pd.Timestamp(date_raw))  # type: ignore[arg-type]
             date_label = format_full_date(session_day)
+            dow_label = format_weekday_short(session_day)
         else:
             date_label = "—"
+            dow_label = "—"
     except (TypeError, ValueError):
         date_label = "—"
+        dow_label = "—"
         session_day = None
     name = str(session.get("session") or "").strip() or "—"
     miles_label = str(session.get("miles_label") or "—").strip() or "—"
@@ -1927,11 +2142,75 @@ def _training_plan_session_row_html(
     badge = (
         '<span class="training-plan-race-badge">Race</span>' if is_race else ""
     )
+    shoes_raw = session.get("shoes")
+    if shoes_raw is None or not str(shoes_raw).strip():
+        shoes_label = "—"
+    else:
+        shoes_label = str(shoes_raw).strip()
+    est_tip = _estimated_shoe_tooltip(
+        shoes_label,
+        session_day=session_day,
+        today=today,
+        shoe_plans=shoe_plans,
+        shoe_gear=shoe_gear,
+        shoe_estimates=shoe_estimates,
+    )
+    session_estimate: float | None = None
+    if (
+        shoe_plans is not None
+        and shoe_gear is not None
+        and session_day is not None
+        and today is not None
+        and normalize_shoe_label(shoes_label) is not None
+    ):
+        import pandas as pd
+
+        as_of_day = normalize_utc(pd.Timestamp(today))  # type: ignore[arg-type]
+        day = normalize_utc(pd.Timestamp(session_day))  # type: ignore[arg-type]
+        if day > as_of_day:
+            session_estimate = estimated_shoe_mileage(
+                shoes_label,
+                shoe_plans,
+                shoe_gear,
+                as_of_day,
+                through_date=day,
+            )
+    wear_miles = shoe_miles_for_wear_flag(
+        shoes_label,
+        session_day=session_day,
+        today=today,
+        estimated_miles=session_estimate,
+        shoe_estimates=shoe_estimates,
+        shoe_actuals=shoe_actuals,
+    )
+    wear_band = shoe_wear_band(wear_miles)
+    wear_tip = _shoe_wear_tooltip(wear_band)
+    shoe_tip = _combine_shoe_tooltips(est_tip, wear_tip)
+    shoe_classes = "training-plan-shoes"
+    if wear_band == "prepare":
+        shoe_classes += " training-plan-shoes--prepare"
+    elif wear_band == "limit":
+        shoe_classes += " training-plan-shoes--limit"
+    shoes_cell = _plan_cell_tooltip_html(
+        shoes_label,
+        shoe_tip,
+        cell_class=shoe_classes,
+        tip_modifier="training-plan-cell--tip",
+    )
+    notes_tip = _session_notes_tooltip(session.get("notes"))
+    session_name_html = _plan_cell_tooltip_html(
+        name,
+        notes_tip,
+        cell_class="training-plan-session-name",
+        tip_modifier="training-plan-cell--tip",
+    )
     return (
         f'<div class="{row_class}" role="row">'
+        f'<span class="training-plan-dow">{html.escape(dow_label)}</span>'
         f'<span class="training-plan-date">{html.escape(date_label)}</span>'
         f'<span class="training-plan-session">'
-        f"{html.escape(name)}{badge}</span>"
+        f"{session_name_html}{badge}</span>"
+        f"{shoes_cell}"
         f'<span class="training-plan-num">{html.escape(miles_label)}</span>'
         f'<span class="training-plan-num">{html.escape(elev_label)}</span>'
         "</div>"
@@ -1979,29 +2258,82 @@ def _training_plan_week_summary_cells(week: Mapping[str, object]) -> tuple[str, 
     return label, miles_label, elev_label
 
 
+def _training_plan_visible_week_index(
+    weeks: Sequence[Mapping[str, object]],
+    as_of: object,
+    *,
+    expanded_week_index: int | None = None,
+) -> int | None:
+    """Pick which week to show when the table is in focus-week-only mode.
+
+    Uses the calendar week containing ``as_of`` only — never the nearest
+    upcoming week (e.g. Sierra week 1 months before the plan starts).
+    """
+    if expanded_week_index is not None:
+        return expanded_week_index
+    return current_plan_week_index(weeks, as_of)  # type: ignore[arg-type]
+
+
 def training_plan_table_html(
     weeks: Sequence[Mapping[str, object]],
     *,
     expanded_week_index: int | None = None,
+    show_all_weeks: bool = True,
     today: object | None = None,
+    shoe_plans: Sequence[Mapping[str, object]] | None = None,
+    shoe_gear=None,
+    shoe_estimates: Mapping[str, float] | None = None,
+    shoe_actuals: Mapping[str, float] | None = None,
 ) -> str:
     """Return one cohesive plan table with expandable week-total rows.
 
     Each week is a JS-free ``<details>`` block: the summary row shows the week
     range plus target miles/elevation; opening it reveals individual sessions.
+    When ``show_all_weeks`` is False, only the calendar week containing
+    ``today`` is emitted (``expanded_week_index`` or ``current_plan_week_index``);
+    other weeks are omitted. When today falls in no plan week, an empty-state
+    message is shown instead of falling back to week 1.
     Race sessions use muted-gold text for the whole row (bold session name +
     Race badge). The focus day — today when a session falls on it, otherwise
     the next upcoming session day — gets a cool row wash distinct from race
-    text styling.
+    text styling. In full-plan mode (``show_all_weeks=True``), the week
+    summary whose calendar week contains ``today`` gets the same cool wash
+    when that week is collapsed (``is-current-week``; CSS uses
+    ``:not([open])``). Focus-week-only mode omits that wash so the single
+    visible week is not double-highlighted. Future-dated Shoes cells may carry
+    a CSS ``.kpi-tooltip`` with estimated mileage as of that session when
+    ``shoe_plans`` + ``shoe_gear`` are provided (or a legacy ``shoe_estimates``
+    map). Shoes cells may also include prepare/limit wear copy in that
+    tooltip from estimated miles (future) or actual-to-date (today/past),
+    with orange/red text on the shoe name (no colored wear dots).
+    Session names with non-empty plan notes get the same CSS tooltip on any
+    date.
 
     Parameters
     ----------
     weeks :
         Plan week dicts from ``parse_training_plan_file`` / loaders.
     expanded_week_index : int, optional
-        Week row that starts open (``current_plan_week_index``).
+        Week row that starts open in focus-week mode, or when showing all
+        weeks if callers pass an index. Full-plan UI passes ``None`` so every
+        week stays collapsed until the user opens a ``<details>`` row.
+    show_all_weeks : bool, optional
+        When False, render only the focus week block (no other week rows).
     today :
         Reference day for focus highlighting (defaults to now UTC).
+    shoe_plans :
+        Optional sequence of **all loaded** training plans used with
+        ``shoe_gear`` for cumulative as-of-session estimates (plans are
+        consecutive; do not scope to the visible plan table alone).
+    shoe_gear :
+        Optional gear DataFrame (``load_gear``) for actual mileage.
+    shoe_estimates :
+        Optional legacy map of plan shoe label → estimated total mileage.
+        Prefer ``shoe_plans`` + ``shoe_gear`` so each future row shows
+        cumulative miles as of that session date.
+    shoe_actuals :
+        Optional map of plan shoe label → Metrics actual mileage. Used for
+        wear banding on today/past sessions.
 
     Returns
     -------
@@ -2021,16 +2353,58 @@ def training_plan_table_html(
         else pd.Timestamp.now(tz="UTC")
     )
     focus_date = plan_focus_session_date(weeks, as_of)
+    # Calendar week containing today — not merely the visible focus-mode week.
+    current_week_idx = current_plan_week_index(weeks, as_of)
+
+    if show_all_weeks:
+        indexed_weeks: list[tuple[int, Mapping[str, object]]] = [
+            (idx, week) for idx, week in enumerate(weeks)
+        ]
+        open_week_index = expanded_week_index
+    else:
+        visible_idx = _training_plan_visible_week_index(
+            weeks, as_of, expanded_week_index=expanded_week_index
+        )
+        if visible_idx is None:
+            indexed_weeks = []
+            open_week_index = None
+        else:
+            indexed_weeks = [(visible_idx, weeks[visible_idx])]
+            open_week_index = 0
+
+    if not indexed_weeks and not show_all_weeks:
+        return (
+            '<div class="training-plan-table-wrap">'
+            '<div class="training-plan-table" role="table">'
+            '<div class="training-plan-head" role="row">'
+            "<span>Day</span>"
+            "<span>Date</span>"
+            "<span>Session</span>"
+            "<span>Shoes</span>"
+            "<span>Miles</span>"
+            "<span>Elev (ft)</span>"
+            "</div>"
+            '<div class="race-results-empty">'
+            "No current week in this plan."
+            "</div>"
+            "</div></div>"
+        )
 
     week_blocks: list[str] = []
-    for week_i, week in enumerate(weeks):
+    for display_i, (orig_week_i, week) in enumerate(indexed_weeks):
         week_label, miles_label, elev_label = _training_plan_week_summary_cells(week)
-        open_attr = " open" if week_i == expanded_week_index else ""
+        open_attr = " open" if display_i == open_week_index else ""
         sessions = list(week.get("sessions") or [])
         if sessions:
             body = "".join(
                 _training_plan_session_row_html(
-                    s, focus_date=focus_date, today=as_of
+                    s,
+                    focus_date=focus_date,
+                    today=as_of,
+                    shoe_plans=shoe_plans,
+                    shoe_gear=shoe_gear,
+                    shoe_estimates=shoe_estimates,
+                    shoe_actuals=shoe_actuals,
                 )
                 for s in sessions
             )
@@ -2040,12 +2414,26 @@ def training_plan_table_html(
                 "No sessions in this week."
                 "</div>"
             )
+        week_classes = "training-plan-week"
+        sum_classes = "training-plan-week-sum"
+        # Cool wash only in full-plan view — focus-week-only already isolates
+        # the current week, so the summary wash would be redundant.
+        if (
+            show_all_weeks
+            and current_week_idx is not None
+            and orig_week_i == current_week_idx
+        ):
+            # Paint target is the summary row (mirrors session-row focus classes).
+            week_classes += " is-current-week"
+            sum_classes += " is-current-week"
         week_blocks.append(
-            f'<details class="training-plan-week"{open_attr}>'
-            f'<summary class="training-plan-week-sum" role="row">'
+            f'<details class="{week_classes}"{open_attr}>'
+            f'<summary class="{sum_classes}" role="row">'
+            # Week range spans Day + Date columns (no empty Day cell / em dash).
             f'<span class="training-plan-week-range">'
             f"{html.escape(week_label)}</span>"
-            f'<span class="training-plan-week-session">Week {week_i + 1} total</span>'
+            f'<span class="training-plan-week-session">Week {orig_week_i + 1} total</span>'
+            f'<span class="training-plan-shoes training-plan-week-shoes" aria-hidden="true"></span>'
             f'<span class="training-plan-num">{html.escape(miles_label)}</span>'
             f'<span class="training-plan-num">{html.escape(elev_label)}</span>'
             "</summary>"
@@ -2057,8 +2445,10 @@ def training_plan_table_html(
         '<div class="training-plan-table-wrap">'
         '<div class="training-plan-table" role="table">'
         '<div class="training-plan-head" role="row">'
-        "<span>Week / Date</span>"
+        "<span>Day</span>"
+        "<span>Date</span>"
         "<span>Session</span>"
+        "<span>Shoes</span>"
         "<span>Miles</span>"
         "<span>Elev (ft)</span>"
         "</div>"
@@ -2071,6 +2461,10 @@ def training_plan_week_table_html(
     sessions: Sequence[Mapping[str, object]],
     *,
     today: object | None = None,
+    shoe_plans: Sequence[Mapping[str, object]] | None = None,
+    shoe_gear=None,
+    shoe_estimates: Mapping[str, float] | None = None,
+    shoe_actuals: Mapping[str, float] | None = None,
 ) -> str:
     """Return session rows for one week (compat wrapper around the plan table).
 
@@ -2083,20 +2477,49 @@ def training_plan_week_table_html(
         Session dicts for a single synthetic week.
     today :
         Reference day for focus highlighting (defaults to now UTC).
+    shoe_plans :
+        Optional all-plans sequence for cumulative as-of-session estimates.
+    shoe_gear :
+        Optional gear DataFrame for actual mileage.
+    shoe_estimates :
+        Optional legacy map of plan shoe label → estimated total mileage.
+    shoe_actuals :
+        Optional map of plan shoe label → actual-to-date mileage.
 
     Returns
     -------
     str
         HTML from ``training_plan_table_html`` with the week row open.
     """
-    week = {
+    week_start = None
+    for session in sessions:
+        raw = session.get("date") if isinstance(session, Mapping) else None
+        if raw is None:
+            continue
+        try:
+            import pandas as pd
+
+            day = normalize_utc(pd.Timestamp(raw))  # type: ignore[arg-type]
+            monday = day - pd.Timedelta(days=int(day.weekday()))
+            week_start = monday if week_start is None else min(week_start, monday)
+        except (TypeError, ValueError):
+            continue
+    week: dict[str, object] = {
         "week_label": "Week",
         "total_miles": 0.0,
         "total_elevation_ft": None,
         "sessions": list(sessions),
     }
+    if week_start is not None:
+        week["week_start"] = week_start
     return training_plan_table_html(
-        [week], expanded_week_index=0, today=today
+        [week],
+        expanded_week_index=0,
+        today=today,
+        shoe_plans=shoe_plans,
+        shoe_gear=shoe_gear,
+        shoe_estimates=shoe_estimates,
+        shoe_actuals=shoe_actuals,
     )
 
 
@@ -2107,9 +2530,16 @@ def render_training_plans(
 ) -> None:
     """Render Training plans: plan expanders with one expandable-row table each.
 
-    Each plan is an ``st.expander`` (CSV header name). Inside, weeks are
-    ``<details>`` summary rows in a single table; only the current week opens
-    by default.
+    Each plan is an ``st.expander`` (CSV header name). By default only the
+    focus week is rendered (session state ``training_plan_show_all_weeks`` is
+    False); plans with no calendar week containing ``today`` are omitted
+    entirely in that mode. A section-level toggle reveals all plans and
+    weeks as ``<details>`` rows. Shoes cells on future-dated sessions show a
+    hover estimate of total mileage (gear actuals + planned miles on that
+    shoe across **all loaded plans** with ``today < date ≤ session date``).
+    Wear tips in that hover flag prepare/limit bands from estimate (future)
+    or actual-to-date (today/past). Prepare/limit shoe names use orange/red
+    text; there are no colored wear dots on the cell.
 
     Parameters
     ----------
@@ -2130,7 +2560,7 @@ def render_training_plans(
 
     with st.expander(
         "Training plans",
-        expanded=False,
+        expanded=True,
         type="compact",
         key="training_plans",
     ):
@@ -2144,11 +2574,37 @@ def render_training_plans(
             return
 
         as_of = None if today is None else pd.Timestamp(today)
+        if "training_plan_show_all_weeks" not in st.session_state:
+            st.session_state.training_plan_show_all_weeks = False
+        show_all_weeks = bool(st.session_state.training_plan_show_all_weeks)
+        toggle_label = (
+            "Show this week only"
+            if show_all_weeks
+            else "Show full training plan"
+        )
+        if st.button(toggle_label, key="training_plan_show_all_weeks_btn"):
+            st.session_state.training_plan_show_all_weeks = not show_all_weeks
+            st.rerun()
+
+        shoe_actuals: dict[str, float] = {}
+        gear = None
+        if as_of is not None:
+            gear = load_gear()
+            if gear is not None:
+                # All loaded plans: consecutive blocks share shoe mileage.
+                shoe_actuals = actual_shoe_mileages(plans, gear)
+
         expand_plan_idx = default_expanded_plan_index(plans, as_of)
+        rendered_any = False
         for plan_i, plan in enumerate(plans):
+            weeks = list(plan.get("weeks") or [])
+            if not show_all_weeks:
+                # Hide future (or fully past) plans with no calendar week for today.
+                if current_plan_week_index(weeks, as_of) is None:
+                    continue
+            rendered_any = True
             name = str(plan.get("name") or "Training plan").strip() or "Training plan"
             plan_open = plan_i == expand_plan_idx
-            weeks = list(plan.get("weeks") or [])
             with st.expander(
                 name,
                 expanded=plan_open,
@@ -2163,20 +2619,31 @@ def render_training_plans(
                         unsafe_allow_html=True,
                     )
                     continue
-                # Open the calendar week containing today when present; otherwise
-                # open the week that holds the focus (today/next) session day.
-                expand_week = current_plan_week_index(weeks, as_of)
-                if expand_week is None:
-                    focus_day = plan_focus_session_date(weeks, as_of)
-                    expand_week = plan_week_index_for_date(weeks, focus_day)
+                if show_all_weeks:
+                    expand_week: int | None = None
+                else:
+                    # Focus-week mode: only the ISO week that contains today.
+                    # Do not fall back to week 1 / next upcoming session week.
+                    expand_week = current_plan_week_index(weeks, as_of)
                 st.markdown(
                     training_plan_table_html(
                         weeks,
                         expanded_week_index=expand_week,
+                        show_all_weeks=show_all_weeks,
                         today=as_of,
+                        shoe_plans=plans if gear is not None else None,
+                        shoe_gear=gear,
+                        shoe_actuals=shoe_actuals or None,
                     ),
                     unsafe_allow_html=True,
                 )
+        if not rendered_any and not show_all_weeks:
+            st.markdown(
+                '<div class="race-results-empty">'
+                "No training plan covers this week."
+                "</div>",
+                unsafe_allow_html=True,
+            )
 
 
 def render_hiking_section_nav(grain: str) -> None:

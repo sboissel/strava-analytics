@@ -35,6 +35,8 @@ GAUGE_TARGET_PROGRESS = 0.8
 # Gauge scale max so WEEKLY_MILES_GOAL lands at GAUGE_TARGET_PROGRESS (20 / 0.8).
 MILES_GAUGE_MAX = WEEKLY_MILES_GOAL / GAUGE_TARGET_PROGRESS
 SHOE_MILEAGE_GOAL = 400.0
+# Wear bands for gauge prepare wash + shoe tooltips: [PREPARE, GOAL) / >= GOAL.
+SHOE_WEAR_PREPARE_MILES = 350.0
 LONGEST_RUN_GOAL = 10.0
 # Gauge scale max so LONGEST_RUN_GOAL lands at GAUGE_TARGET_PROGRESS (10 / 0.8).
 LONGEST_RUN_GAUGE_MAX = LONGEST_RUN_GOAL / GAUGE_TARGET_PROGRESS
@@ -76,6 +78,19 @@ def shoe_wear_color(mileage: float, goal: float = SHOE_MILEAGE_GOAL) -> str:
     """Return a traffic-light color for shoe wear toward the mileage goal.
 
     Low mileage stays green; color warms as the shoe approaches retirement.
+
+    Parameters
+    ----------
+    mileage : float
+        Actual miles on the shoe.
+    goal : float, optional
+        Retirement mileage. Defaults to ``SHOE_MILEAGE_GOAL``.
+
+    Returns
+    -------
+    str
+        Hex color from the traffic-light palette (or ``INK`` when ``goal``
+        is non-positive).
     """
     if goal <= 0:
         return INK
@@ -89,6 +104,46 @@ def shoe_wear_color(mileage: float, goal: float = SHOE_MILEAGE_GOAL) -> str:
     if used < 1.0:
         return TRAFFIC_ORANGE
     return TRAFFIC_RED
+
+
+def shoe_wear_band(
+    mileage: float | None,
+    *,
+    prepare_at: float = SHOE_WEAR_PREPARE_MILES,
+    limit_at: float = SHOE_MILEAGE_GOAL,
+) -> str | None:
+    """Return a plan-table wear band for shoe mileage, or ``None``.
+
+    Bands (miles):
+    * ``"prepare"`` — ``[prepare_at, limit_at)`` (nearing retirement)
+    * ``"limit"`` — ``>= limit_at`` (at / past retirement mileage)
+
+    Parameters
+    ----------
+    mileage :
+        Miles to classify (estimated total or actual-to-date).
+    prepare_at :
+        Lower bound of the prepare band (inclusive).
+    limit_at :
+        Retirement / limit threshold (inclusive).
+
+    Returns
+    -------
+    str or None
+        ``"prepare"``, ``"limit"``, or ``None`` when below ``prepare_at`` or
+        mileage is missing.
+    """
+    if mileage is None:
+        return None
+    try:
+        miles = float(mileage)
+    except (TypeError, ValueError):
+        return None
+    if miles >= limit_at:
+        return "limit"
+    if miles >= prepare_at:
+        return "prepare"
+    return None
 
 
 def longest_run_color(miles: float | None, goal: float = LONGEST_RUN_GOAL) -> str:
@@ -603,6 +658,17 @@ GLOBAL_CSS = f"""
     color: {INK};
     border-color: {LINE};
     outline: none;
+  }}
+  section[data-testid="stSidebar"] .sidebar-version {{
+    font-family: {FONT_BODY};
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: {MUTED};
+    margin: 1.25rem 0 0.25rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid rgba(21, 32, 40, 0.08);
+    opacity: 0.85;
   }}
   .page-anchor,
   #chart-race-weeks,
@@ -2822,6 +2888,9 @@ GLOBAL_CSS = f"""
     stroke-width: 5;
     stroke-linecap: round;
   }}
+  .gauge-prepare-band {{
+    stroke: rgba(219, 123, 43, 0.28);
+  }}
   .kpi-sub {{
     font-size: 0.72rem;
     color: {MUTED};
@@ -3363,10 +3432,12 @@ GLOBAL_CSS = f"""
     margin-bottom: calc(var(--layout-gap) * 1.5) !important;
     --secondary-background-color: {BG};
   }}
+  /* Clear Streamlit expander chrome only — not nested plan-week
+     <details>/<summary>, which need the current-week cool wash. */
   .st-key-training_plans,
   .st-key-training_plans [data-testid="stExpander"],
-  .st-key-training_plans [data-testid="stExpander"] details,
-  .st-key-training_plans [data-testid="stExpander"] summary,
+  .st-key-training_plans [data-testid="stExpander"] details:not(.training-plan-week),
+  .st-key-training_plans [data-testid="stExpander"] summary:not(.training-plan-week-sum),
   .st-key-training_plans [data-testid="stExpanderDetails"],
   .st-key-training_plans [data-testid="stVerticalBlockBorderWrapper"],
   .st-key-training_plans [data-testid="stVerticalBlock"],
@@ -3380,6 +3451,36 @@ GLOBAL_CSS = f"""
     --secondary-background-color: {BG};
     margin-top: 0.35rem !important;
     margin-bottom: 0.15rem !important;
+  }}
+  /* Training plans section title: match .panel-label (RACES strip label). */
+  .st-key-training_plans [data-testid="stExpander"] summary
+    [data-testid="stMarkdownContainer"],
+  .st-key-training_plans [data-testid="stExpander"] summary
+    [data-testid="stMarkdownContainer"] p,
+  .st-key-training_plans [data-testid="stExpander"] summary p {{
+    font-family: {FONT_BODY} !important;
+    font-size: 0.72rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    color: {MUTED} !important;
+    line-height: 1.2 !important;
+    margin: 0 !important;
+  }}
+  /* Plan name expanders: bold ink block (race session row weight). */
+  [class*="st-key-training_plan_"] [data-testid="stExpander"] summary
+    [data-testid="stMarkdownContainer"],
+  [class*="st-key-training_plan_"] [data-testid="stExpander"] summary
+    [data-testid="stMarkdownContainer"] p,
+  [class*="st-key-training_plan_"] [data-testid="stExpander"] summary p {{
+    font-family: {FONT_BODY} !important;
+    font-size: 0.88rem !important;
+    font-weight: 700 !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    color: {INK} !important;
+    line-height: 1.2 !important;
+    margin: 0 !important;
   }}
   .training-plan-table-wrap {{
     width: 100%;
@@ -3396,7 +3497,7 @@ GLOBAL_CSS = f"""
   .training-plan-week-sum,
   .training-plan-session-row {{
     display: grid;
-    grid-template-columns: minmax(9.5rem, 1.5fr) minmax(8rem, 2fr) 4.5rem 5rem;
+    grid-template-columns: 2.35rem minmax(8.5rem, 1.45fr) minmax(8rem, 2fr) minmax(5.5rem, 1.15fr) 4.5rem 5rem;
     column-gap: 0.35rem;
     align-items: center;
   }}
@@ -3409,8 +3510,88 @@ GLOBAL_CSS = f"""
     border-bottom: 1px solid rgba(21, 32, 40, 0.10);
     padding: 0.4rem 0.55rem;
   }}
-  .training-plan-head > span:nth-child(3),
-  .training-plan-head > span:nth-child(4),
+  .training-plan-dow {{
+    color: {MUTED};
+    font-size: 0.82rem;
+    font-weight: 550;
+    white-space: nowrap;
+  }}
+  .training-plan-shoes {{
+    min-width: 0;
+    font-size: 0.82rem;
+    color: {INK};
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }}
+  /* Wear cues: text color only (no colored dots beside the shoe name). */
+  .training-plan-shoes.training-plan-shoes--prepare {{
+    color: {TRAFFIC_ORANGE};
+    text-decoration-color: rgba(219, 123, 43, 0.55);
+  }}
+  .training-plan-shoes.training-plan-shoes--limit {{
+    color: {TRAFFIC_RED};
+    text-decoration-color: rgba(204, 50, 50, 0.55);
+  }}
+  .training-plan-session-row.is-race .training-plan-shoes.training-plan-shoes--prepare,
+  .training-plan-session-row.is-race .training-plan-shoes.training-plan-shoes--prepare > span:not(.kpi-tooltip) {{
+    color: {TRAFFIC_ORANGE};
+  }}
+  .training-plan-session-row.is-race .training-plan-shoes.training-plan-shoes--limit,
+  .training-plan-session-row.is-race .training-plan-shoes.training-plan-shoes--limit > span:not(.kpi-tooltip) {{
+    color: {TRAFFIC_RED};
+  }}
+  .training-plan-session-name {{
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }}
+  /* Shoes estimate + Session notes: dashed underline + CSS .kpi-tooltip
+     (not native title) so Streamlit/Electron shows hover immediately. */
+  .training-plan-cell--tip {{
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    cursor: help;
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-decoration-color: rgba(21, 32, 40, 0.35);
+    text-underline-offset: 0.18em;
+  }}
+  .training-plan-cell--tip:focus {{
+    outline: none;
+  }}
+  .training-plan-cell--tip:focus-visible {{
+    box-shadow: 0 0 0 2px rgba(21, 32, 40, 0.14);
+    border-radius: 2px;
+  }}
+  .training-plan-cell--tip .kpi-tooltip {{
+    /* Open below the cell so the first session row is not clipped by
+       .training-plan-table-wrap overflow. */
+    left: 0;
+    bottom: auto;
+    top: calc(100% + 0.35rem);
+    transform: none;
+    width: max-content;
+    max-width: min(16rem, 72vw);
+    z-index: 50;
+  }}
+  .training-plan-session-row:has(.training-plan-cell--tip:hover),
+  .training-plan-session-row:has(.training-plan-cell--tip:focus-within) {{
+    position: relative;
+    z-index: 40;
+  }}
+  .training-plan-cell--tip:hover .kpi-tooltip,
+  .training-plan-cell--tip:focus .kpi-tooltip,
+  .training-plan-cell--tip:focus-within .kpi-tooltip {{
+    visibility: visible;
+    opacity: 1;
+  }}
+  .training-plan-week-shoes {{
+    /* Week totals: leave Shoes column blank (grid alignment only). */
+    visibility: hidden;
+  }}
+  .training-plan-head > span:nth-child(5),
+  .training-plan-head > span:nth-child(6),
   .training-plan-num {{
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -3446,6 +3627,8 @@ GLOBAL_CSS = f"""
     content: "▾";
   }}
   .training-plan-week-range {{
+    /* Merge Day + Date columns on week-total rows (Day cell omitted in HTML). */
+    grid-column: 1 / span 2;
     min-width: 0;
   }}
   .training-plan-week-session {{
@@ -3465,15 +3648,22 @@ GLOBAL_CSS = f"""
     border-top: 1px solid rgba(21, 32, 40, 0.04);
     font-weight: 400;
   }}
-  /* Today / next session day: cool wash (distinct from race text cue). */
+  /* Today / next session day, and the calendar week containing today
+     when that week row is collapsed: cool wash (distinct from race text
+     cue). Expanded current weeks drop the wash so the open detail view
+     is not double-emphasized. */
   .training-plan-session-row.is-today,
-  .training-plan-session-row.is-next {{
+  .training-plan-session-row.is-next,
+  .training-plan-week.is-current-week:not([open]) > .training-plan-week-sum {{
     background: rgba(91, 155, 213, 0.18);
     box-shadow: inset 3px 0 0 {EASY};
   }}
-  /* Races: muted-gold text on the whole row (date/session/miles/elev/badge).
-     No gold background wash — today/next cool wash may still apply. */
-  .training-plan-session-row.is-race {{
+  /* Races: muted-gold text on the whole row (day/date/session/shoes/miles/elev/badge).
+     Override cell-level colors (.training-plan-dow MUTED, .training-plan-shoes INK)
+     so every visible cell inherits the same race text. No gold background wash —
+     today/next cool wash may still apply. Week summary rows are unaffected. */
+  .training-plan-session-row.is-race,
+  .training-plan-session-row.is-race > span {{
     color: {TRAINING_PLAN_RACE_TEXT};
   }}
   .training-plan-session-row.is-race .training-plan-session {{

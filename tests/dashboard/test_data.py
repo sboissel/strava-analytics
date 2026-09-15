@@ -276,6 +276,55 @@ class MetricsInspectAnchorHtmlTests(unittest.TestCase):
         self.assertIn("details[open] [data-testid=\"stExpanderDetails\"]", GLOBAL_CSS)
 
 
+class HeroChromeTests(unittest.TestCase):
+    """Hero banner stays free of version chrome; version sits in the sidebar."""
+
+    def test_hero_html_omits_package_version(self):
+        from dashboard.ui import hero_html
+
+        html = hero_html()
+        self.assertIn("Strava analytics", html)
+        self.assertIn("Runner’s Dashboard", html)
+        self.assertNotIn("hero-version", html)
+        self.assertNotIn("v1.", html)
+        self.assertNotIn("sidebar-version", html)
+
+    def test_sidebar_version_html_includes_package_version(self):
+        from dashboard.theme import GLOBAL_CSS, MUTED
+        from dashboard.ui import sidebar_version_html
+        from strava_analytics import __version__
+
+        html = sidebar_version_html()
+        self.assertIn('class="sidebar-version"', html)
+        self.assertIn(f"v{__version__}", html)
+        version_block = GLOBAL_CSS.split(".sidebar-version {", 1)[1].split("}", 1)[0]
+        self.assertIn(f"color: {MUTED}", version_block)
+        self.assertIn("font-size: 0.68rem", version_block)
+        self.assertNotIn(".hero-version {", GLOBAL_CSS)
+
+    def test_sidebar_version_html_accepts_version_override(self):
+        from dashboard.ui import sidebar_version_html
+
+        self.assertIn("v9.9.9", sidebar_version_html(version="9.9.9"))
+
+    def test_render_section_nav_wires_sidebar_version(self):
+        ui = (
+            Path(__file__).resolve().parents[2] / "dashboard" / "ui.py"
+        ).read_text(encoding="utf-8")
+        nav_start = ui.index("def render_section_nav(")
+        nav_end = ui.index("\ndef render_insights_section_nav(", nav_start)
+        nav_body = ui[nav_start:nav_end]
+        self.assertIn("sidebar_version_html()", nav_body)
+        self.assertIn("st.markdown(sidebar_version_html()", nav_body)
+
+    def test_streamlit_app_renders_hero_html(self):
+        app = Path(__file__).resolve().parents[2] / "dashboard" / "streamlit_app.py"
+        text = app.read_text(encoding="utf-8")
+        self.assertIn("from ui import hero_html", text)
+        self.assertIn("st.markdown(hero_html(), unsafe_allow_html=True)", text)
+        self.assertNotIn("hero_html(version", text)
+
+
 class MetricsSectionNavTests(unittest.TestCase):
     """Metrics left-nav jumps omit Inspect and sit below the page list."""
 

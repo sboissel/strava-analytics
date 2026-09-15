@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-09-15
+
+### Added
+
+**Dashboard**
+
+- **Training**: added Shoe column from training plan CSVs, with hover text when cell text underlined: estimated future mileage shown by taking current shoe mileage and summing future plan mileage. Shoe cell text colored to inidicate wear by estimated mileage (orange = 350+ miles, red = 400+ miles).
+- **Training**: added Session Notes from training plan CSVs as hover text over Session cells, indicated by cell text underline.
+- **Metrics**: shoe gauges show a shaded prepare band (350–400 mi); ⓘ tooltip documents the cues.
+
+### Changed
+
+**Dashboard**
+
+- **Training**: updated how plans show by default (**Show this week only**) that hides additional weeks vs on toggle to **Show full training plan** toggle.
+- **Training**: race session rows apply race text color to rows of race weeks.
+
 ## [1.7.0] — 2026-09-14
 
 ### Added
