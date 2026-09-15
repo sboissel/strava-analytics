@@ -11,23 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Dashboard**
 
-- **Training**: Training plans expander opens by default; section title matches the RACES panel label style.
-- **Training**: **Show this week only** (default) / **Show full training plan** toggle — week-only omits plans with no current calendar week; full plan lists all weeks collapsed.
-- **Training**: in full-plan view, the current week keeps a cool summary wash while collapsed.
-- **Training**: Day column (weekday) on session rows; Shoes column; Session Notes hover on dashed underlines.
-- **Training**: future Shoes cells hover estimated cumulative mileage (gear actuals + planned miles on that shoe across loaded plans through the session date).
-- **Training**: prepare/limit wear cues tint shoe names orange/red from estimate (future) or actual-to-date (today/past).
-- **Metrics**: shoe gauges show a shaded prepare band (350–400 mi) and an end-of-arc limit tick; ⓘ tooltip documents the cues.
+- **Training**: added Shoe column from training plan CSVs, with hover text when cell text underlined: estimated future mileage shown by taking current shoe mileage and summing future plan mileage. Shoe cell text colored to inidicate wear by estimated mileage (orange = 350+ miles, red = 400+ miles).
+- **Training**: added Session Notes from training plan CSVs as hover text over Session cells, indicated by cell text underline.
+- **Metrics**: shoe gauges show a shaded prepare band (350–400 mi); ⓘ tooltip documents the cues.
 
 ### Changed
 
 **Dashboard**
 
-- **Training**: race session rows apply race text color to every cell (no gold background wash).
-
-**Pipeline / data**
-
-- Training plan CSVs use Shoe / Session Notes columns (`november_halves`, `sierra_half` updated).
+- **Training**: updated how plans show by default (**Show this week only**) that hides additional weeks vs on toggle to **Show full training plan** toggle.
+- **Training**: race session rows apply race text color to rows of race weeks.
 
 ## [1.7.0] — 2026-09-14
 
