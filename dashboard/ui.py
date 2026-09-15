@@ -103,6 +103,42 @@ def band_square(color_hex: str) -> str:
     return f'<span class="band-square" style="background:{color_hex}"></span>'
 
 
+def hero_html() -> str:
+    """Return the dashboard hero banner HTML (kicker + title only).
+
+    Returns
+    -------
+    str
+        HTML for the hero kicker and title. Package version lives in the
+        sidebar footer via :func:`sidebar_version_html`.
+    """
+    return (
+        '<div class="hero">'
+        '<div class="hero-kicker">Strava analytics</div>'
+        '<h1 class="hero-title">Runner’s Dashboard</h1>'
+        "</div>"
+    )
+
+
+def sidebar_version_html(*, version: str | None = None) -> str:
+    """Return muted package-version markup for the sidebar footer.
+
+    Parameters
+    ----------
+    version : str, optional
+        Version string to display. Defaults to ``strava_analytics.__version__``.
+
+    Returns
+    -------
+    str
+        HTML for a quiet ``vX.Y.Z`` label under the left nav.
+    """
+    from strava_analytics import __version__ as pkg_version
+
+    ver = pkg_version if version is None else version
+    return f'<div class="sidebar-version">v{html.escape(ver)}</div>'
+
+
 def race_weeks_legend_html() -> str:
     """Return the Training race-strip label and hover legend.
 
@@ -1663,6 +1699,7 @@ def render_section_nav(
                         )
                     st.page_link(path, label=title, use_container_width=True)
         st.markdown(jumps, unsafe_allow_html=True)
+        st.markdown(sidebar_version_html(), unsafe_allow_html=True)
 
 
 def render_insights_section_nav(

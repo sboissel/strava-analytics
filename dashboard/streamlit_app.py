@@ -23,6 +23,7 @@ _bs_spec.loader.exec_module(_bootstrap)
 _bootstrap.bootstrap()
 
 from theme import GLOBAL_CSS
+from ui import hero_html
 
 
 def _is_embed_mode() -> bool:
@@ -50,15 +51,7 @@ performance = st.Page("pages/performance.py", title="Performance")
 hiking = st.Page("pages/hiking.py", title="Hiking")
 metrics = st.Page("pages/metrics.py", title="Metrics", default=True)
 
-st.markdown(
-    """
-    <div class="hero">
-      <div class="hero-kicker">Strava analytics</div>
-      <h1 class="hero-title">Runner’s Dashboard</h1>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown(hero_html(), unsafe_allow_html=True)
 
 pg = st.navigation(
     {

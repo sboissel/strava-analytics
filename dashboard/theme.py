@@ -659,6 +659,17 @@ GLOBAL_CSS = f"""
     border-color: {LINE};
     outline: none;
   }}
+  section[data-testid="stSidebar"] .sidebar-version {{
+    font-family: {FONT_BODY};
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: {MUTED};
+    margin: 1.25rem 0 0.25rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid rgba(21, 32, 40, 0.08);
+    opacity: 0.85;
+  }}
   .page-anchor,
   #chart-race-weeks,
   #chart-compliance,
