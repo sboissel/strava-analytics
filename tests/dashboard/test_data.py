@@ -328,6 +328,48 @@ class HeroChromeTests(unittest.TestCase):
             sys.modules.pop("strava_analytics", None)
             sys.modules.update(saved)
 
+    def test_version_from_checkout_pyproject_walks_cloud_layout(self):
+        """ui.py under dashboard/ finds repo-root pyproject (Cloud mount layout)."""
+        from dashboard.ui import _version_from_checkout_pyproject
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "mount" / "src" / "strava-analytics"
+            dash = root / "dashboard"
+            dash.mkdir(parents=True)
+            (root / "pyproject.toml").write_text(
+                '[project]\nname = "strava-analytics"\nversion = "9.9.9"\n',
+                encoding="utf-8",
+            )
+            ui_path = dash / "ui.py"
+            ui_path.write_text("# fake\n", encoding="utf-8")
+            self.assertEqual(_version_from_checkout_pyproject(ui_path), "9.9.9")
+
+    def test_version_from_checkout_pyproject_skips_unrelated_toml(self):
+        from dashboard.ui import _version_from_checkout_pyproject
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "strava-analytics"
+            dash = root / "dashboard"
+            dash.mkdir(parents=True)
+            (root / "pyproject.toml").write_text(
+                '[project]\nname = "other-project"\nversion = "0.0.1"\n',
+                encoding="utf-8",
+            )
+            ui_path = dash / "ui.py"
+            ui_path.write_text("# fake\n", encoding="utf-8")
+            self.assertIsNone(_version_from_checkout_pyproject(ui_path))
+
+    def test_dashboard_version_label_prefers_pyproject_over_stale_package(self):
+        """Checkout pyproject wins even when importlib/package would say otherwise."""
+        from unittest import mock
+
+        from dashboard import ui as ui_mod
+
+        with mock.patch.object(
+            ui_mod, "_version_from_checkout_pyproject", return_value="1.8.2"
+        ):
+            self.assertEqual(ui_mod._dashboard_version_label(), "1.8.2")
+
     def test_render_section_nav_wires_sidebar_version(self):
         ui = (
             Path(__file__).resolve().parents[2] / "dashboard" / "ui.py"

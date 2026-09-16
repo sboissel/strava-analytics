@@ -6,6 +6,7 @@ import html
 import math
 import re
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from charts import (
     RACE_EVENTS_TITLE,
@@ -120,31 +121,56 @@ def hero_html() -> str:
     )
 
 
+_FALLBACK_VERSION = "1.8.2"
+_PROJECT_NAME_RE = re.compile(r'(?m)^name\s*=\s*"strava-analytics"')
+_PROJECT_VERSION_RE = re.compile(r'(?m)^version\s*=\s*"([^"]+)"')
+
+
+def _version_from_checkout_pyproject(anchor: Path | None = None) -> str | None:
+    """Read ``version`` from repo-root ``pyproject.toml`` near ``anchor``.
+
+    Walks parents from ``dashboard/ui.py`` (or ``anchor``) so Streamlit Cloud
+    layouts like ``/mount/src/strava-analytics/dashboard/`` still resolve the
+    checkout file. Does not use cwd.
+    """
+    start = (anchor or Path(__file__)).resolve()
+    roots = [start] if start.is_dir() else [start.parent]
+    roots.extend(start.parents)
+    for parent in roots:
+        pyproject = parent / "pyproject.toml"
+        if not pyproject.is_file():
+            continue
+        try:
+            text = pyproject.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if not _PROJECT_NAME_RE.search(text):
+            continue
+        match = _PROJECT_VERSION_RE.search(text)
+        if match:
+            return match.group(1)
+    return None
+
+
 def _dashboard_version_label() -> str:
     """Resolve the package version without requiring an editable install.
 
-    Prefers ``strava_analytics.__version__`` when importable (``src/`` on
-    ``sys.path`` via bootstrap). Falls back to reading repo-root
-    ``pyproject.toml`` from the Cloud/checkout layout, then ``"unknown"``.
+    Prefer checkout ``pyproject.toml`` (walk from this file) over
+    ``strava_analytics.__version__`` / importlib metadata, which can lag on
+    Cloud or after an old ``pip install``. Then package metadata, then a
+    release-matched fallback.
     """
+    from_pyproject = _version_from_checkout_pyproject()
+    if from_pyproject:
+        return from_pyproject
+
     try:
         from strava_analytics import __version__ as pkg_version
     except ImportError:
         pkg_version = None
     if pkg_version:
         return str(pkg_version)
-
-    from pathlib import Path
-
-    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    if pyproject.is_file():
-        match = re.search(
-            r'(?m)^version\s*=\s*"([^"]+)"',
-            pyproject.read_text(encoding="utf-8"),
-        )
-        if match:
-            return match.group(1)
-    return "unknown"
+    return _FALLBACK_VERSION
 
 
 def sidebar_version_html(*, version: str | None = None) -> str:

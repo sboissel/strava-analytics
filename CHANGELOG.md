@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.2] — 2026-09-16
+
+### Fixed
+
+**Dashboard**
+
+- Sidebar version prefers checkout ``pyproject.toml`` (walk from ``dashboard/ui.py`` / package ``__init__``) over stale importlib / egg-info metadata so Streamlit Cloud and local installs no longer stick on an old release (e.g. v1.6.0).
+
 ## [1.8.1] — 2026-09-16
 
 ### Fixed
