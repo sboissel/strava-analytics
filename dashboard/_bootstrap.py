@@ -45,8 +45,9 @@ _REQUIRED_DATA_ATTRS = (
     "resolve_activities_dir",
 )
 
-# Names pages import from ``ui``. A stale ``ui`` in ``sys.modules`` can point
-# at the right file but lack newer helpers (e.g. training-plan zoom/render).
+# Names pages / entrypoint import from ``ui``. A stale ``ui`` in ``sys.modules``
+# can point at the right file but lack newer helpers (e.g. training-plan
+# zoom/render, or ``hero_html`` after a mixed Cloud redeploy).
 _REQUIRED_UI_ATTRS = (
     "achievements_html",
     "aerobic_efficiency_info_html",
@@ -54,6 +55,7 @@ _REQUIRED_UI_ATTRS = (
     "compliance_info_html",
     "fastest_race_cards_html",
     "fitness_freshness_info_html",
+    "hero_html",
     "hike_gap_info_html",
     "hiking_badges_html",
     "hr_zones_week_to_date_pie_html",
@@ -77,6 +79,7 @@ _REQUIRED_UI_ATTRS = (
     "render_training_plan_zoom_select",
     "render_training_plans",
     "shoe_kpi_cards_html",
+    "sidebar_version_html",
 )
 
 

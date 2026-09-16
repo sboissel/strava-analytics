@@ -307,6 +307,27 @@ class HeroChromeTests(unittest.TestCase):
 
         self.assertIn("v9.9.9", sidebar_version_html(version="9.9.9"))
 
+    def test_sidebar_version_html_falls_back_without_package(self):
+        """Cloud-like: version label works when ``strava_analytics`` is not importable."""
+        import sys
+
+        from dashboard.ui import sidebar_version_html
+
+        blocked = [
+            name
+            for name in list(sys.modules)
+            if name == "strava_analytics" or name.startswith("strava_analytics.")
+        ]
+        saved = {name: sys.modules.pop(name) for name in blocked}
+        sys.modules["strava_analytics"] = None
+        try:
+            html = sidebar_version_html()
+            self.assertIn('class="sidebar-version"', html)
+            self.assertRegex(html, r">v\d+\.\d+\.\d+<")
+        finally:
+            sys.modules.pop("strava_analytics", None)
+            sys.modules.update(saved)
+
     def test_render_section_nav_wires_sidebar_version(self):
         ui = (
             Path(__file__).resolve().parents[2] / "dashboard" / "ui.py"

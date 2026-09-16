@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+**Dashboard**
+
+- Bootstrap reloads a stale Streamlit Cloud ``ui`` module when entrypoint exports ``hero_html`` / ``sidebar_version_html`` are missing (v1.8.0 mixed redeploy ImportError). Sidebar version falls back to ``pyproject.toml`` when ``strava_analytics`` is not importable.
+
 ## [1.8.0] — 2026-09-15
 
 ### Added

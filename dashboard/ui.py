@@ -120,22 +120,47 @@ def hero_html() -> str:
     )
 
 
+def _dashboard_version_label() -> str:
+    """Resolve the package version without requiring an editable install.
+
+    Prefers ``strava_analytics.__version__`` when importable (``src/`` on
+    ``sys.path`` via bootstrap). Falls back to reading repo-root
+    ``pyproject.toml`` from the Cloud/checkout layout, then ``"unknown"``.
+    """
+    try:
+        from strava_analytics import __version__ as pkg_version
+    except ImportError:
+        pkg_version = None
+    if pkg_version:
+        return str(pkg_version)
+
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    if pyproject.is_file():
+        match = re.search(
+            r'(?m)^version\s*=\s*"([^"]+)"',
+            pyproject.read_text(encoding="utf-8"),
+        )
+        if match:
+            return match.group(1)
+    return "unknown"
+
+
 def sidebar_version_html(*, version: str | None = None) -> str:
     """Return muted package-version markup for the sidebar footer.
 
     Parameters
     ----------
     version : str, optional
-        Version string to display. Defaults to ``strava_analytics.__version__``.
+        Version string to display. Defaults to :func:`_dashboard_version_label`.
 
     Returns
     -------
     str
         HTML for a quiet ``vX.Y.Z`` label under the left nav.
     """
-    from strava_analytics import __version__ as pkg_version
-
-    ver = pkg_version if version is None else version
+    ver = _dashboard_version_label() if version is None else version
     return f'<div class="sidebar-version">v{html.escape(ver)}</div>'
 
 

@@ -50,6 +50,12 @@ _TRAINING_UI_IMPORTS = (
     "render_training_plans",
 )
 
+# Names streamlit_app imports from ui (keep in sync with the entrypoint).
+_ENTRYPOINT_UI_IMPORTS = (
+    "hero_html",
+    "sidebar_version_html",
+)
+
 
 def _prefer_sys_path(*paths: Path | str) -> None:
     """Put ``paths`` first on ``sys.path`` without dropping the stdlib."""
@@ -347,6 +353,61 @@ class BootstrapImportTests(unittest.TestCase):
             from ui import render_training_plans as render_fn
 
             self.assertTrue(callable(render_fn))
+        finally:
+            for name in (
+                "_bootstrap",
+                "_sa_dashboard_bootstrap",
+                "data",
+                "race_data",
+                "ui",
+            ):
+                sys.modules.pop(name, None)
+                if saved_mods[name] is not None:
+                    sys.modules[name] = saved_mods[name]
+            sys.path[:] = saved_path
+
+    def test_refresh_replaces_stale_ui_missing_hero_html(self):
+        """Stale ``ui`` lacking ``hero_html`` is reloaded (Cloud entrypoint ImportError)."""
+        saved_path = list(sys.path)
+        saved_mods = {
+            name: sys.modules.pop(name, None)
+            for name in (
+                "_bootstrap",
+                "_sa_dashboard_bootstrap",
+                "data",
+                "race_data",
+                "ui",
+            )
+        }
+        try:
+            _prefer_sys_path(DASHBOARD_ROOT, REPO_ROOT / "src", REPO_ROOT)
+            bootstrap = _load_bootstrap()
+            sys.modules.pop("ui", None)
+
+            # Pre-v1.8.0 Cloud cache: every required export except hero/version.
+            stale = types.ModuleType("ui")
+            stale.__file__ = str(UI_MODULE)
+            for name in bootstrap._REQUIRED_UI_ATTRS:
+                if name in _ENTRYPOINT_UI_IMPORTS:
+                    continue
+                setattr(stale, name, lambda *a, **k: None)
+            sys.modules["ui"] = stale
+
+            with self.assertRaises(ImportError):
+                from ui import hero_html  # noqa: F401
+
+            bootstrap.bootstrap()
+
+            ui = sys.modules["ui"]
+            for name in _ENTRYPOINT_UI_IMPORTS:
+                self.assertTrue(
+                    hasattr(ui, name),
+                    msg=f"ui missing required export {name!r}",
+                )
+            from ui import hero_html as hero_fn
+
+            self.assertTrue(callable(hero_fn))
+            self.assertIn("Runner", hero_fn())
         finally:
             for name in (
                 "_bootstrap",
