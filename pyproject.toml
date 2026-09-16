@@ -1,6 +1,6 @@
 [project]
 name = "strava-analytics"
-version = "1.8.2"
+version = "1.9.0"
 requires-python = ">=3.11"
 dependencies = [
   "pandas>=2.0.0",
