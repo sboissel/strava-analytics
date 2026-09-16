@@ -1194,8 +1194,8 @@ def mileage_chart(
     Training charts. The calendar mileage heatmap (Training expander) uses
     the same palette via ``mileage_heatmap_chart``.
 
-    When ``period_df`` includes finite ``plan_miles`` (Training week grain with
-    overlapping plan targets from any loaded plan), draws grouped plan vs
+    When ``period_df`` includes finite ``plan_miles`` (Training Show By grain
+    with overlapping plan targets from any loaded plan), draws grouped plan vs
     actual bars instead of a single actual series. Plan bars stay a muted
     solid teal (outline ``MILEAGE_BAR``); only actual bars use the heatmap.
 
@@ -1632,7 +1632,7 @@ def elevation_chart(
     colorbar: ``showscale=False`` keeps the plot box aligned with the
     other Training charts. Achievements keep ``ELEVATION_PURPLE``.
 
-    When ``period_df`` includes finite ``plan_elevation_ft`` (Training week
+    When ``period_df`` includes finite ``plan_elevation_ft`` (Training Show By
     grain with an overlapping plan), draws grouped plan vs actual bars.
     Plan overlay applies only for ``unit="ft"`` (Hiking ``unit="mi"`` stays
     actual-only).

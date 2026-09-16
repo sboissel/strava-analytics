@@ -3482,6 +3482,10 @@ GLOBAL_CSS = f"""
     line-height: 1.2 !important;
     margin: 0 !important;
   }}
+  /* Weekday filter select beside the show-all / this-week toggle. */
+  .st-key-training_plan_weekday_filter {{
+    max-width: 7.5rem;
+  }}
   .training-plan-table-wrap {{
     width: 100%;
     overflow-x: auto;
@@ -3492,6 +3496,9 @@ GLOBAL_CSS = f"""
     font-family: {FONT_BODY};
     font-size: 0.88rem;
     color: {INK};
+  }}
+  .training-plan-table--weekday-filter .training-plan-session-row {{
+    border-bottom: 1px solid rgba(21, 32, 40, 0.06);
   }}
   .training-plan-head,
   .training-plan-week-sum,

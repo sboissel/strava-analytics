@@ -4434,6 +4434,15 @@ PLAN_VS_ACTUAL_COLUMNS = (
     "in_progress",
 )
 
+# Columns required to left-join plan targets onto Show By period rows.
+PLAN_TARGET_ATTACH_COLUMNS = (
+    "period_key",
+    "plan_miles",
+    "plan_elevation_ft",
+    "plan_name",
+    "plan_week",
+)
+
 
 def select_plan_for_charts(
     plans: Sequence[Mapping[str, object]],
@@ -4466,6 +4475,147 @@ def select_plan_for_charts(
         if list(plans[i].get("weeks") or []):
             return i, plans[i]
     return None, None
+
+
+def _plan_targets_from_sessions(
+    plans: Sequence[Mapping[str, object]],
+    grain: PeriodGrain,
+) -> pd.DataFrame:
+    """Sum session miles/elevation into Show By periods for ``grain``.
+
+    Groups by ``(period_key, plan_name, plan_week)`` so
+    ``_collapse_plan_targets_by_period`` can join multi-week Month/Year
+    identities for hover. Sessions without a date are skipped. Miles and
+    elevation follow ``plan_week_totals`` rules (missing miles ignored;
+    elevation ``NaN`` when no session in the bucket sets elevation).
+
+    Parameters
+    ----------
+    plans :
+        Loaded training plans with dated ``sessions`` under each week.
+    grain : PeriodGrain
+        ``Day``, ``Month``, or ``Year`` (not ``Week`` — use week totals).
+
+    Returns
+    -------
+    pandas.DataFrame
+        Attach-ready rows (``PLAN_TARGET_ATTACH_COLUMNS``), possibly with
+        repeated ``period_key`` across plans/weeks.
+    """
+    empty = pd.DataFrame(columns=list(PLAN_TARGET_ATTACH_COLUMNS))
+    # bucket_key -> (miles_sum, elev_sum, elev_any)
+    buckets: dict[tuple[str, str, int], tuple[float, float, bool]] = {}
+    for plan in plans:
+        plan_name = str(plan.get("name") or "").strip()
+        for plan_week, week in enumerate(plan.get("weeks") or [], start=1):
+            if not isinstance(week, Mapping):
+                continue
+            for session in week.get("sessions") or []:
+                if not isinstance(session, Mapping):
+                    continue
+                date_raw = session.get("date")
+                if date_raw is None:
+                    continue
+                try:
+                    stamp = normalize_utc(pd.Timestamp(date_raw))  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    continue
+                key_series, _ = _period_key_and_label(pd.Series([stamp]), grain)
+                period_key = str(key_series.iloc[0])
+                bucket_key = (period_key, plan_name, plan_week)
+
+                miles_add = 0.0
+                miles_raw = session.get("miles")
+                if miles_raw is not None:
+                    try:
+                        miles_add = float(miles_raw)  # type: ignore[arg-type]
+                    except (TypeError, ValueError):
+                        miles_add = 0.0
+
+                elev_add = 0.0
+                elev_hit = False
+                elev_raw = session.get("elevation_ft")
+                if elev_raw is not None:
+                    try:
+                        elev_add = float(elev_raw)  # type: ignore[arg-type]
+                        elev_hit = True
+                    except (TypeError, ValueError):
+                        pass
+
+                prev = buckets.get(bucket_key)
+                if prev is None:
+                    buckets[bucket_key] = (miles_add, elev_add, elev_hit)
+                else:
+                    prev_miles, prev_elev, prev_any = prev
+                    buckets[bucket_key] = (
+                        prev_miles + miles_add,
+                        prev_elev + elev_add,
+                        prev_any or elev_hit,
+                    )
+
+    if not buckets:
+        return empty
+
+    rows: list[dict[str, object]] = []
+    for (period_key, plan_name, plan_week), (miles, elev, elev_any) in buckets.items():
+        # Skip empty rest-day buckets with neither miles nor elevation.
+        if miles == 0.0 and not elev_any:
+            continue
+        rows.append(
+            {
+                "period_key": period_key,
+                "plan_miles": miles,
+                "plan_elevation_ft": elev if elev_any else np.nan,
+                "plan_name": plan_name if plan_name else pd.NA,
+                "plan_week": plan_week,
+            }
+        )
+    if not rows:
+        return empty
+    return pd.DataFrame(rows, columns=list(PLAN_TARGET_ATTACH_COLUMNS))
+
+
+def plan_targets_by_period(
+    plans: Sequence[Mapping[str, object]],
+    grain: PeriodGrain,
+    runs: pd.DataFrame | None = None,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Build plan target rows keyed to the selected Show By ``grain``.
+
+    - **Week**: week totals via ``plan_vs_actual_all_plans`` (unchanged;
+      supports weeks that only have totals and empty session lists).
+    - **Day / Month / Year**: sum dated plan session miles and elevation
+      into each period (``_plan_targets_from_sessions``).
+
+    Parameters
+    ----------
+    plans :
+        Output of ``load_training_plans`` / parse helpers.
+    grain : PeriodGrain
+        Show By grain (``Day``, ``Week``, ``Month``, or ``Year``).
+    runs : pandas.DataFrame, optional
+        Run rows for Week grain actuals / overlap flags (unused for
+        Day/Month/Year attach; defaults to empty).
+    as_of : pandas.Timestamp, optional
+        Reference for Week ``in_progress`` (defaults inside week helper).
+
+    Returns
+    -------
+    pandas.DataFrame
+        Rows with at least ``PLAN_TARGET_ATTACH_COLUMNS`` (Week also
+        includes full ``PLAN_VS_ACTUAL_COLUMNS``). Empty when no targets.
+    """
+    if not plans:
+        return pd.DataFrame(columns=list(PLAN_TARGET_ATTACH_COLUMNS))
+    if grain == "Week":
+        return plan_vs_actual_all_plans(
+            plans,
+            runs if runs is not None else pd.DataFrame(),
+            as_of=as_of,
+        )
+    return _plan_targets_from_sessions(plans, grain)
 
 
 def plan_vs_actual_all_plans(

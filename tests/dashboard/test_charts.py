@@ -1096,7 +1096,7 @@ class TrainingChartThemeTests(unittest.TestCase):
         self.assertNotIn('id="chart-plan-vs-actual"', page)
         self.assertNotIn("plan_vs_actual_combined_chart", page)
         self.assertNotIn("plan_vs_actual_distance_chart", page)
-        self.assertIn("plan_vs_actual_all_plans", page)
+        self.assertIn("plan_targets_by_period", page)
         self.assertIn("attach_plan_targets_to_periods", page)
         self.assertIn("plan_targets_overlap_periods", page)
         self.assertNotIn("select_plan_for_charts", page)

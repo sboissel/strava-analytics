@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Dashboard**
+
+- **Training**: weekday filter on Training plans (All / Mon–Sun) to list same-day sessions across weeks for week-over-week comparison (hides week-total rows when a day is selected).
+
+### Changed
+
+**Dashboard**
+
+- **Training**: **Mileage** and **Elevation** plan vs actual bars now follow every Show By grain (Day / Week / Month / Year). Week still uses plan week totals; Day / Month / Year sum dated plan session miles and elevation into each period.
+
 ## [1.8.2] — 2026-09-16
 
 ### Fixed

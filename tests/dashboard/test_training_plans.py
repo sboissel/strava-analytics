@@ -36,6 +36,7 @@ from dashboard.data import (
     period_window_for_plan,
     period_window_widget_values,
     plan_focus_session_date,
+    plan_targets_by_period,
     plan_targets_overlap_periods,
     plan_vs_actual_all_plans,
     plan_vs_actual_by_week,
@@ -1171,6 +1172,12 @@ class PlanTableHtmlTests(unittest.TestCase):
             "st.session_state.training_plan_show_all_weeks = False",
             source,
         )
+        self.assertIn(
+            'st.session_state.training_plan_weekday_filter = TRAINING_PLAN_WEEKDAY_ALL',
+            source,
+        )
+        self.assertIn('key="training_plan_weekday_filter"', source)
+        self.assertIn("weekday_filter=weekday_filter", source)
         # Week-only mode skips plans with no calendar week for today.
         self.assertIn("if current_plan_week_index(weeks, as_of) is None:", source)
         self.assertIn("No training plan covers this week.", source)
@@ -1248,14 +1255,24 @@ class PlanTableHtmlTests(unittest.TestCase):
             fake_st = mock.MagicMock()
             fake_st.session_state = _Session()
             fake_st.session_state.training_plan_show_all_weeks = show_all
+            fake_st.session_state.training_plan_weekday_filter = "All"
             fake_st.button.return_value = False
+            fake_st.selectbox.return_value = "All"
 
             @contextlib.contextmanager
             def _expander(title, *args, **kwargs):
                 titles.append(title)
                 yield
 
+            @contextlib.contextmanager
+            def _column():
+                yield
+
+            def _columns(*args, **kwargs):
+                return (_column(), _column())
+
             fake_st.expander.side_effect = _expander
+            fake_st.columns.side_effect = _columns
             with (
                 mock.patch.dict("sys.modules", {"streamlit": fake_st}),
                 mock.patch.object(ui_mod, "load_gear", return_value=None),
@@ -1321,17 +1338,27 @@ class PlanTableHtmlTests(unittest.TestCase):
         fake_st = mock.MagicMock()
         fake_st.session_state = _Session()
         fake_st.session_state.training_plan_show_all_weeks = False
+        fake_st.session_state.training_plan_weekday_filter = "All"
         fake_st.button.return_value = False
+        fake_st.selectbox.return_value = "All"
 
         @contextlib.contextmanager
         def _expander(title, *args, **kwargs):
             titles.append(title)
             yield
 
+        @contextlib.contextmanager
+        def _column():
+            yield
+
+        def _columns(*args, **kwargs):
+            return (_column(), _column())
+
         def _markdown(html, **kwargs):
             markdowns.append(html)
 
         fake_st.expander.side_effect = _expander
+        fake_st.columns.side_effect = _columns
         fake_st.markdown.side_effect = _markdown
         with (
             mock.patch.dict("sys.modules", {"streamlit": fake_st}),
@@ -2038,6 +2065,74 @@ class PlanTableHtmlTests(unittest.TestCase):
         self.assertEqual(html.count('<details class="training-plan-week">'), 2)
         self.assertNotIn("is-current-week", html)
 
+    def test_plan_table_weekday_filter_lists_matching_sessions(self):
+        """Weekday filter hides week totals and keeps only matching days."""
+        # Tue 8 Sep (Easy run) + Wed 16 Sep (Hill) + Sun 8 Nov (Race).
+        html = training_plan_table_html(
+            self._sample_weeks(),
+            expanded_week_index=None,
+            show_all_weeks=True,
+            weekday_filter="Tue",
+            today=pd.Timestamp("2026-09-01", tz="UTC"),
+        )
+        self.assertIn("training-plan-table--weekday-filter", html)
+        self.assertIn("Easy run", html)
+        self.assertIn('class="training-plan-dow">Tue<', html)
+        self.assertNotIn("Hill repeats", html)
+        self.assertNotIn("Race day", html)
+        self.assertNotIn("Week 1 total", html)
+        self.assertNotIn("Week 2 total", html)
+        self.assertNotIn('<details class="training-plan-week', html)
+        self.assertEqual(html.count('class="training-plan-session-row"'), 1)
+
+    def test_plan_table_weekday_filter_all_keeps_week_rows(self):
+        html = training_plan_table_html(
+            self._sample_weeks(),
+            show_all_weeks=True,
+            weekday_filter="All",
+            today=pd.Timestamp("2026-09-01", tz="UTC"),
+        )
+        self.assertIn("Week 1 total", html)
+        self.assertIn('<details class="training-plan-week">', html)
+        self.assertNotIn("training-plan-table--weekday-filter", html)
+
+    def test_plan_table_weekday_filter_empty_state(self):
+        html = training_plan_table_html(
+            self._sample_weeks(),
+            show_all_weeks=True,
+            weekday_filter="Fri",
+            today=pd.Timestamp("2026-09-01", tz="UTC"),
+        )
+        self.assertIn("No Fri sessions in this plan.", html)
+        self.assertNotIn("Easy run", html)
+        self.assertNotIn('<details class="training-plan-week', html)
+
+    def test_plan_table_weekday_filter_respects_focus_week_mode(self):
+        """This-week-only + weekday still scopes to the current week."""
+        html = training_plan_table_html(
+            self._sample_weeks(),
+            expanded_week_index=1,
+            show_all_weeks=False,
+            weekday_filter="Wed",
+            today=pd.Timestamp("2026-09-16", tz="UTC"),
+        )
+        self.assertIn("Hill repeats", html)
+        self.assertNotIn("Easy run", html)
+        self.assertNotIn("Week 2 total", html)
+        empty = training_plan_table_html(
+            self._sample_weeks(),
+            expanded_week_index=1,
+            show_all_weeks=False,
+            weekday_filter="Tue",
+            today=pd.Timestamp("2026-09-16", tz="UTC"),
+        )
+        self.assertIn("No Tue sessions this week.", empty)
+        self.assertNotIn("Easy run", empty)
+
+    def test_plan_table_weekday_filter_css(self):
+        self.assertIn(".st-key-training_plan_weekday_filter", GLOBAL_CSS)
+        self.assertIn(".training-plan-table--weekday-filter .training-plan-session-row", GLOBAL_CSS)
+
 
 class PlanVsActualAggregatorTests(unittest.TestCase):
     def _plan(self) -> dict[str, object]:
@@ -2304,6 +2399,130 @@ class PlanVsActualAggregatorTests(unittest.TestCase):
         self.assertTrue(pd.isna(out.iloc[0]["plan_elevation_ft"]))
         self.assertTrue(pd.isna(out.iloc[0]["plan_name"]))
         self.assertTrue(pd.isna(out.iloc[0]["plan_week"]))
+
+    def test_plan_targets_by_period_week_matches_week_totals(self):
+        comparison = plan_targets_by_period(
+            [self._plan()], "Week", self._runs()
+        )
+        weekly = plan_vs_actual_all_plans([self._plan()], self._runs())
+        self.assertEqual(list(comparison["period_key"]), list(weekly["period_key"]))
+        self.assertAlmostEqual(
+            float(comparison.iloc[0]["plan_miles"]), float(weekly.iloc[0]["plan_miles"])
+        )
+
+    def test_attach_plan_targets_day_sums_sessions(self):
+        comparison = plan_targets_by_period([self._plan()], "Day")
+        self.assertEqual(
+            set(comparison["period_key"]),
+            {"2026-09-14", "2026-09-16", "2026-09-18"},
+        )
+        by_key = comparison.set_index("period_key")
+        self.assertAlmostEqual(float(by_key.loc["2026-09-14", "plan_miles"]), 4.0)
+        self.assertAlmostEqual(float(by_key.loc["2026-09-16", "plan_miles"]), 3.8)
+        self.assertAlmostEqual(float(by_key.loc["2026-09-18", "plan_miles"]), 10.0)
+        # Week 2 has totals but empty sessions — Day grain ignores it.
+        self.assertNotIn("2026-09-21", set(comparison["period_key"]))
+
+        period_df = pd.DataFrame(
+            {
+                "period_key": [
+                    "2026-09-13",
+                    "2026-09-14",
+                    "2026-09-16",
+                    "2026-09-18",
+                ],
+                "total_miles": [1.0, 4.0, 0.0, 9.5],
+            }
+        )
+        self.assertTrue(plan_targets_overlap_periods(comparison, period_df))
+        out = attach_plan_targets_to_periods(period_df, comparison)
+        self.assertTrue(pd.isna(out.iloc[0]["plan_miles"]))
+        self.assertAlmostEqual(float(out.iloc[1]["plan_miles"]), 4.0)
+        self.assertEqual(out.iloc[1]["plan_name"], "Sample")
+        self.assertEqual(int(out.iloc[1]["plan_week"]), 1)
+        self.assertAlmostEqual(float(out.iloc[2]["plan_miles"]), 3.8)
+        self.assertAlmostEqual(float(out.iloc[3]["plan_miles"]), 10.0)
+
+    def test_attach_plan_targets_month_sums_sessions(self):
+        comparison = plan_targets_by_period([self._plan()], "Month")
+        self.assertEqual(list(comparison["period_key"]), ["2026-09"])
+        # 4 + 3.8 + 10 from week 1 sessions; week 2 empty sessions ignored.
+        self.assertAlmostEqual(float(comparison.iloc[0]["plan_miles"]), 17.8)
+        self.assertTrue(pd.isna(comparison.iloc[0]["plan_elevation_ft"]))
+        self.assertEqual(comparison.iloc[0]["plan_name"], "Sample")
+        self.assertEqual(int(comparison.iloc[0]["plan_week"]), 1)
+
+        period_df = pd.DataFrame(
+            {
+                "period_key": ["2026-08", "2026-09", "2026-10"],
+                "total_miles": [1.0, 20.0, 3.0],
+            }
+        )
+        out = attach_plan_targets_to_periods(period_df, comparison)
+        self.assertTrue(pd.isna(out.iloc[0]["plan_miles"]))
+        self.assertAlmostEqual(float(out.iloc[1]["plan_miles"]), 17.8)
+        self.assertTrue(pd.isna(out.iloc[2]["plan_miles"]))
+
+    def test_attach_plan_targets_month_joins_multi_week_identities(self):
+        plan = {
+            "name": "Sample",
+            "weeks": [
+                {
+                    "week_start": pd.Timestamp("2026-09-14", tz="UTC"),
+                    "total_miles": 7.8,
+                    "total_elevation_ft": None,
+                    "sessions": [
+                        {
+                            "date": pd.Timestamp("2026-09-14", tz="UTC"),
+                            "miles": 4.0,
+                            "elevation_ft": None,
+                        },
+                        {
+                            "date": pd.Timestamp("2026-09-16", tz="UTC"),
+                            "miles": 3.8,
+                            "elevation_ft": None,
+                        },
+                    ],
+                },
+                {
+                    "week_start": pd.Timestamp("2026-09-21", tz="UTC"),
+                    "total_miles": 12.0,
+                    "total_elevation_ft": 800.0,
+                    "sessions": [
+                        {
+                            "date": pd.Timestamp("2026-09-21", tz="UTC"),
+                            "miles": 5.0,
+                            "elevation_ft": 400.0,
+                        },
+                        {
+                            "date": pd.Timestamp("2026-09-25", tz="UTC"),
+                            "miles": 7.0,
+                            "elevation_ft": 400.0,
+                        },
+                    ],
+                },
+            ],
+        }
+        comparison = plan_targets_by_period([plan], "Month")
+        period_df = pd.DataFrame({"period_key": ["2026-09"], "total_miles": [30.0]})
+        out = attach_plan_targets_to_periods(period_df, comparison)
+        self.assertAlmostEqual(float(out.iloc[0]["plan_miles"]), 19.8)
+        self.assertAlmostEqual(float(out.iloc[0]["plan_elevation_ft"]), 800.0)
+        self.assertEqual(
+            out.iloc[0]["plan_name"], "Sample · Week 1 / Sample · Week 2"
+        )
+        self.assertTrue(pd.isna(out.iloc[0]["plan_week"]))
+
+    def test_attach_plan_targets_year_sums_sessions(self):
+        comparison = plan_targets_by_period([self._plan()], "Year")
+        self.assertEqual(list(comparison["period_key"]), ["2026"])
+        self.assertAlmostEqual(float(comparison.iloc[0]["plan_miles"]), 17.8)
+        period_df = pd.DataFrame(
+            {"period_key": ["2025", "2026"], "total_miles": [1.0, 50.0]}
+        )
+        out = attach_plan_targets_to_periods(period_df, comparison)
+        self.assertTrue(pd.isna(out.iloc[0]["plan_miles"]))
+        self.assertAlmostEqual(float(out.iloc[1]["plan_miles"]), 17.8)
 
 
 class PlanZoomWindowTests(unittest.TestCase):

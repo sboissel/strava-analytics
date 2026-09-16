@@ -43,8 +43,8 @@ from data import (
     load_runs,
     load_training_plans,
     period_showing_label,
+    plan_targets_by_period,
     plan_targets_overlap_periods,
-    plan_vs_actual_all_plans,
     training_plans_max_end,
 )
 from insights_data import (
@@ -77,10 +77,14 @@ def _race_week_strip(period_metrics, grain: str) -> None:
 
 
 def _with_plan_targets(period_metrics, plans, runs, *, grain: str, today: pd.Timestamp):
-    """Attach plan miles/elevation when Week grain overlaps any loaded plan."""
-    if grain != "Week" or not plans:
+    """Attach plan miles/elevation when Show By periods overlap any loaded plan.
+
+    Week uses plan week totals; Day / Month / Year sum dated plan sessions
+    into each period (see ``plan_targets_by_period``).
+    """
+    if not plans:
         return period_metrics
-    comparison = plan_vs_actual_all_plans(plans, runs, as_of=today)
+    comparison = plan_targets_by_period(plans, grain, runs, as_of=today)
     if not plan_targets_overlap_periods(comparison, period_metrics):
         return period_metrics
     return attach_plan_targets_to_periods(period_metrics, comparison)

@@ -2268,6 +2268,73 @@ def _training_plan_session_row_html(
     )
 
 
+# Weekday filter options for Training plans (matches ``format_weekday_short``).
+TRAINING_PLAN_WEEKDAY_ALL = "All"
+TRAINING_PLAN_WEEKDAY_OPTIONS: tuple[str, ...] = (
+    TRAINING_PLAN_WEEKDAY_ALL,
+    "Mon",
+    "Tue",
+    "Wed",
+    "Thu",
+    "Fri",
+    "Sat",
+    "Sun",
+)
+
+
+def _normalize_training_plan_weekday_filter(weekday_filter: object | None) -> str | None:
+    """Return a short weekday label to filter on, or ``None`` for all days.
+
+    Parameters
+    ----------
+    weekday_filter :
+        ``None``, ``"All"``, or a short English weekday such as ``"Fri"``.
+
+    Returns
+    -------
+    str or None
+        Normalized weekday (``Mon``…``Sun``), or ``None`` when unfiltered.
+    """
+    if weekday_filter is None:
+        return None
+    label = str(weekday_filter).strip()
+    if not label or label == TRAINING_PLAN_WEEKDAY_ALL:
+        return None
+    return label
+
+
+def _session_matches_weekday(
+    session: Mapping[str, object],
+    weekday: str | None,
+) -> bool:
+    """Return whether a plan session falls on ``weekday`` (or always if unset).
+
+    Parameters
+    ----------
+    session :
+        Plan session dict with optional ``date``.
+    weekday :
+        Short weekday from ``format_weekday_short``, or ``None`` for all days.
+
+    Returns
+    -------
+    bool
+        ``True`` when the session should appear under the active filter.
+    """
+    if weekday is None:
+        return True
+    date_raw = session.get("date")
+    if date_raw is None:
+        return False
+    try:
+        import pandas as pd
+
+        session_day = normalize_utc(pd.Timestamp(date_raw))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    return format_weekday_short(session_day) == weekday
+
+
 def _training_plan_miles_label(miles: float) -> str:
     """Format week-total miles for plan table cells."""
     if abs(miles - round(miles)) < 1e-9:
@@ -2325,11 +2392,31 @@ def _training_plan_visible_week_index(
     return current_plan_week_index(weeks, as_of)  # type: ignore[arg-type]
 
 
+def _training_plan_table_shell(body: str, *, table_class: str = "") -> str:
+    """Wrap plan table body rows with the shared head and outer chrome."""
+    extra = f" {table_class}" if table_class else ""
+    return (
+        '<div class="training-plan-table-wrap">'
+        f'<div class="training-plan-table{extra}" role="table">'
+        '<div class="training-plan-head" role="row">'
+        "<span>Day</span>"
+        "<span>Date</span>"
+        "<span>Session</span>"
+        "<span>Shoes</span>"
+        "<span>Miles</span>"
+        "<span>Elev (ft)</span>"
+        "</div>"
+        f"{body}"
+        "</div></div>"
+    )
+
+
 def training_plan_table_html(
     weeks: Sequence[Mapping[str, object]],
     *,
     expanded_week_index: int | None = None,
     show_all_weeks: bool = True,
+    weekday_filter: object | None = None,
     today: object | None = None,
     shoe_plans: Sequence[Mapping[str, object]] | None = None,
     shoe_gear=None,
@@ -2344,6 +2431,9 @@ def training_plan_table_html(
     ``today`` is emitted (``expanded_week_index`` or ``current_plan_week_index``);
     other weeks are omitted. When today falls in no plan week, an empty-state
     message is shown instead of falling back to week 1.
+    When ``weekday_filter`` is a short weekday (``Mon``…``Sun``), week summary
+    rows are omitted and only matching session rows are listed (week-over-week
+    comparison). ``All`` / ``None`` keeps the expandable week layout.
     Race sessions use muted-gold text for the whole row (bold session name +
     Race badge). The focus day — today when a session falls on it, otherwise
     the next upcoming session day — gets a cool row wash distinct from race
@@ -2370,6 +2460,9 @@ def training_plan_table_html(
         week stays collapsed until the user opens a ``<details>`` row.
     show_all_weeks : bool, optional
         When False, render only the focus week block (no other week rows).
+    weekday_filter : str, optional
+        ``All`` / ``None`` for every session; otherwise a short weekday
+        (``Mon``…``Sun``) matching ``format_weekday_short``.
     today :
         Reference day for focus highlighting (defaults to now UTC).
     shoe_plans :
@@ -2406,6 +2499,7 @@ def training_plan_table_html(
     focus_date = plan_focus_session_date(weeks, as_of)
     # Calendar week containing today — not merely the visible focus-mode week.
     current_week_idx = current_plan_week_index(weeks, as_of)
+    weekday = _normalize_training_plan_weekday_filter(weekday_filter)
 
     if show_all_weeks:
         indexed_weeks: list[tuple[int, Mapping[str, object]]] = [
@@ -2424,21 +2518,45 @@ def training_plan_table_html(
             open_week_index = 0
 
     if not indexed_weeks and not show_all_weeks:
-        return (
-            '<div class="training-plan-table-wrap">'
-            '<div class="training-plan-table" role="table">'
-            '<div class="training-plan-head" role="row">'
-            "<span>Day</span>"
-            "<span>Date</span>"
-            "<span>Session</span>"
-            "<span>Shoes</span>"
-            "<span>Miles</span>"
-            "<span>Elev (ft)</span>"
-            "</div>"
+        return _training_plan_table_shell(
             '<div class="race-results-empty">'
             "No current week in this plan."
             "</div>"
-            "</div></div>"
+        )
+
+    # Weekday filter: flat session list (no week-total rows) for WoW compare.
+    if weekday is not None:
+        session_rows: list[str] = []
+        for _orig_week_i, week in indexed_weeks:
+            for session in list(week.get("sessions") or []):
+                if not isinstance(session, Mapping):
+                    continue
+                if not _session_matches_weekday(session, weekday):
+                    continue
+                session_rows.append(
+                    _training_plan_session_row_html(
+                        session,
+                        focus_date=focus_date,
+                        today=as_of,
+                        shoe_plans=shoe_plans,
+                        shoe_gear=shoe_gear,
+                        shoe_estimates=shoe_estimates,
+                        shoe_actuals=shoe_actuals,
+                    )
+                )
+        if not session_rows:
+            empty_msg = (
+                f"No {html.escape(weekday)} sessions in this plan."
+                if show_all_weeks
+                else f"No {html.escape(weekday)} sessions this week."
+            )
+            return _training_plan_table_shell(
+                f'<div class="race-results-empty">{empty_msg}</div>',
+                table_class="training-plan-table--weekday-filter",
+            )
+        return _training_plan_table_shell(
+            "".join(session_rows),
+            table_class="training-plan-table--weekday-filter",
         )
 
     week_blocks: list[str] = []
@@ -2492,20 +2610,7 @@ def training_plan_table_html(
             "</details>"
         )
 
-    return (
-        '<div class="training-plan-table-wrap">'
-        '<div class="training-plan-table" role="table">'
-        '<div class="training-plan-head" role="row">'
-        "<span>Day</span>"
-        "<span>Date</span>"
-        "<span>Session</span>"
-        "<span>Shoes</span>"
-        "<span>Miles</span>"
-        "<span>Elev (ft)</span>"
-        "</div>"
-        f"{''.join(week_blocks)}"
-        "</div></div>"
-    )
+    return _training_plan_table_shell("".join(week_blocks))
 
 
 def training_plan_week_table_html(
@@ -2585,7 +2690,10 @@ def render_training_plans(
     focus week is rendered (session state ``training_plan_show_all_weeks`` is
     False); plans with no calendar week containing ``today`` are omitted
     entirely in that mode. A section-level toggle reveals all plans and
-    weeks as ``<details>`` rows. Shoes cells on future-dated sessions show a
+    weeks as ``<details>`` rows. A section-level weekday select
+    (``training_plan_weekday_filter``) can list only Mon–Sun sessions across
+    visible weeks (hides week-total rows) for week-over-week comparison.
+    Shoes cells on future-dated sessions show a
     hover estimate of total mileage (gear actuals + planned miles on that
     shoe across **all loaded plans** with ``today < date ≤ session date``).
     Wear tips in that hover flag prepare/limit bands from estimate (future)
@@ -2627,15 +2735,31 @@ def render_training_plans(
         as_of = None if today is None else pd.Timestamp(today)
         if "training_plan_show_all_weeks" not in st.session_state:
             st.session_state.training_plan_show_all_weeks = False
+        if "training_plan_weekday_filter" not in st.session_state:
+            st.session_state.training_plan_weekday_filter = TRAINING_PLAN_WEEKDAY_ALL
         show_all_weeks = bool(st.session_state.training_plan_show_all_weeks)
         toggle_label = (
             "Show this week only"
             if show_all_weeks
             else "Show full training plan"
         )
-        if st.button(toggle_label, key="training_plan_show_all_weeks_btn"):
-            st.session_state.training_plan_show_all_weeks = not show_all_weeks
-            st.rerun()
+        toggle_col, day_col = st.columns([2.4, 1.1], gap="small")
+        with toggle_col:
+            if st.button(toggle_label, key="training_plan_show_all_weeks_btn"):
+                st.session_state.training_plan_show_all_weeks = not show_all_weeks
+                st.rerun()
+        with day_col:
+            weekday_filter = st.selectbox(
+                "Day",
+                options=list(TRAINING_PLAN_WEEKDAY_OPTIONS),
+                key="training_plan_weekday_filter",
+                label_visibility="collapsed",
+                help=(
+                    "Show only sessions on this weekday across the visible "
+                    "plan weeks (week totals hidden). Choose All for the "
+                    "full week layout."
+                ),
+            )
 
         shoe_actuals: dict[str, float] = {}
         gear = None
@@ -2681,6 +2805,7 @@ def render_training_plans(
                         weeks,
                         expanded_week_index=expand_week,
                         show_all_weeks=show_all_weeks,
+                        weekday_filter=weekday_filter,
                         today=as_of,
                         shoe_plans=plans if gear is not None else None,
                         shoe_gear=gear,
