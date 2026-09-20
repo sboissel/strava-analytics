@@ -27,6 +27,8 @@ from dashboard.data import (
     load_training_plans,
     lookup_shoe_miles,
     normalize_shoe_label,
+    parse_plan_course_map,
+    parse_plan_course_map_url,
     parse_plan_elevation,
     parse_plan_header_name,
     parse_plan_miles,
@@ -133,6 +135,62 @@ class PlanRaceAndMilesTests(unittest.TestCase):
         self.assertIsNone(parse_plan_notes({"notes": ""}))
         self.assertIsNone(parse_plan_notes({"notes": None}))
         self.assertIsNone(parse_plan_notes({}))
+
+    def test_parse_plan_course_map(self):
+        name, url, alt, alt_url = parse_plan_course_map(
+            {
+                "course_map_name": "  Pico de Veleta (lower) mile 1.2–5.2 ",
+                "course_map_url": "https://www.strava.com/routes/3535613882450267630",
+                "course_map_alt_name": "  Alt route ",
+                "course_map_alt_url": (
+                    "https://www.strava.com/routes/3535620966288012090"
+                ),
+            }
+        )
+        self.assertEqual(name, "Pico de Veleta (lower) mile 1.2–5.2")
+        self.assertEqual(
+            url, "https://www.strava.com/routes/3535613882450267630"
+        )
+        self.assertEqual(alt, "Alt route")
+        self.assertEqual(
+            alt_url, "https://www.strava.com/routes/3535620966288012090"
+        )
+
+        name_only, no_url, no_alt, no_alt_url = parse_plan_course_map(
+            {"course_map_name": "Sierra Nevada MEDIA mile 7.2–10.2"}
+        )
+        self.assertEqual(name_only, "Sierra Nevada MEDIA mile 7.2–10.2")
+        self.assertIsNone(no_url)
+        self.assertIsNone(no_alt)
+        self.assertIsNone(no_alt_url)
+
+        # Alt URL without alt name is dropped.
+        _, _, orphan_alt, orphan_alt_url = parse_plan_course_map(
+            {
+                "course_map_name": "Primary",
+                "course_map_alt_url": "https://example.com/alt",
+            }
+        )
+        self.assertIsNone(orphan_alt)
+        self.assertIsNone(orphan_alt_url)
+
+        self.assertEqual(
+            parse_plan_course_map({"course_map_name": "", "course_map_url": ""}),
+            (None, None, None, None),
+        )
+        self.assertEqual(
+            parse_plan_course_map({"course_map_name": "—", "course_map_url": "-"}),
+            (None, None, None, None),
+        )
+        self.assertIsNone(
+            parse_plan_course_map_url("javascript:alert(1)")
+        )
+        self.assertIsNone(parse_plan_course_map_url("ftp://example.com/x"))
+        self.assertIsNone(parse_plan_course_map_url("not-a-url"))
+        self.assertEqual(
+            parse_plan_course_map_url("http://example.com/route"),
+            "http://example.com/route",
+        )
 
 
 class EstimatedShoeMileageTests(unittest.TestCase):
@@ -961,6 +1019,75 @@ class PlanFileParseTests(unittest.TestCase):
         long_run = by_date[pd.Timestamp("2026-07-31", tz="UTC")]
         self.assertEqual(long_run["notes"], "Trail, easy/comfortable effort")
 
+    def test_sierra_parses_course_map_fields(self):
+        repo_plans = Path(__file__).resolve().parents[2] / "data" / "plans"
+        sierra = parse_training_plan_file(repo_plans / "sierra_half.csv")
+        self.assertEqual(sierra["name"], "Sierra Nevada Half")
+        by_date = {
+            s["date"]: s
+            for week in sierra["weeks"]
+            for s in week["sessions"]
+        }
+        # Name + URL, no alt.
+        long_dec5 = by_date[pd.Timestamp("2026-12-05", tz="UTC")]
+        self.assertEqual(long_dec5["course_map_name"], "6-Mile Race-Course Route")
+        self.assertEqual(
+            long_dec5["course_map_url"],
+            "https://www.strava.com/routes/3535661480546733202",
+        )
+        self.assertIsNone(long_dec5["course_map_alt_name"])
+        self.assertIsNone(long_dec5["course_map_alt_url"])
+        # Name + URL, no alt.
+        long_dec26 = by_date[pd.Timestamp("2026-12-26", tz="UTC")]
+        self.assertEqual(
+            long_dec26["course_map_name"], "8-Mile High Mountain Route A"
+        )
+        self.assertEqual(
+            long_dec26["course_map_url"],
+            "https://www.strava.com/routes/3535640625955657322",
+        )
+        self.assertIsNone(long_dec26["course_map_alt_name"])
+        self.assertIsNone(long_dec26["course_map_alt_url"])
+        # Name + URL + alt name + alt URL (snow risk).
+        long_jan9 = by_date[pd.Timestamp("2027-01-09", tz="UTC")]
+        self.assertEqual(
+            long_jan9["course_map_name"], "10-Mile Race-Course Route Rev A"
+        )
+        self.assertEqual(
+            long_jan9["course_map_url"],
+            "https://www.strava.com/routes/3535646059573469330",
+        )
+        self.assertEqual(
+            long_jan9["course_map_alt_name"],
+            "10-Mile High Mountain Route",
+        )
+        self.assertEqual(
+            long_jan9["course_map_alt_url"],
+            "https://www.strava.com/routes/3535620966288012090",
+        )
+        # Alt name only (no alt URL).
+        long_feb27 = by_date[pd.Timestamp("2027-02-27", tz="UTC")]
+        self.assertEqual(
+            long_feb27["course_map_alt_name"],
+            "10-Mile High Mountain Route",
+        )
+        self.assertIsNone(long_feb27["course_map_alt_url"])
+        # Easy day with no course map.
+        easy = by_date[pd.Timestamp("2026-11-30", tz="UTC")]
+        self.assertIsNone(easy["course_map_name"])
+        self.assertIsNone(easy["course_map_url"])
+        self.assertIsNone(easy["course_map_alt_name"])
+        self.assertIsNone(easy["course_map_alt_url"])
+
+    def test_november_halves_course_map_fields_absent(self):
+        repo_plans = Path(__file__).resolve().parents[2] / "data" / "plans"
+        nov = parse_training_plan_file(repo_plans / "november_halves.csv")
+        first = nov["weeks"][0]["sessions"][0]
+        self.assertIsNone(first.get("course_map_name"))
+        self.assertIsNone(first.get("course_map_url"))
+        self.assertIsNone(first.get("course_map_alt_name"))
+        self.assertIsNone(first.get("course_map_alt_url"))
+
 
 class PlanFocusDateTests(unittest.TestCase):
     def _weeks(self) -> list[dict[str, object]]:
@@ -1434,7 +1561,193 @@ class PlanTableHtmlTests(unittest.TestCase):
         self.assertIn('class="training-plan-shoes">Hoka Mach 7<', html)
         self.assertIn("training-plan-week-shoes", html)
         self.assertIn(
-            "minmax(5.5rem, 1.15fr) 4.5rem 5rem",
+            "minmax(14rem, 2.4fr) minmax(5.5rem, 1fr) 4.5rem 5rem",
+            GLOBAL_CSS,
+        )
+        course_block = GLOBAL_CSS.split(".training-plan-course {", 1)[1].split(
+            "}", 1
+        )[0]
+        self.assertIn("white-space: nowrap;", course_block)
+        self.assertNotIn("overflow-wrap:", course_block)
+
+    def test_plan_table_planned_course_column(self):
+        html = training_plan_table_html(
+            [
+                {
+                    "week_label": "Dec 21, 2026 - Dec 27, 2026",
+                    "week_start": pd.Timestamp("2026-12-21", tz="UTC"),
+                    "total_miles": 8.0,
+                    "total_elevation_ft": 1400.0,
+                    "sessions": [
+                        {
+                            "date": pd.Timestamp("2026-12-26", tz="UTC"),
+                            "session": "Long run",
+                            "miles_label": "8",
+                            "elevation_ft": 1400,
+                            "shoes": "Pegasus Trail 5",
+                            "course_map_name": "Pico de Veleta (lower) mile 1.2–5.2",
+                            "course_map_url": (
+                                "https://www.strava.com/routes/3535613882450267630"
+                            ),
+                            "is_race": False,
+                        },
+                        {
+                            "date": pd.Timestamp("2026-12-05", tz="UTC"),
+                            "session": "Long run",
+                            "miles_label": "6",
+                            "elevation_ft": 450,
+                            "shoes": "Pegasus Trail 5",
+                            "course_map_name": "Sierra Nevada MEDIA mile 7.2–10.2",
+                            "course_map_url": None,
+                            "is_race": False,
+                        },
+                        {
+                            "date": pd.Timestamp("2026-12-04", tz="UTC"),
+                            "session": "Rest",
+                            "miles_label": "—",
+                            "elevation_ft": None,
+                            "shoes": None,
+                            "course_map_name": None,
+                            "course_map_url": None,
+                            "is_race": False,
+                        },
+                        {
+                            "date": pd.Timestamp("2026-12-03", tz="UTC"),
+                            "session": "Bad link",
+                            "miles_label": "3",
+                            "elevation_ft": None,
+                            "shoes": None,
+                            "course_map_name": "Unsafe",
+                            "course_map_url": "javascript:alert(1)",
+                            "is_race": False,
+                        },
+                    ],
+                },
+            ],
+            expanded_week_index=0,
+            today=pd.Timestamp("2026-09-01", tz="UTC"),
+        )
+        self.assertIn(">Planned course<", html)
+        self.assertIn("training-plan-week-course", html)
+        self.assertIn(
+            'href="https://www.strava.com/routes/3535613882450267630"',
+            html,
+        )
+        self.assertIn('target="_blank"', html)
+        self.assertIn('rel="noopener noreferrer"', html)
+        self.assertIn("Pico de Veleta (lower) mile 1.2–5.2</a>", html)
+        # Name without URL: plain text, not a link.
+        self.assertIn(
+            'class="training-plan-course">Sierra Nevada MEDIA mile 7.2–10.2<',
+            html,
+        )
+        self.assertNotIn("Sierra Nevada MEDIA mile 7.2–10.2</a>", html)
+        # Missing name → em dash.
+        self.assertIn('class="training-plan-course">—<', html)
+        # Reject non-http(s) URLs.
+        self.assertNotIn("javascript:", html)
+        self.assertIn('class="training-plan-course">Unsafe<', html)
+
+    def test_plan_table_planned_course_alt_tooltip(self):
+        html = training_plan_table_html(
+            [
+                {
+                    "week_label": "Jan 4, 2027 - Jan 10, 2027",
+                    "week_start": pd.Timestamp("2027-01-04", tz="UTC"),
+                    "total_miles": 20.0,
+                    "total_elevation_ft": None,
+                    "sessions": [
+                        {
+                            "date": pd.Timestamp("2027-01-09", tz="UTC"),
+                            "session": "Long run",
+                            "miles_label": "10",
+                            "elevation_ft": None,
+                            "shoes": None,
+                            "course_map_name": "10-Mile Race-Course Route Rev A",
+                            "course_map_url": (
+                                "https://www.strava.com/routes/3535646059573469330"
+                            ),
+                            "course_map_alt_name": "10-Mile High Mountain Route",
+                            "course_map_alt_url": (
+                                "https://www.strava.com/routes/3535620966288012090"
+                            ),
+                            "is_race": False,
+                        },
+                        {
+                            "date": pd.Timestamp("2027-02-27", tz="UTC"),
+                            "session": "Long run",
+                            "miles_label": "10",
+                            "elevation_ft": None,
+                            "shoes": None,
+                            "course_map_name": "10-Mile Race-Course Route Rev B",
+                            "course_map_url": None,
+                            "course_map_alt_name": "10-Mile High Mountain Route",
+                            "course_map_alt_url": None,
+                            "is_race": False,
+                        },
+                        {
+                            "date": pd.Timestamp("2027-01-05", tz="UTC"),
+                            "session": "Easy",
+                            "miles_label": "4",
+                            "elevation_ft": None,
+                            "shoes": None,
+                            "course_map_name": "Primary only",
+                            "course_map_url": None,
+                            "course_map_alt_name": None,
+                            "course_map_alt_url": (
+                                "https://www.strava.com/routes/3535620966288012090"
+                            ),
+                            "is_race": False,
+                        },
+                    ],
+                },
+            ],
+            expanded_week_index=0,
+            today=pd.Timestamp("2026-09-01", tz="UTC"),
+        )
+        # Name + alt URL → linked tip (prefix plain, name linked).
+        self.assertIn(
+            'class="training-plan-course training-plan-cell--tip"',
+            html,
+        )
+        self.assertIn(
+            '<span class="kpi-tooltip" role="tooltip">'
+            "Alternative course - "
+            '<a href="https://www.strava.com/routes/3535620966288012090" '
+            'target="_blank" rel="noopener noreferrer">'
+            "10-Mile High Mountain Route</a></span>",
+            html,
+        )
+        # Name-only alt → plain tip text.
+        self.assertIn(
+            '<span class="kpi-tooltip" role="tooltip">'
+            "Alternative course - 10-Mile High Mountain Route</span>",
+            html,
+        )
+        # No alt name → no tip even if orphan alt URL is present.
+        self.assertIn(
+            'class="training-plan-course">Primary only<',
+            html,
+        )
+        self.assertNotIn(
+            'training-plan-course training-plan-cell--tip">Primary only',
+            html,
+        )
+        self.assertIn(
+            ".training-plan-cell--tip:hover .kpi-tooltip",
+            GLOBAL_CSS,
+        )
+        # Tip stays hoverable/clickable: override pointer-events + gap bridge.
+        tip_hover = GLOBAL_CSS.split(
+            ".training-plan-cell--tip:hover .kpi-tooltip,", 1
+        )[1].split("}", 1)[0]
+        self.assertIn("pointer-events: auto", tip_hover)
+        self.assertIn(
+            ".training-plan-cell--tip .kpi-tooltip::before",
+            GLOBAL_CSS,
+        )
+        self.assertIn(
+            ".training-plan-cell--tip .kpi-tooltip a",
             GLOBAL_CSS,
         )
 

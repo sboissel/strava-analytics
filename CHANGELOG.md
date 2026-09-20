@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-09-20
+
+### Added
+
+**Pipeline / data**
+
+- Sierra Nevada Half plan (`data/plans/sierra_half.csv`): **Course map name**, **Course map url**, optional **Alt course map name (snow risk)**, and optional **Alt course map url**.
+
+**Dashboard**
+
+- **Training**: plan table **Planned course** column (course map name; links to Strava/course URL when present). Hover shows alternate course name in a CSS `.kpi-tooltip` when set; alt URL becomes a hyperlink in the tip.
+
+### Changed
+
+**Pipeline / data**
+
+- Minor update to the November halves plan (`data/plans/november_halves.csv`).
+- Sierra Nevada Half plan: run target elevations use smoothed GPX elevation for the trail in place of the previously reported values.
+
 ## [1.9.0] — 2026-09-16
 
 ### Added

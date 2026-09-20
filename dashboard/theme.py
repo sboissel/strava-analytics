@@ -3504,7 +3504,7 @@ GLOBAL_CSS = f"""
   .training-plan-week-sum,
   .training-plan-session-row {{
     display: grid;
-    grid-template-columns: 2.35rem minmax(8.5rem, 1.45fr) minmax(8rem, 2fr) minmax(5.5rem, 1.15fr) 4.5rem 5rem;
+    grid-template-columns: 2.35rem minmax(8.5rem, 1.35fr) minmax(7.5rem, 1.45fr) minmax(14rem, 2.4fr) minmax(5.5rem, 1fr) 4.5rem 5rem;
     column-gap: 0.35rem;
     align-items: center;
   }}
@@ -3522,6 +3522,21 @@ GLOBAL_CSS = f"""
     font-size: 0.82rem;
     font-weight: 550;
     white-space: nowrap;
+  }}
+  .training-plan-course {{
+    min-width: 0;
+    font-size: 0.82rem;
+    color: {INK};
+    white-space: nowrap;
+  }}
+  .training-plan-course a {{
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: rgba(21, 32, 40, 0.35);
+    text-underline-offset: 0.18em;
+  }}
+  .training-plan-course a:hover {{
+    text-decoration-color: rgba(21, 32, 40, 0.65);
   }}
   .training-plan-shoes {{
     min-width: 0;
@@ -3552,8 +3567,9 @@ GLOBAL_CSS = f"""
     overflow-wrap: anywhere;
     word-break: break-word;
   }}
-  /* Shoes estimate + Session notes: dashed underline + CSS .kpi-tooltip
-     (not native title) so Streamlit/Electron shows hover immediately. */
+  /* Shoes estimate + Session notes + alt course: dashed underline + CSS
+     .kpi-tooltip (not native title) so Streamlit/Electron shows hover
+     immediately. */
   .training-plan-cell--tip {{
     position: relative;
     display: inline-block;
@@ -3582,6 +3598,26 @@ GLOBAL_CSS = f"""
     max-width: min(16rem, 72vw);
     z-index: 50;
   }}
+  /* Invisible hover bridge across the 0.35rem gap so the pointer can
+     move from the cell onto the tip (and click links) without the tip
+     vanishing. Only hit-tests while the tip is visible (pointer-events). */
+  .training-plan-cell--tip .kpi-tooltip::before {{
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    height: 0.45rem;
+  }}
+  .training-plan-cell--tip .kpi-tooltip a {{
+    position: relative;
+    z-index: 1;
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: rgba(21, 32, 40, 0.35);
+    text-underline-offset: 0.18em;
+    pointer-events: auto;
+  }}
   .training-plan-session-row:has(.training-plan-cell--tip:hover),
   .training-plan-session-row:has(.training-plan-cell--tip:focus-within) {{
     position: relative;
@@ -3592,13 +3628,17 @@ GLOBAL_CSS = f"""
   .training-plan-cell--tip:focus-within .kpi-tooltip {{
     visibility: visible;
     opacity: 1;
+    /* Override base .kpi-tooltip pointer-events: none so alt-course
+       (and any other tip links) stay clickable while hovering the tip. */
+    pointer-events: auto;
   }}
+  .training-plan-week-course,
   .training-plan-week-shoes {{
-    /* Week totals: leave Shoes column blank (grid alignment only). */
+    /* Week totals: leave Planned course / Shoes blank (grid alignment only). */
     visibility: hidden;
   }}
-  .training-plan-head > span:nth-child(5),
   .training-plan-head > span:nth-child(6),
+  .training-plan-head > span:nth-child(7),
   .training-plan-num {{
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -3665,7 +3705,7 @@ GLOBAL_CSS = f"""
     background: rgba(91, 155, 213, 0.18);
     box-shadow: inset 3px 0 0 {EASY};
   }}
-  /* Races: muted-gold text on the whole row (day/date/session/shoes/miles/elev/badge).
+  /* Races: muted-gold text on the whole row (day/date/session/course/shoes/miles/elev/badge).
      Override cell-level colors (.training-plan-dow MUTED, .training-plan-shoes INK)
      so every visible cell inherits the same race text. No gold background wash —
      today/next cool wash may still apply. Week summary rows are unaffected. */

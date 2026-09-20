@@ -40,6 +40,7 @@ from data import (
     lookup_shoe_miles,
     normalize_shoe_label,
     normalize_utc,
+    parse_plan_course_map_url,
     period_window_limits,
     plan_focus_session_date,
     shoe_miles_for_wear_flag,
@@ -2138,6 +2139,61 @@ def _session_notes_tooltip(notes: object | None) -> str:
     return text
 
 
+def _training_plan_course_cell_html(session: Mapping[str, object]) -> str:
+    """Return the Planned course cell for a session row.
+
+    Uses ``course_map_name`` as visible text. When ``course_map_url`` is a
+    validated http(s) URL, the name is a new-tab link; otherwise plain text.
+    Missing names render as an em dash like other optional plan cells.
+
+    When ``course_map_alt_name`` is set, a CSS ``.kpi-tooltip`` shows
+    ``Alternative course - <name>`` (plain text) or the same with the name as a
+    new-tab link when ``course_map_alt_url`` is a validated http(s) URL. No tip
+    when alt name is absent.
+    """
+    raw_name = session.get("course_map_name")
+    name = str(raw_name).strip() if raw_name is not None else ""
+    if not name or name in {"—", "-", "–"}:
+        return '<span class="training-plan-course">—</span>'
+    safe_name = html.escape(name)
+    url = parse_plan_course_map_url(session.get("course_map_url"))
+    if url is None:
+        visible = safe_name
+    else:
+        safe_href = html.escape(url, quote=True)
+        visible = (
+            f'<a href="{safe_href}" target="_blank" rel="noopener noreferrer">'
+            f"{safe_name}</a>"
+        )
+
+    alt_raw = session.get("course_map_alt_name")
+    alt_name = str(alt_raw).strip() if alt_raw is not None else ""
+    if not alt_name or alt_name in {"—", "-", "–"}:
+        return f'<span class="training-plan-course">{visible}</span>'
+
+    safe_alt = html.escape(alt_name)
+    tip_prefix = "Alternative course - "
+    alt_url = parse_plan_course_map_url(session.get("course_map_alt_url"))
+    if alt_url is None:
+        tip_inner = f"{tip_prefix}{safe_alt}"
+    else:
+        safe_alt_href = html.escape(alt_url, quote=True)
+        tip_inner = (
+            f"{tip_prefix}"
+            f'<a href="{safe_alt_href}" target="_blank" rel="noopener noreferrer">'
+            f"{safe_alt}</a>"
+        )
+    tip_label = f"{tip_prefix}{alt_name}"
+    return (
+        f'<span class="training-plan-course training-plan-cell--tip" tabindex="0" '
+        f'aria-label="{html.escape(name, quote=True)}; '
+        f'{html.escape(tip_label, quote=True)}">'
+        f"{visible}"
+        f'<span class="kpi-tooltip" role="tooltip">{tip_inner}</span>'
+        f"</span>"
+    )
+
+
 def _training_plan_session_row_html(
     session: Mapping[str, object],
     *,
@@ -2255,12 +2311,14 @@ def _training_plan_session_row_html(
         cell_class="training-plan-session-name",
         tip_modifier="training-plan-cell--tip",
     )
+    course_cell = _training_plan_course_cell_html(session)
     return (
         f'<div class="{row_class}" role="row">'
         f'<span class="training-plan-dow">{html.escape(dow_label)}</span>'
         f'<span class="training-plan-date">{html.escape(date_label)}</span>'
         f'<span class="training-plan-session">'
         f"{session_name_html}{badge}</span>"
+        f"{course_cell}"
         f"{shoes_cell}"
         f'<span class="training-plan-num">{html.escape(miles_label)}</span>'
         f'<span class="training-plan-num">{html.escape(elev_label)}</span>'
@@ -2402,6 +2460,7 @@ def _training_plan_table_shell(body: str, *, table_class: str = "") -> str:
         "<span>Day</span>"
         "<span>Date</span>"
         "<span>Session</span>"
+        "<span>Planned course</span>"
         "<span>Shoes</span>"
         "<span>Miles</span>"
         "<span>Elev (ft)</span>"
@@ -2602,6 +2661,7 @@ def training_plan_table_html(
             f'<span class="training-plan-week-range">'
             f"{html.escape(week_label)}</span>"
             f'<span class="training-plan-week-session">Week {orig_week_i + 1} total</span>'
+            f'<span class="training-plan-course training-plan-week-course" aria-hidden="true"></span>'
             f'<span class="training-plan-shoes training-plan-week-shoes" aria-hidden="true"></span>'
             f'<span class="training-plan-num">{html.escape(miles_label)}</span>'
             f'<span class="training-plan-num">{html.escape(elev_label)}</span>'
