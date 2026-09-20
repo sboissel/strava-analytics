@@ -6,7 +6,7 @@ import re
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-_FALLBACK_VERSION = "1.9.0"
+_FALLBACK_VERSION = "1.10.0"
 _PROJECT_NAME_RE = re.compile(r'(?m)^name\s*=\s*"strava-analytics"')
 _PROJECT_VERSION_RE = re.compile(r'(?m)^version\s*=\s*"([^"]+)"')
 
