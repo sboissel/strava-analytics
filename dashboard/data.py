@@ -8,6 +8,7 @@ import re
 from collections.abc import Mapping, MutableMapping, Sequence
 from pathlib import Path
 from typing import Literal, NamedTuple
+from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
@@ -86,6 +87,18 @@ _PLAN_COL_ALIASES: dict[str, str] = {
     "session notes": "notes",
     "session_notes": "notes",
     "notes": "notes",
+    "course map name": "course_map_name",
+    "course_map_name": "course_map_name",
+    "course map url": "course_map_url",
+    "course map url (strava)": "course_map_url",
+    "strava url": "course_map_url",
+    "course_map_url": "course_map_url",
+    "alt course map name (snow risk)": "course_map_alt_name",
+    "alt course map name": "course_map_alt_name",
+    "course_map_alt_name": "course_map_alt_name",
+    "alt course map url": "course_map_alt_url",
+    "alt course map url (strava)": "course_map_alt_url",
+    "course_map_alt_url": "course_map_alt_url",
 }
 _PLAN_MILES_RANGE_RE = re.compile(
     r"^(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)$"
@@ -3398,6 +3411,72 @@ def parse_plan_notes(row: Mapping[str, object]) -> str | None:
     return text or None
 
 
+def _plan_optional_text(value: object) -> str | None:
+    """Return stripped plan cell text, or ``None`` for blank / dash placeholders."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text in {"—", "-", "–"}:
+        return None
+    return text
+
+
+def parse_plan_course_map_url(value: object) -> str | None:
+    """Return an http(s) course-map URL, or ``None`` when missing/invalid.
+
+    Only ``http`` and ``https`` schemes are accepted so plan cells never emit
+    ``javascript:`` or other unsafe hrefs.
+
+    Parameters
+    ----------
+    value :
+        Raw Course map url / Strava URL cell.
+
+    Returns
+    -------
+    str or None
+        Stripped URL, or ``None`` when blank or not http(s).
+    """
+    text = _plan_optional_text(value)
+    if text is None:
+        return None
+    try:
+        parsed = urlparse(text)
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return None
+    return text
+
+
+def parse_plan_course_map(
+    row: Mapping[str, object],
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Return course map name, URL, and optional alt name/URL from a plan row.
+
+    Parameters
+    ----------
+    row :
+        Normalized plan CSV row with optional ``course_map_name``,
+        ``course_map_url``, ``course_map_alt_name``, and
+        ``course_map_alt_url``.
+
+    Returns
+    -------
+    tuple
+        ``(course_map_name, course_map_url, course_map_alt_name,
+        course_map_alt_url)`` — each ``None`` when blank/invalid. URLs are
+        http(s)-only. Alt URL is cleared when alt name is missing.
+    """
+    name = _plan_optional_text(row.get("course_map_name"))
+    url = parse_plan_course_map_url(row.get("course_map_url"))
+    alt = _plan_optional_text(row.get("course_map_alt_name"))
+    alt_url = parse_plan_course_map_url(row.get("course_map_alt_url"))
+    if alt is None:
+        alt_url = None
+    return name, url, alt, alt_url
+
+
 def normalize_shoe_label(name: object) -> str | None:
     """Return a stripped shoe label, or ``None`` when blank / placeholder.
 
@@ -4224,6 +4303,14 @@ def parse_training_plan_file(path: Path) -> dict[str, object]:
         frame["shoes"] = None
     if "notes" not in frame.columns:
         frame["notes"] = None
+    if "course_map_name" not in frame.columns:
+        frame["course_map_name"] = None
+    if "course_map_url" not in frame.columns:
+        frame["course_map_url"] = None
+    if "course_map_alt_name" not in frame.columns:
+        frame["course_map_alt_name"] = None
+    if "course_map_alt_url" not in frame.columns:
+        frame["course_map_alt_url"] = None
 
     frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
     frame = frame.dropna(subset=["date"]).sort_values("date", kind="mergesort")
@@ -4235,6 +4322,9 @@ def parse_training_plan_file(path: Path) -> dict[str, object]:
         elev = parse_plan_elevation(row.get("target_elevation_ft"))
         shoes = parse_plan_shoes(row)
         notes = parse_plan_notes(row)
+        course_name, course_url, course_alt, course_alt_url = parse_plan_course_map(
+            row
+        )
         sessions.append(
             {
                 "date": normalize_utc(pd.Timestamp(row["date"])),
@@ -4244,6 +4334,10 @@ def parse_training_plan_file(path: Path) -> dict[str, object]:
                 "elevation_ft": elev,
                 "shoes": shoes,
                 "notes": notes,
+                "course_map_name": course_name,
+                "course_map_url": course_url,
+                "course_map_alt_name": course_alt,
+                "course_map_alt_url": course_alt_url,
                 "is_race": is_plan_race_session(session_name),
             }
         )
