@@ -1,4 +1,5 @@
 activity_id,name,type,gear_id,date,distance_miles,moving_time_min,elapsed_time_min,elevation_gain_ft,avg_pace,avg_pace_sec,max_pace,max_pace_sec,start_lat,start_lng,avg_hr,max_hr,%_easy,mt_min_easy,mt_min_hard,hr_zone_1_sec,hr_zone_2_sec,hr_zone_3_sec,hr_zone_4_sec,hr_zone_5_sec,race,race_distance
+20292400259,Feeling run down,Run,g33031373,2026-09-23T06:20:43Z,3.79,00:41:02,00:44:34,462.6,10:50,650,06:30,390,37.174526,-3.589677,130.2,164,85.2,34.3,6.0,215.0,1845.0,233.0,126.0,0.0,False,
 20263600505,Morning Run,Run,g33031360,2026-09-21T06:11:27Z,4.06,00:40:00,00:41:42,72.18,09:51,591,06:54,414,37.173337,-3.593967,124.0,142,100.0,39.5,0.0,302.0,2070.0,0.0,0.0,0.0,False,
 20236219561,Morning Run,Run,g33031350,2026-09-19T06:02:46Z,10.0,01:52:07,02:01:12,1164.7,11:12,672,08:10,490,37.174516,-3.589613,135.3,155,82.3,90.9,19.6,261.0,5195.0,1177.0,0.0,0.0,False,
 20223397849,Bailed on long run,Run,g33031350,2026-09-18T06:40:54Z,1.05,00:12:34,00:20:14,236.22,12:00,720,09:03,543,37.174514,-3.589704,125.0,145,96.6,12.0,0.4,141.0,577.0,25.0,0.0,0.0,False,
