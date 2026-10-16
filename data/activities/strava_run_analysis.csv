@@ -1,4 +1,5 @@
 activity_id,name,type,gear_id,date,distance_miles,moving_time_min,elapsed_time_min,elevation_gain_ft,avg_pace,avg_pace_sec,max_pace,max_pace_sec,start_lat,start_lng,avg_hr,max_hr,%_easy,mt_min_easy,mt_min_hard,hr_zone_1_sec,hr_zone_2_sec,hr_zone_3_sec,hr_zone_4_sec,hr_zone_5_sec,race,race_distance
+20612619996,Morning Run,Run,g33031350,2026-10-16T13:11:34Z,12.0,02:04:07,02:17:37,170.6,10:20,620,06:02,362,42.339173,-71.075437,134.7,152,91.6,111.8,10.2,170.0,6540.0,614.0,0.0,0.0,False,
 20582123762,Surprisingly awful,Run,g33031350,2026-10-14T13:02:54Z,3.75,00:38:30,00:42:56,95.14,10:15,615,07:14,434,42.385733,-71.116141,135.7,150,83.5,31.5,6.2,131.0,1759.0,374.0,0.0,0.0,False,
 20514396931,Not too jet lagged,Run,g33031350,2026-10-09T10:16:19Z,10.0,01:38:03,01:46:19,252.62,09:47,587,07:19,439,42.342565,-71.079131,131.6,150,89.8,87.1,9.9,209.0,5015.0,595.0,0.0,0.0,False,
 20476655550,Afternoon Run,Run,g33031356,2026-10-06T15:57:15Z,3.01,00:31:03,00:31:25,59.06,10:19,619,07:01,421,37.173325,-3.593924,130.4,146,97.0,29.9,0.9,24.0,1772.0,56.0,0.0,0.0,False,
