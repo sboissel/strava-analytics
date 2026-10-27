@@ -1,4 +1,5 @@
 activity_id,name,type,gear_id,date,distance_miles,moving_time_min,elapsed_time_min,elevation_gain_ft,avg_pace,avg_pace_sec,max_pace,max_pace_sec,start_lat,start_lng
+20750945252,Belated Brisket Birthday walk,Hike,,2026-10-27T10:30:11Z,3.91,01:40:31,02:06:38,286.09,25:42,1542.0,14:43,883.0,36.920475,-3.542264
 20712390785,Lunch Hike,Hike,,2026-10-24T09:20:06Z,6.94,02:52:33,03:23:12,1053.15,24:52,1492,11:16,676,37.174405,-3.591382
 20350774300,Still too hot for the dogs,Hike,,2026-09-27T09:56:14Z,5.05,02:04:07,02:28:30,902.23,24:33,1473,05:37,337,37.174392,-3.593619
 20254489806,Morning Hike,Hike,,2026-09-20T08:48:27Z,8.05,03:10:02,03:46:24,1187.66,23:36,1416,11:05,665,37.174474,-3.593653
