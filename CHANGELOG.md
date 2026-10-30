@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Pipeline / data**
 
-- Manual reprocess path for specific Strava activities: edit `data/reprocess_activities.yaml`, run `python -m strava_analytics.reprocess` (or the GitLab CI `reprocess` job with `when: manual` on the default branch). Reuses the same process/CSV helpers as daily sync without moving `highest_activity_id.txt`.
+- Manual reprocess path for specific Strava activities: edit `data/reprocess_activities.yaml`, run `python -m strava_analytics.reprocess` (or the GitLab CI `reprocess` job with `when: manual` on the default branch, or on branch `reprocess` to test without pushing data to `main`). Reuses the same process/CSV helpers as daily sync without moving `highest_activity_id.txt`.
 
 ### Changed
 

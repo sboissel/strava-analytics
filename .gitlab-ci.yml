@@ -82,13 +82,16 @@ sync:
       git push "${REMOTE_URL}" "HEAD:${CI_DEFAULT_BRANCH}"
 
 # Manual only: edit data/reprocess_activities.yaml, push, then play this job.
-# Not scheduled. Prefer default branch so the push lands on main.
+# Not scheduled. Default-branch runs push data to main. Branch `reprocess`
+# is the test path: the same job runs there and pushes back to `reprocess`.
 reprocess:
   stage: sync
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+    - if: $CI_COMMIT_BRANCH == "reprocess"
       when: manual
   variables:
     GIT_DEPTH: "0"
@@ -127,8 +130,10 @@ reprocess:
         exit 1
       fi
       git commit -m "chore: reprocess Strava activities"
+      # Stay on the branch that was played (main, or reprocess while testing).
+      TARGET_BRANCH="${CI_COMMIT_BRANCH}"
       REMOTE_URL="https://oauth2:${CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
-      git fetch "${REMOTE_URL}" "${CI_DEFAULT_BRANCH}"
+      git fetch "${REMOTE_URL}" "${TARGET_BRANCH}"
       if ! git rebase "FETCH_HEAD"; then
         echo "Rebase conflict in data/; preferring reprocess output."
         git checkout --theirs -- "$@" || true
@@ -140,4 +145,4 @@ reprocess:
         fi
         GIT_EDITOR=true git rebase --continue
       fi
-      git push "${REMOTE_URL}" "HEAD:${CI_DEFAULT_BRANCH}"
+      git push "${REMOTE_URL}" "HEAD:${TARGET_BRANCH}"

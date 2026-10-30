@@ -98,10 +98,10 @@ activity_ids:
   - 9876543210
 ```
 
-2. Commit and push to `main` on GitLab.
-3. Open **CI/CD → Pipelines**, open the pipeline for that commit (or **Run pipeline** on `main`), then click the play button on the manual **`reprocess`** job.
+2. Commit and push to branch `reprocess` to test, or to `main` when the result should land on the default branch.
+3. Open **CI/CD → Pipelines**, open the pipeline for that commit (or **Run pipeline** on that branch), then click the play button on the manual **`reprocess`** job.
 
-The job uses the same Strava CI variables as `sync`, runs `PYTHONPATH=src python -m strava_analytics.reprocess`, and commits updated files under `data/activities/` back to `main` (same push pattern as the daily sync). It fails fast if an ID is missing or the API errors. Clear `activity_ids` (or leave `[]`) after a successful run so the next manual play does not re-hit Strava by accident.
+The job uses the same Strava CI variables as `sync`, runs `PYTHONPATH=src python -m strava_analytics.reprocess`, and commits updated files under `data/activities/` back to the branch you played (`reprocess` or `main`). It fails fast if an ID is missing or the API errors. Clear `activity_ids` (or leave `[]`) after a successful run so the next manual play does not re-hit Strava by accident.
 
 Locally (with the same env vars as the pipeline):
 
