@@ -1,0 +1,9 @@
+# Activity IDs to re-fetch from Strava and rewrite in data/activities/.
+# Edit this file, commit, then run the manual GitLab CI job `reprocess`
+# (CI/CD → Pipelines → play on `reprocess`). See README "Reprocess activities".
+#
+# Example:
+# activity_ids:
+#   - 1234567890  # wrong shoes
+#   - 9876543210  # backfill fields
+activity_ids: []

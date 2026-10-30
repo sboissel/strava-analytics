@@ -31,6 +31,7 @@ Shoe mileage on the dashboard is computed from activity `gear_id` values: for ea
   - numpy
   - requests
   - tqdm
+  - PyYAML
 
 ## Environment variables
 
@@ -84,6 +85,29 @@ In GitLab → **Build → Pipeline schedules**:
 3. Save, then use **Play** once to verify after the variables are set.
 
 The `sync` job runs only for scheduled pipelines (and web pipelines on the default branch); the `test` job still runs on normal pushes.
+
+## Reprocess activities
+
+Use this when you need to re-fetch specific activities (wrong shoes / `gear_id`, backfilling new fields, etc.) without resetting `highest_activity_id.txt`.
+
+1. Edit [`data/reprocess_activities.yaml`](data/reprocess_activities.yaml) and list Strava activity IDs under `activity_ids` (YAML `#` comments are fine for reasons):
+
+```yaml
+activity_ids:
+  - 1234567890  # wrong shoes
+  - 9876543210
+```
+
+2. Commit and push to `main` on GitLab.
+3. Open **CI/CD → Pipelines**, open the pipeline for that commit (or **Run pipeline** on `main`), then click the play button on the manual **`reprocess`** job.
+
+The job uses the same Strava CI variables as `sync`, runs `PYTHONPATH=src python -m strava_analytics.reprocess`, and commits updated files under `data/activities/` back to `main` (same push pattern as the daily sync). It fails fast if an ID is missing or the API errors. Clear `activity_ids` (or leave `[]`) after a successful run so the next manual play does not re-hit Strava by accident.
+
+Locally (with the same env vars as the pipeline):
+
+```bash
+PYTHONPATH=src python -m strava_analytics.reprocess
+```
 
 ## Runner's Dashboard
 

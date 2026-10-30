@@ -7,9 +7,9 @@ This repository lives on **GitLab** as the source of truth. A GitLab push mirror
 | GitLab (source) | `https://gitlab.com/sandrineboissel/strava-analytics` |
 | GitHub (mirror) | `https://github.com/sboissel/strava-analytics` |
 
-GitLab CI (`.gitlab-ci.yml`) runs tests on push and a daily scheduled sync that commits updated `data/activities/` files back to `main`. Incremental sync captures `start_lat` / `start_lng` from Strava list/summary payloads on newly processed activities. Pushing to GitLab (including those CI commits) is enough for the mirror to update GitHub.
+GitLab CI (`.gitlab-ci.yml`) runs tests on push and a daily scheduled sync that commits updated `data/activities/` files back to `main`. Incremental sync captures `start_lat` / `start_lng` from Strava list/summary payloads on newly processed activities. A separate manual **`reprocess`** job re-fetches activity IDs listed in `data/reprocess_activities.yaml` and pushes the same CSV outputs. Pushing to GitLab (including those CI commits) is enough for the mirror to update GitHub.
 
-See **Daily GitLab sync** in [README.md](README.md) for CI variables and the nightly schedule.
+See **Daily GitLab sync** and **Reprocess activities** in [README.md](README.md) for CI variables, the nightly schedule, and how to trigger the manual reprocess job.
 
 ## 1. Create the GitHub repository
 
