@@ -1,6 +1,6 @@
 # Activity IDs to re-fetch from Strava and rewrite in data/activities/.
-# Edit this file, commit, then play the manual GitLab CI job `reprocess`
-# on branch `reprocess` (test) or on the default branch. See README.
+# Edit this file, commit, then Run pipeline with REPROCESS=true
+# (or play the reprocess job). See README.
 #
 # Example:
 # activity_ids:

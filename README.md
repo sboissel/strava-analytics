@@ -98,10 +98,10 @@ activity_ids:
   - 9876543210
 ```
 
-2. Commit and push to branch `reprocess` to test, or to `main` when the result should land on the default branch.
-3. Open **CI/CD → Pipelines**, open the pipeline for that commit (or **Run pipeline** on that branch), then click the play button on the manual **`reprocess`** job.
+2. Commit and push the YAML (branch `reprocess` to test, or `main` to persist).
+3. Run it ad hoc from **Build → Pipelines → Run pipeline**: pick the branch, add variable `REPROCESS` = `true`, then Run. That starts only the **`reprocess`** job (no test/sync stages). You can also play the job from a pipeline on `main` or `reprocess`.
 
-The job uses the same Strava CI variables as `sync`, runs `PYTHONPATH=src python -m strava_analytics.reprocess`, and commits updated files under `data/activities/` back to the branch you played (`reprocess` or `main`). It fails fast if an ID is missing or the API errors. Clear `activity_ids` (or leave `[]`) after a successful run so the next manual play does not re-hit Strava by accident.
+The job uses the same Strava CI variables as `sync` and runs `PYTHONPATH=src python -m strava_analytics.reprocess`. It commits updated files under `data/activities/` back to the branch you ran. On an unprotected branch, a **Protected** `CI_PUSH_TOKEN` is empty (that was the earlier job failure); the job then tries `CI_JOB_TOKEN` and still uploads CSV artifacts. Uncheck **Protect variable** for `CI_PUSH_TOKEN` / Strava vars, or protect the `reprocess` branch, if you need those secrets on that branch. It fails fast if an ID is missing or the API errors. Clear `activity_ids` (or leave `[]`) after a successful run so the next run does not re-hit Strava by accident.
 
 Locally (with the same env vars as the pipeline):
 
