@@ -160,6 +160,15 @@ def update_activity_analysis_csvs(
             combined = pd.concat([typed_new, existing_df], axis=0, sort=False)
             combined["activity_id"] = combined["activity_id"].astype(str)
             combined = combined.drop_duplicates(subset=["activity_id"])
+            # Reprocessed (older) activities are prepended above newer ones, so
+            # restore newest-first order. Sort on a parsed copy to keep the
+            # original date strings untouched.
+            sort_key = pd.to_datetime(combined["date"], errors="coerce", utc=True)
+            combined = (
+                combined.assign(_sort_key=sort_key)
+                .sort_values("_sort_key", ascending=False, kind="stable", na_position="last")
+                .drop(columns="_sort_key")
+            )
 
         combined = combined.drop(columns=["zrfs", "vo2max"], errors="ignore")
         combined = combined.reindex(columns=columns)
@@ -195,9 +204,20 @@ def update_run_pace_analysis_csv(pace_summaries: Sequence[Dict[str, Any]], outpu
     else:
         existing_df = pd.DataFrame(columns=columns)
 
-    # Merge the existing CSV rows with the newly computed summaries and keep the latest value per activity.
+    # Existing rows are read as strings; new summaries carry int IDs. Normalize
+    # so reprocessed activities replace their old row instead of duplicating it.
+    existing_df["activity_id"] = existing_df["activity_id"].astype(str)
+    new_df["activity_id"] = new_df["activity_id"].astype(str)
+
+    # Keep each activity at its original position but take the newest values.
     combined = pd.concat([existing_df, new_df], ignore_index=True, sort=False)
-    combined = combined.drop_duplicates(subset=["activity_id"], keep="last")
+    order = pd.unique(combined["activity_id"])
+    combined = (
+        combined.drop_duplicates(subset=["activity_id"], keep="last")
+        .set_index("activity_id")
+        .loc[order]
+        .reset_index()
+    )
     combined = combined.reindex(columns=columns)
     combined.to_csv(output_path, index=False)
 
