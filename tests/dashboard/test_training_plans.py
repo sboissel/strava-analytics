@@ -1073,7 +1073,7 @@ class PlanFileParseTests(unittest.TestCase):
         )
         self.assertIsNone(long_feb27["course_map_alt_url"])
         # Easy day with no course map.
-        easy = by_date[pd.Timestamp("2026-11-30", tz="UTC")]
+        easy = by_date[pd.Timestamp("2026-12-14", tz="UTC")]
         self.assertIsNone(easy["course_map_name"])
         self.assertIsNone(easy["course_map_url"])
         self.assertIsNone(easy["course_map_alt_name"])
