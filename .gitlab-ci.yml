@@ -10,6 +10,8 @@ test:
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
+    - if: $REPROCESS == "true"
+      when: never
     - when: on_success
   script:
     - pip install -r requirements.txt -r requirements-dev.txt
@@ -80,3 +82,90 @@ sync:
         GIT_EDITOR=true git rebase --continue
       fi
       git push "${REMOTE_URL}" "HEAD:${CI_DEFAULT_BRANCH}"
+
+# Ad-hoc only (not a sync-stage job, not scheduled).
+# Run pipeline → add variable REPROCESS=true, or play the job on main / reprocess.
+# GitLab still requires a stage name; .post is not test/sync. needs: [] so it
+# does not wait on those jobs.
+reprocess:
+  stage: .post
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: $REPROCESS == "true"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_BRANCH == "reprocess"
+      when: manual
+      allow_failure: true
+  variables:
+    GIT_DEPTH: "0"
+  artifacts:
+    when: on_success
+    expire_in: 7 days
+    paths:
+      - data/activities/strava_run_analysis.csv
+      - data/activities/strava_run_pace_analysis.csv
+      - data/activities/strava_ride_analysis.csv
+      - data/activities/strava_swim_analysis.csv
+      - data/activities/strava_hike_analysis.csv
+      - data/activities/activities_last_week.csv
+      - data/activities/highest_activity_id.txt
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git
+    - pip install -r requirements-pipeline.txt
+  script:
+    - PYTHONPATH=src python -m strava_analytics.reprocess
+    - |
+      # Same explicit pathspecs as sync (sync-data-v4).
+      set -- \
+        data/activities/strava_run_analysis.csv \
+        data/activities/strava_run_pace_analysis.csv \
+        data/activities/strava_ride_analysis.csv \
+        data/activities/strava_swim_analysis.csv \
+        data/activities/strava_hike_analysis.csv \
+        data/activities/activities_last_week.csv \
+        data/activities/highest_activity_id.txt
+      git fetch origin "${CI_DEFAULT_BRANCH}" || true
+      git checkout "origin/${CI_DEFAULT_BRANCH}" -- .gitignore || true
+      if git diff --quiet -- "$@" && [ -z "$(git ls-files --others --exclude-standard -- "$@")" ]; then
+        echo "No data changes to commit."
+        exit 0
+      fi
+      TARGET_BRANCH="${CI_COMMIT_BRANCH}"
+      if [ -n "${CI_PUSH_TOKEN}" ]; then
+        REMOTE_URL="https://oauth2:${CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+      elif [ "${TARGET_BRANCH}" != "${CI_DEFAULT_BRANCH}" ]; then
+        echo "CI_PUSH_TOKEN is empty (often Protected and this branch is not)."
+        echo "Pushing to ${TARGET_BRANCH} with CI_JOB_TOKEN."
+        REMOTE_URL="https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+      else
+        echo "CI_PUSH_TOKEN is required to push reprocess output to ${CI_DEFAULT_BRANCH}."
+        echo "Reprocess wrote CSVs in this job; they are uploaded as artifacts."
+        exit 0
+      fi
+      git config --unset-all http.extraHeader || true
+      git config user.email "gitlab-ci@${CI_SERVER_HOST}"
+      git config user.name "GitLab CI"
+      if ! git add -f -- "$@"; then
+        echo "ERROR: git add of reprocess data files failed. Ignore diagnostics:"
+        git check-ignore -v -- "$@" || true
+        git status
+        exit 1
+      fi
+      git commit -m "chore: reprocess Strava activities"
+      git fetch "${REMOTE_URL}" "${TARGET_BRANCH}"
+      if ! git rebase "FETCH_HEAD"; then
+        echo "Rebase conflict in data/; preferring reprocess output."
+        git checkout --theirs -- "$@" || true
+        if ! git add -f -- "$@"; then
+          echo "ERROR: git add during rebase conflict resolution failed."
+          git check-ignore -v -- "$@" || true
+          git status
+          exit 1
+        fi
+        GIT_EDITOR=true git rebase --continue
+      fi
+      git push "${REMOTE_URL}" "HEAD:${TARGET_BRANCH}"

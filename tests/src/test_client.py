@@ -150,6 +150,64 @@ class StravaClientTests(unittest.TestCase):
         self.assertEqual(activities, [{"id": 1}])
         self.assertEqual(get_mock.call_count, 2)
 
+    def test_get_activity_returns_payload_on_success(self):
+        """Ensure successful single-activity requests return the parsed JSON object."""
+        client = make_client()
+        client.access_token = "token"
+        activity = {"id": 123, "type": "Run", "gear_id": "g123"}
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = activity
+
+        with patch("strava_analytics.client.requests.get", return_value=mock_response) as get_mock:
+            payload = client.get_activity(123)
+
+        self.assertEqual(payload, activity)
+        get_mock.assert_called_once()
+        self.assertIn("/activities/123", get_mock.call_args.args[0])
+        self.assertNotIn("/streams", get_mock.call_args.args[0])
+        self.assertNotIn("/zones", get_mock.call_args.args[0])
+
+    def test_get_activity_raises_for_missing_activity(self):
+        """Ensure a 404 single-activity response raises a descriptive runtime error."""
+        client = make_client()
+        client.access_token = "token"
+
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_response.text = "Not Found"
+
+        with patch("strava_analytics.client.requests.get", return_value=mock_response):
+            with self.assertRaisesRegex(RuntimeError, r"activity 123 not found"):
+                client.get_activity(123)
+
+    def test_get_activity_raises_for_failed_request(self):
+        """Ensure non-404 failures raise a descriptive runtime error."""
+        client = make_client()
+        client.access_token = "token"
+
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.text = "boom"
+
+        with patch("strava_analytics.client.requests.get", return_value=mock_response):
+            with self.assertRaisesRegex(RuntimeError, r"500 boom"):
+                client.get_activity(123)
+
+    def test_get_activity_raises_when_payload_is_not_an_object(self):
+        """Ensure a non-object activity payload raises a runtime error."""
+        client = make_client()
+        client.access_token = "token"
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [{"id": 1}]
+
+        with patch("strava_analytics.client.requests.get", return_value=mock_response):
+            with self.assertRaisesRegex(RuntimeError, r"not an object"):
+                client.get_activity(123)
+
     def test_get_streams_refreshes_access_token_when_missing(self):
         """Ensure stream requests refresh the access token when none is set yet."""
         client = make_client()

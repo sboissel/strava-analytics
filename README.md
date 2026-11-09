@@ -31,6 +31,7 @@ Shoe mileage on the dashboard is computed from activity `gear_id` values: for ea
   - numpy
   - requests
   - tqdm
+  - PyYAML
 
 ## Environment variables
 
@@ -84,6 +85,29 @@ In GitLab → **Build → Pipeline schedules**:
 3. Save, then use **Play** once to verify after the variables are set.
 
 The `sync` job runs only for scheduled pipelines (and web pipelines on the default branch); the `test` job still runs on normal pushes.
+
+## Reprocess activities
+
+Use this when you need to re-fetch specific activities (wrong shoes / `gear_id`, backfilling new fields, etc.) without resetting `highest_activity_id.txt`.
+
+1. Edit [`data/reprocess_activities.yaml`](data/reprocess_activities.yaml) and list Strava activity IDs under `activity_ids` (YAML `#` comments are fine for reasons):
+
+```yaml
+activity_ids:
+  - 1234567890  # wrong shoes
+  - 9876543210
+```
+
+2. Commit and push the YAML (branch `reprocess` to test, or `main` to persist).
+3. Run it ad hoc from **Build → Pipelines → Run pipeline**: pick the branch, add variable `REPROCESS` = `true`, then Run. That starts only the **`reprocess`** job (no test/sync stages). You can also play the job from a pipeline on `main` or `reprocess`.
+
+The job uses the same Strava CI variables as `sync` and runs `PYTHONPATH=src python -m strava_analytics.reprocess`. It commits updated files under `data/activities/` back to the branch you ran. On an unprotected branch, a **Protected** `CI_PUSH_TOKEN` is empty (that was the earlier job failure); the job then tries `CI_JOB_TOKEN` and still uploads CSV artifacts. Uncheck **Protect variable** for `CI_PUSH_TOKEN` / Strava vars, or protect the `reprocess` branch, if you need those secrets on that branch. It fails fast if an ID is missing or the API errors. Clear `activity_ids` (or leave `[]`) after a successful run so the next run does not re-hit Strava by accident.
+
+Locally (with the same env vars as the pipeline):
+
+```bash
+PYTHONPATH=src python -m strava_analytics.reprocess
+```
 
 ## Runner's Dashboard
 

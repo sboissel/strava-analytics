@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Pipeline / data**
+
+- Manual reprocess path for specific Strava activities: edit `data/reprocess_activities.yaml`, run `python -m strava_analytics.reprocess`, or run the GitLab **`reprocess`** job ad hoc (**Run pipeline** with `REPROCESS=true`). The job is independent of the test/sync stages. Reuses the same process/CSV helpers as daily sync without moving `highest_activity_id.txt`.
+
+### Changed
+
+**Dashboard**
+
+- Light mobile-friendly CSS: at ≤900px stack controls+chart/map rows and use 2-column KPI/shoe grids; at ≤480px use 1-column grids and tighten hero/padding. Training-plan tables keep horizontal touch scroll. Desktop layout unchanged.
+- Training plan updates to account for 2 week delay of Cordoba half. 
+
 ## [1.10.1] — 2026-09-20
 
 ### Changed

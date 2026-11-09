@@ -7,4 +7,5 @@ dependencies = [
   "numpy>=1.26.0",
   "requests>=2.31.0",
   "tqdm>=4.66.0",
+  "PyYAML>=6.0.0",
 ]

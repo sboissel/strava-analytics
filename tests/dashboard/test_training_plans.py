@@ -1029,14 +1029,14 @@ class PlanFileParseTests(unittest.TestCase):
             for s in week["sessions"]
         }
         # Name + URL, no alt.
-        long_dec5 = by_date[pd.Timestamp("2026-12-05", tz="UTC")]
-        self.assertEqual(long_dec5["course_map_name"], "6-Mile Race-Course Route")
+        long_dec19 = by_date[pd.Timestamp("2026-12-19", tz="UTC")]
+        self.assertEqual(long_dec19["course_map_name"], "6-Mile Race-Course Route")
         self.assertEqual(
-            long_dec5["course_map_url"],
+            long_dec19["course_map_url"],
             "https://www.strava.com/routes/3535661480546733202",
         )
-        self.assertIsNone(long_dec5["course_map_alt_name"])
-        self.assertIsNone(long_dec5["course_map_alt_url"])
+        self.assertIsNone(long_dec19["course_map_alt_name"])
+        self.assertIsNone(long_dec19["course_map_alt_url"])
         # Name + URL, no alt.
         long_dec26 = by_date[pd.Timestamp("2026-12-26", tz="UTC")]
         self.assertEqual(
@@ -1073,7 +1073,7 @@ class PlanFileParseTests(unittest.TestCase):
         )
         self.assertIsNone(long_feb27["course_map_alt_url"])
         # Easy day with no course map.
-        easy = by_date[pd.Timestamp("2026-11-30", tz="UTC")]
+        easy = by_date[pd.Timestamp("2026-12-14", tz="UTC")]
         self.assertIsNone(easy["course_map_name"])
         self.assertIsNone(easy["course_map_url"])
         self.assertIsNone(easy["course_map_alt_name"])

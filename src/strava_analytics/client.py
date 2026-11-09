@@ -169,6 +169,41 @@ class StravaClient:
         """
         return self.get_activity_summaries(stop_at_activity_id=self.last_activity_id)
 
+    def get_activity(self, activity_id: Union[int, str]) -> Dict[str, Any]:
+        """Fetch a single activity by ID (detail endpoint).
+
+        Parameters
+        ----------
+        activity_id : int or str
+            The Strava activity identifier.
+
+        Returns
+        -------
+        dict
+            Activity dictionary from ``GET /activities/{id}``.
+
+        Raises
+        ------
+        RuntimeError
+            If the API request fails or the activity is missing.
+        """
+        access_token = self._require_access_token()
+        url = f"https://www.strava.com/api/v3/activities/{activity_id}"
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        res = requests.get(url, headers=headers, timeout=30)
+        if res.status_code == 404:
+            raise RuntimeError(f"Strava activity {activity_id} not found: {res.text[:200]}")
+        if res.status_code != 200:
+            raise RuntimeError(
+                f"Strava activity request failed: {res.status_code} {res.text[:200]}"
+            )
+
+        payload = res.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("Strava activity response was not an object.")
+        return payload
+
     def get_streams(self, activity_id: Union[int, str], streams: Sequence[str]) -> Dict[str, Any]:
         """Retrieve one or more Strava activity streams for a given activity.
 

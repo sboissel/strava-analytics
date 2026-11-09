@@ -2750,11 +2750,8 @@ GLOBAL_CSS = f"""
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.75rem;
   }}
-  @media (max-width: 900px) {{
-    .kpi-grid {{
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }}
-  }}
+  /* Narrower grids: see consolidated mobile block at end of stylesheet
+     (~900px → 2 cols, ~480px → 1 col). */
   .kpi-card {{
     background: {CARD};
     border: 1px solid transparent;
@@ -3105,11 +3102,7 @@ GLOBAL_CSS = f"""
     width: 100%;
     overflow: visible;
   }}
-  @media (max-width: 900px) {{
-    .achievement-grid {{
-      grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
-    }}
-  }}
+  /* Tablet/phone column counts: consolidated mobile block at end. */
   .achievement-badge {{
     --achievement-accent: {EASY};
     --achievement-ring: rgba(91, 155, 213, 0.22);
@@ -3489,10 +3482,14 @@ GLOBAL_CSS = f"""
   .training-plan-table-wrap {{
     width: 100%;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pinch-zoom;
+    overscroll-behavior-x: contain;
     margin: 0.15rem 0 0.35rem 0;
   }}
   .training-plan-table {{
     width: 100%;
+    min-width: 48rem;
     font-family: {FONT_BODY};
     font-size: 0.88rem;
     color: {INK};
@@ -3763,6 +3760,284 @@ GLOBAL_CSS = f"""
   }}
   [data-testid="stHeadingWithActionElements"] {{
     border-bottom: none !important;
+  }}
+
+  /* ------------------------------------------------------------------ */
+  /* Mobile / narrow viewports (spot-check via CSS; desktop unchanged).  */
+  /* Breakpoints:                                                      */
+  /*   max-width 900px — tablet / large phone landscape: stack          */
+  /*     controls+chart rows, 2-col KPI/shoe/achievement grids.         */
+  /*   max-width 480px — small phones: 1-col grids, tighter chrome,     */
+  /*     stack Fitness dual-filter + date-range pairs.                  */
+  /* Training-plan tables keep horizontal scroll (touch pan-x above).   */
+  /* ------------------------------------------------------------------ */
+  @media (max-width: 900px) {{
+    .block-container {{
+      padding-top: 1rem;
+      padding-bottom: 1.75rem;
+      padding-left: 1rem;
+      padding-right: 1rem;
+    }}
+    .hero {{
+      gap: 0.15rem;
+      margin-bottom: 0.2rem;
+    }}
+    .hero-title {{
+      font-size: clamp(1.65rem, 6vw, 2.1rem);
+    }}
+    .panel {{
+      padding: 1rem 0.95rem 1.05rem;
+      border-radius: 16px;
+    }}
+    [data-testid="stColumn"]:has(.controls-panel),
+    [data-testid="column"]:has(.controls-panel) {{
+      padding: 1rem !important;
+      border-radius: 16px !important;
+    }}
+
+    /* Stack Training / Hiking / Fitness / Performance controls rows.
+       Hiking keeps the map column; empty gutter columns are collapsed. */
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="stColumn"] .controls-panel
+    ),
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="column"] .controls-panel
+    ) {{
+      flex-direction: column !important;
+      flex-wrap: nowrap !important;
+      gap: 0.85rem !important;
+    }}
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="stColumn"] .controls-panel
+    )
+      > [data-testid="stColumn"]:has(.controls-panel),
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="column"] .controls-panel
+    )
+      > [data-testid="column"]:has(.controls-panel),
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="stColumn"] .controls-panel
+    )
+      > [data-testid="stColumn"]:has(.hiking-map-panel),
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="column"] .controls-panel
+    )
+      > [data-testid="column"]:has(.hiking-map-panel),
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="stColumn"] .controls-panel
+    )
+      > [data-testid="column"]:has(.controls-panel),
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="column"] .controls-panel
+    )
+      > [data-testid="stColumn"]:has(.controls-panel),
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="stColumn"] .controls-panel
+    )
+      > [data-testid="column"]:has(.hiking-map-panel),
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="column"] .controls-panel
+    )
+      > [data-testid="stColumn"]:has(.hiking-map-panel) {{
+      width: 100% !important;
+      max-width: 100% !important;
+      flex: 1 1 auto !important;
+      min-width: 0 !important;
+    }}
+    /* Training / Fitness / Performance: hide empty right gutter. */
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="stColumn"] .controls-panel
+    )
+      > [data-testid="stColumn"]:not(:has(.controls-panel)):not(
+        :has(.hiking-map-panel)
+      ),
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="column"] .controls-panel
+    )
+      > [data-testid="column"]:not(:has(.controls-panel)):not(
+        :has(.hiking-map-panel)
+      ),
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="stColumn"] .controls-panel
+    )
+      > [data-testid="column"]:not(:has(.controls-panel)):not(
+        :has(.hiking-map-panel)
+      ),
+    [data-testid="stHorizontalBlock"]:has(
+      > [data-testid="column"] .controls-panel
+    )
+      > [data-testid="stColumn"]:not(:has(.controls-panel)):not(
+        :has(.hiking-map-panel)
+      ) {{
+      display: none !important;
+    }}
+    /* Compact / Fitness / Performance cards can use full content width. */
+    [data-testid="stColumn"]:has(.controls-panel--compact),
+    [data-testid="column"]:has(.controls-panel--compact),
+    [data-testid="stColumn"]:has(.insights-controls-panel),
+    [data-testid="column"]:has(.insights-controls-panel),
+    [data-testid="stColumn"]:has(.race-controls-panel),
+    [data-testid="column"]:has(.race-controls-panel),
+    [data-testid="stColumn"]:has(.race-buildup-controls),
+    [data-testid="column"]:has(.race-buildup-controls) {{
+      max-width: 100% !important;
+      width: 100% !important;
+      flex: 1 1 auto !important;
+    }}
+
+    .kpi-grid {{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }}
+    .achievement-grid {{
+      grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    }}
+    .shoe-kpi-grid,
+    .fastest-race-grid {{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }}
+  }}
+
+  @media (max-width: 480px) {{
+    .block-container {{
+      padding-top: 0.75rem;
+      padding-bottom: 1.4rem;
+      padding-left: 0.7rem;
+      padding-right: 0.7rem;
+    }}
+    .hero-kicker {{
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+    }}
+    .hero-title {{
+      font-size: clamp(1.45rem, 7.5vw, 1.85rem);
+    }}
+    .panel {{
+      padding: 0.85rem 0.8rem 0.9rem;
+      border-radius: 14px;
+    }}
+    [data-testid="stColumn"]:has(.controls-panel),
+    [data-testid="column"]:has(.controls-panel) {{
+      padding: 0.85rem !important;
+      border-radius: 14px !important;
+    }}
+
+    .kpi-grid,
+    .shoe-kpi-grid,
+    .fastest-race-grid,
+    .achievement-grid {{
+      grid-template-columns: minmax(0, 1fr);
+    }}
+    .achievement-badge {{
+      max-width: none;
+    }}
+
+    /* Fitness: stack Entire Dashboard | HR filter halves. */
+    [data-testid="stColumn"]:has(.insights-controls-panel)
+      [data-testid="stHorizontalBlock"]:has(.controls-section-label),
+    [data-testid="column"]:has(.insights-controls-panel)
+      [data-testid="stHorizontalBlock"]:has(.controls-section-label) {{
+      flex-direction: column !important;
+      gap: 0.75rem !important;
+    }}
+    [data-testid="stColumn"]:has(.insights-controls-panel)
+      [data-testid="stHorizontalBlock"]:has(.controls-section-label)
+      > [data-testid="stColumn"],
+    [data-testid="stColumn"]:has(.insights-controls-panel)
+      [data-testid="stHorizontalBlock"]:has(.controls-section-label)
+      > [data-testid="column"],
+    [data-testid="column"]:has(.insights-controls-panel)
+      [data-testid="stHorizontalBlock"]:has(.controls-section-label)
+      > [data-testid="stColumn"],
+    [data-testid="column"]:has(.insights-controls-panel)
+      [data-testid="stHorizontalBlock"]:has(.controls-section-label)
+      > [data-testid="column"] {{
+      width: 100% !important;
+      max-width: 100% !important;
+      flex: 1 1 auto !important;
+    }}
+    .insights-controls-split {{
+      display: none !important;
+    }}
+
+    /* Start/End markers sit in the ElementContainer *before* the picker row. */
+    [data-testid="stElementContainer"]:has(.period-range-inputs)
+      + [data-testid="stElementContainer"]
+      [data-testid="stHorizontalBlock"],
+    [data-testid="stElementContainer"]:has(.race-date-inputs)
+      + [data-testid="stElementContainer"]
+      [data-testid="stHorizontalBlock"] {{
+      flex-direction: column !important;
+      gap: 0.5rem !important;
+      width: 100% !important;
+      max-width: 100% !important;
+    }}
+    [data-testid="stElementContainer"]:has(.period-range-inputs)
+      + [data-testid="stElementContainer"]
+      [data-testid="stHorizontalBlock"]
+      > [data-testid="stColumn"],
+    [data-testid="stElementContainer"]:has(.period-range-inputs)
+      + [data-testid="stElementContainer"]
+      [data-testid="stHorizontalBlock"]
+      > [data-testid="column"],
+    [data-testid="stElementContainer"]:has(.race-date-inputs)
+      + [data-testid="stElementContainer"]
+      [data-testid="stHorizontalBlock"]
+      > [data-testid="stColumn"],
+    [data-testid="stElementContainer"]:has(.race-date-inputs)
+      + [data-testid="stElementContainer"]
+      [data-testid="stHorizontalBlock"]
+      > [data-testid="column"] {{
+      width: 100% !important;
+      max-width: 100% !important;
+      flex: 1 1 auto !important;
+    }}
+    /* Performance build-up: Race A | Race B side-by-side → stack. */
+    [data-testid="stColumn"]:has(.race-buildup-controls)
+      [data-testid="stHorizontalBlock"]:has([data-testid="stSelectbox"]),
+    [data-testid="column"]:has(.race-buildup-controls)
+      [data-testid="stHorizontalBlock"]:has([data-testid="stSelectbox"]) {{
+      flex-direction: column !important;
+      gap: 0.5rem !important;
+    }}
+    [data-testid="stColumn"]:has(.race-buildup-controls)
+      [data-testid="stHorizontalBlock"]:has([data-testid="stSelectbox"])
+      > [data-testid="stColumn"],
+    [data-testid="stColumn"]:has(.race-buildup-controls)
+      [data-testid="stHorizontalBlock"]:has([data-testid="stSelectbox"])
+      > [data-testid="column"],
+    [data-testid="column"]:has(.race-buildup-controls)
+      [data-testid="stHorizontalBlock"]:has([data-testid="stSelectbox"])
+      > [data-testid="stColumn"],
+    [data-testid="column"]:has(.race-buildup-controls)
+      [data-testid="stHorizontalBlock"]:has([data-testid="stSelectbox"])
+      > [data-testid="column"] {{
+      width: 100% !important;
+      max-width: 100% !important;
+      flex: 1 1 auto !important;
+    }}
+    [data-testid="stColumn"]:has(.controls-panel--compact) .controls-meta-divider,
+    [data-testid="column"]:has(.controls-panel--compact) .controls-meta-divider,
+    [data-testid="stColumn"]:has(.controls-panel--compact) .controls-section-label,
+    [data-testid="column"]:has(.controls-panel--compact) .controls-section-label,
+    [data-testid="stColumn"]:has(.controls-panel--compact) .controls-filter-label,
+    [data-testid="column"]:has(.controls-panel--compact) .controls-filter-label,
+    [data-testid="stColumn"]:has(.controls-panel--compact) .controls-meta,
+    [data-testid="column"]:has(.controls-panel--compact) .controls-meta,
+    [data-testid="stColumn"]:has(.controls-panel--compact) .race-date-inputs,
+    [data-testid="column"]:has(.controls-panel--compact) .race-date-inputs,
+    [data-testid="stColumn"]:has(.controls-panel--compact) .period-range-inputs,
+    [data-testid="column"]:has(.controls-panel--compact) .period-range-inputs,
+    [data-testid="stColumn"]:has(.insights-controls-panel) .controls-section-label,
+    [data-testid="column"]:has(.insights-controls-panel) .controls-section-label,
+    [data-testid="stColumn"]:has(.insights-controls-panel) .controls-filter-label,
+    [data-testid="column"]:has(.insights-controls-panel) .controls-filter-label,
+    [data-testid="stColumn"]:has(.insights-controls-panel) .controls-meta,
+    [data-testid="column"]:has(.insights-controls-panel) .controls-meta,
+    [data-testid="stColumn"]:has(.insights-controls-panel) .controls-meta-divider,
+    [data-testid="column"]:has(.insights-controls-panel) .controls-meta-divider {{
+      width: 100%;
+      max-width: 100%;
+    }}
   }}
 </style>
 """
