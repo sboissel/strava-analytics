@@ -104,8 +104,10 @@ _PLAN_MILES_RANGE_RE = re.compile(
     r"^(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)$"
 )
 # Race-like tokens in plan session labels (word-boundary; case-insensitive).
+# "half" only counts at the end of the label or before "marathon", so
+# "Malaga Half" / "Half Marathon" match but "Strength A at half volume" does not.
 _PLAN_RACE_TOKEN_RE = re.compile(
-    r"\b(?:race|half|marathon|5k|10k|5m)\b",
+    r"\b(?:race|marathon|5k|10k|5m)\b|\bhalf\b(?=\s*(?:marathon\b|$))",
     re.IGNORECASE,
 )
 
